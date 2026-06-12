@@ -1,0 +1,6 @@
+{
+  "number": 101,
+  "title": "Fix typo in README installation command",
+  "body": "The README Installation section has a typo: `pyhton` should be `python`. It is a one-line wording fix with no logic changes.",
+  "labels": ["queued"]
+}

@@ -1,0 +1,41 @@
+# CI — the deterministic gate (HANDOFF §5.5). CI is the SOLE blocking gate;
+# the adversarial review (review.yml) is advisory. For this pipeline repo the
+# gate is scripts/smoke.sh (§7): it runs fully offline + dry-run, so it needs
+# no secrets and mutates nothing.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install jq + shellcheck
+        run: sudo apt-get update && sudo apt-get install -y jq shellcheck
+
+      - name: Install PyYAML (litellm config structural check)
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Shellcheck scripts
+        run: shellcheck -x --severity=warning --source-path=SCRIPTDIR scripts/*.sh scripts/lib/*.sh
+
+      - name: Smoke (dry-run, offline)
+        run: bash scripts/smoke.sh

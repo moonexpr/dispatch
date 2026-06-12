@@ -1,0 +1,10 @@
+{
+  "_comment": "Merged webhook event for PR #201 (auto-closed #102). Drives closure.sh Phase B: post the issue summary, flip the issue to done, notify the operator.",
+  "pr": 201,
+  "issue": 102,
+  "conclusion": "success",
+  "review_state": "approved",
+  "branch": "pipeline/issue-102",
+  "merged": true,
+  "labels": ["done-pending-merge"]
+}

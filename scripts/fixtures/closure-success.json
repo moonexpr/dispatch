@@ -1,0 +1,10 @@
+{
+  "_comment": "Success payload: CI green + review approved on PR #201 (Closes #102). Drives closure.sh Phase A: /update-docs, re-check CI, arm auto-merge, post summary, flip to done-pending-merge.",
+  "pr": 201,
+  "issue": 102,
+  "conclusion": "success",
+  "review_state": "approved",
+  "branch": "pipeline/issue-102",
+  "merged": false,
+  "labels": ["pr-open", "in-review"]
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "CI failed again on PR #201. One fix attempt has completed (label fix-attempt-1), so the pipeline now dispatches attempt 2. Both derivation paths agree: explicit .attempt=2 AND (max fix-attempt label = 1) + 1 = 2. tier_for_attempt(2) => gen-default.",
+  "pr": 201,
+  "issue": 102,
+  "conclusion": "failure",
+  "review_state": "changes_requested",
+  "branch": "pipeline/issue-102",
+  "attempt": 2,
+  "labels": ["pr-open", "fix-attempt-1"],
+  "brief": "pytest: 2 failures in tests/test_pagination.py (off-by-one on limit boundary)."
+}
