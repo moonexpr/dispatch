@@ -103,13 +103,18 @@ require_tool() {
 have_tool() { command -v "$1" >/dev/null 2>&1; }
 
 # ------------------------- Engine call wrappers ----------------------------
-# gh_repo_flag: emit `--repo owner/repo` when PIPELINE_REPO is set.
-gh_repo_flag() { [[ -n "${PIPELINE_REPO}" ]] && printf -- '--repo %s' "${PIPELINE_REPO}"; }
+# gh_repo_args: set the global REPO_ARGS array to `--repo owner/repo` (or empty)
+# so call sites can splice it without word-splitting (security: no unquoted
+# expansion of operator/attacker-influenced values).
+gh_repo_args() {
+  REPO_ARGS=()
+  [[ -n "${PIPELINE_REPO}" ]] && REPO_ARGS=(--repo "${PIPELINE_REPO}")
+}
 
 # gh_mutate: a gh call that changes GitHub state -> always via run() (dry-run aware).
 gh_mutate() {
-  # shellcheck disable=SC2046
-  run "${GH_BIN}" "$@" $(gh_repo_flag)
+  local REPO_ARGS=(); gh_repo_args
+  run "${GH_BIN}" "$@" "${REPO_ARGS[@]}"
 }
 
 # claude_invoke: launch a saved dynamic workflow headlessly (dry-run aware).
@@ -208,12 +213,7 @@ tier_for_attempt() {
   esac
 }
 
-# critic_route: pick a cross-family critic group opposite the generator (§5.2).
-critic_route() {
-  case "$1" in
-    gen-local)    echo "gen-default" ;;   # local generator -> hosted critic
-    gen-default)  echo "gen-frontier" ;;
-    gen-frontier) echo "gen-default" ;;
-    *)            echo "critic" ;;
-  esac
-}
+# NOTE: cross-family critic selection (§5.2 "route opposite of route") lives in
+# the worker plane where the generator route is known — see criticRoute() in
+# .claude/workflows/update-docs.js. It is intentionally NOT a bash helper here,
+# since no bash script invokes the critic directly.

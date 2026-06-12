@@ -90,7 +90,11 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = { run, tierForAttempt };
 }
 
-if (typeof runtime.__WORKFLOW_AUTORUN__ === "undefined" || runtime.__WORKFLOW_AUTORUN__) {
+// Auto-run under the workflow runtime (which injects `args`); stay
+// side-effect-free when imported for testing (no `args` global).
+const __autorun = (typeof runtime.__WORKFLOW_AUTORUN__ !== "undefined")
+  ? runtime.__WORKFLOW_AUTORUN__ : (typeof args !== "undefined");
+if (__autorun) {
   Promise.resolve()
     .then(run)
     .catch((err) => {

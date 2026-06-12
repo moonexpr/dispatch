@@ -83,6 +83,15 @@ repo supplies its own `ci.yml` (tests/typecheck/build).
 PRs stay green before the key/secret exists. Exact action inputs are a moving
 surface — verify against the action README before enabling.
 
+### A9. Cross-family critic in v0 = local/open-weight  **[decided]**
+§5.2 wants the `critic` "cross-family vs the generator". `update-docs.js`
+writes docs on `gen-local` (open-weight) and verifies on the opposite family
+via `criticRoute()` → `gen-default` (Anthropic). For an *Anthropic* generator
+the opposite family is open-weight: in v0 that resolves to `gen-local` (MLX),
+since the hosted open-weight critics (`gen-deepseek`/`gen-kimi`) are stubs.
+**Upgrade:** activate a hosted stub (§9) for a stronger hosted cross-family
+critic. The `critic` LiteLLM group remains declared for direct use.
+
 ---
 
 ## B. Things a human must verify against moving external surfaces  **[verify]**

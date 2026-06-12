@@ -91,15 +91,24 @@ fi
 
 # ---------------------------------------------------------------------------
 section "§7.4 openclaw cron jobs (dispatch + digest) after bootstrap"
+# Offline proxy: assert bootstrap *intends* to register both jobs (dry-run echo).
 oc="$(scripts/bootstrap-openclaw.sh 2>/dev/null)"
-assert_contains "bootstrap registers pipeline-dispatch cron" "$oc" "pipeline-dispatch"
-assert_contains "bootstrap registers pipeline-digest cron" "$oc" "pipeline-digest"
+assert_contains "bootstrap intends to register pipeline-dispatch" "$oc" "pipeline-dispatch"
+assert_contains "bootstrap intends to register pipeline-digest" "$oc" "pipeline-digest"
 assert_contains "dispatch cron is a command job" "$oc" "--type command"
 assert_contains "digest cron is an isolated agent job" "$oc" "--type isolated"
+# Live: when a Gateway is reachable, actually register (idempotent) and verify
+# that `openclaw cron list` reflects both jobs — the literal §7.4 criterion.
 if have openclaw; then
-  skip "openclaw present — run bootstrap live then 'openclaw cron list' (mutates Gateway; not done in smoke)"
+  PIPELINE_DRY_RUN=0 scripts/bootstrap-openclaw.sh >/dev/null 2>&1 || true
+  cl="$(openclaw cron list 2>/dev/null || true)"
+  case "$cl" in *pipeline-dispatch*) cd1=1 ;; *) cd1=0 ;; esac
+  case "$cl" in *pipeline-digest*)  cd2=1 ;; *) cd2=0 ;; esac
+  [[ "$cd1" == 1 && "$cd2" == 1 ]] \
+    && pass "openclaw cron list shows dispatch + digest after bootstrap" \
+    || fail "openclaw cron list missing dispatch/digest after bootstrap"
 else
-  skip "openclaw binary absent — live 'cron list' check (Gateway required)"
+  skip "openclaw binary absent — live 'cron list' registration check (Gateway required)"
 fi
 
 # ---------------------------------------------------------------------------

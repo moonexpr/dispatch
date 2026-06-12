@@ -112,8 +112,11 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = { run, VALID_ROUTES };
 }
 
-// Auto-run when the runtime executes this file directly (not on import).
-if (typeof runtime.__WORKFLOW_AUTORUN__ === "undefined" || runtime.__WORKFLOW_AUTORUN__) {
+// Auto-run under the workflow runtime (which injects `args`); stay
+// side-effect-free when imported for testing (no `args` global).
+const __autorun = (typeof runtime.__WORKFLOW_AUTORUN__ !== "undefined")
+  ? runtime.__WORKFLOW_AUTORUN__ : (typeof args !== "undefined");
+if (__autorun) {
   Promise.resolve()
     .then(run)
     .catch((err) => {

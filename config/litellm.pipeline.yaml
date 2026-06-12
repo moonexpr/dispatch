@@ -65,10 +65,12 @@ model_list:
     model_info:
       pipeline_role: "daily digest agent turn; triage/distill fallback"
 
-  # --- critic: adversarial reviewer, cross-family vs the generator. ---------
-  # Default backend is Anthropic; cross-family selection (route OPPOSITE of the
-  # generator's `route`) is done by critic_route() in scripts/lib/common.sh,
-  # which picks a different gen-* group at call time.
+  # --- critic: a declared adversarial-reviewer group (Anthropic backend). ----
+  # Cross-family critique (route OPPOSITE of the generator, §5.2) is selected at
+  # call time by the worker plane — see criticRoute() in
+  # .claude/workflows/update-docs.js, which routes an Anthropic generator to an
+  # open-weight critic and vice-versa. This `critic` group stays available for
+  # direct use / as the default backend.
   - model_name: critic
     litellm_params:
       model: os.environ/ANTHROPIC_DEFAULT_MODEL

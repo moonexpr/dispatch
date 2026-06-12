@@ -25,6 +25,21 @@ function requireArg(obj, key) {
   return obj[key];
 }
 
+/**
+ * Cross-family critic selection (HANDOFF §5.2 "route opposite of route"):
+ * an open-weight generator is reviewed by an Anthropic critic and vice-versa.
+ * The docs are written on `gen-local` (open-weight), so the verifier runs on
+ * the opposite family.
+ */
+function criticRoute(generatorRoute) {
+  switch (generatorRoute) {
+    case "gen-local": return "gen-default";   // open-weight writer -> Anthropic critic
+    case "gen-default":
+    case "gen-frontier": return "gen-local";  // Anthropic writer  -> open-weight critic
+    default: return "critic";
+  }
+}
+
 function subagent(opts) {
   if (typeof runtime.spawnSubagent === "function") return runtime.spawnSubagent(opts);
   if (typeof runtime.agent === "function") return runtime.agent(opts);
@@ -56,14 +71,16 @@ async function run() {
   });
 
   // Phase 3 — cross-family verifier checks every doc claim against the diff.
+  // Docs were written on gen-local, so the critic runs on the opposite family.
+  const verifierModel = criticRoute("gen-local");
   const verification = await subagent({
-    model: "critic",
+    model: verifierModel,
     tools: ["read", "gh"],
     prompt:
-      `You are an adversarial doc verifier (cross-family vs the writer). For ` +
-      `each claim in the updated docs/CHANGELOG, confirm it is supported by ` +
-      `the PR #${pr} diff. List any unsupported or inaccurate claim to fix.` +
-      `\nDocs:\n${JSON.stringify(docs)}`,
+      `You are an adversarial doc verifier (cross-family vs the writer, ` +
+      `running on ${verifierModel}). For each claim in the updated ` +
+      `docs/CHANGELOG, confirm it is supported by the PR #${pr} diff. List ` +
+      `any unsupported or inaccurate claim to fix.\nDocs:\n${JSON.stringify(docs)}`,
   });
 
   // Phase 4 — push to the same branch (no merge).
@@ -80,10 +97,14 @@ async function run() {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { run };
+  module.exports = { run, criticRoute };
 }
 
-if (typeof runtime.__WORKFLOW_AUTORUN__ === "undefined" || runtime.__WORKFLOW_AUTORUN__) {
+// Auto-run under the workflow runtime (which injects `args`); stay
+// side-effect-free when imported for testing (no `args` global).
+const __autorun = (typeof runtime.__WORKFLOW_AUTORUN__ !== "undefined")
+  ? runtime.__WORKFLOW_AUTORUN__ : (typeof args !== "undefined");
+if (__autorun) {
   Promise.resolve()
     .then(run)
     .catch((err) => {

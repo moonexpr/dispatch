@@ -33,9 +33,9 @@ load_queued_issues() {
     cat "${PIPELINE_FIXTURE_ISSUES}"
   else
     require_tool "${GH_BIN}"
-    # shellcheck disable=SC2046
+    local REPO_ARGS=(); gh_repo_args
     "${GH_BIN}" issue list --label queued --state open \
-      --json number,title,body,labels --limit 50 $(gh_repo_flag)
+      --json number,title,body,labels --limit 50 "${REPO_ARGS[@]}"
   fi
 }
 
@@ -45,9 +45,9 @@ count_claimed() {
       "${PIPELINE_FIXTURE_ISSUES}"
   else
     require_tool "${GH_BIN}"
-    # shellcheck disable=SC2046
+    local REPO_ARGS=(); gh_repo_args
     "${GH_BIN}" issue list --label claimed --state open --json number \
-      --limit 50 $(gh_repo_flag) | jq 'length'
+      --limit 50 "${REPO_ARGS[@]}" | jq 'length'
   fi
 }
 
@@ -58,9 +58,16 @@ below_threshold() {  # below_threshold <confidence> <threshold> ; exit 0 if belo
 
 # --- transitions -----------------------------------------------------------
 to_needs_human() {
-  local num="$1" reason="$2"
+  local num="$1" reason="$2" action="${3:-}"
+  # Surface the classifier's verdict as a secondary label where applicable
+  # (so the `wont-do` / `duplicate` vocabulary is actually used).
+  local extra=()
+  case "${action}" in
+    wont-do)      extra=(--add-label wont-do) ;;
+    "duplicate?") extra=(--add-label duplicate) ;;
+  esac
   log "#${num} -> needs-human: ${reason}"
-  gh_mutate issue edit "${num}" --remove-label queued --add-label needs-human
+  gh_mutate issue edit "${num}" --remove-label queued --add-label needs-human "${extra[@]}"
   gh_mutate issue comment "${num}" \
     --body "Pipeline dispatch routed this to **needs-human**. Rationale: ${reason}"
 }
@@ -109,7 +116,7 @@ main() {
     log "#${num} classified: action=${action} scope=${scope} route=${route} confidence=${confidence}"
 
     if [[ "${action}" != "implement" ]]; then
-      to_needs_human "${num}" "classifier action='${action}' (not implementable autonomously)"
+      to_needs_human "${num}" "classifier action='${action}' (not implementable autonomously)" "${action}"
       continue
     fi
     if below_threshold "${confidence}" "${PIPELINE_CONFIDENCE_THRESHOLD}"; then
