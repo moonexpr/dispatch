@@ -65,18 +65,37 @@ done
 # ---------------------------------------------------------------------------
 section "§7.3 litellm config validates; non-stub groups present"
 python3 - "$ROOT/config/litellm.pipeline.yaml" <<'PY'
-import sys, yaml
+import sys, re
 path = sys.argv[1]
-with open(path) as fh:
-    cfg = yaml.safe_load(fh)
-names = {m["model_name"] for m in cfg.get("model_list", [])}
 expected = {"triage","distill","gen-local","gen-default","gen-frontier","haiku-tier","critic"}
+stubs = {"gen-deepseek","gen-kimi"}
+try:
+    import yaml
+    with open(path) as fh:
+        cfg = yaml.safe_load(fh)
+    names = {m["model_name"] for m in cfg.get("model_list", [])}
+    master = bool(cfg.get("general_settings", {}).get("master_key"))
+    mode = "yaml"
+except ModuleNotFoundError:
+    # Degraded (no PyYAML): scan uncommented `model_name:` / `master_key:` lines.
+    names, master = set(), False
+    with open(path) as fh:
+        for line in fh:
+            s = line.strip()
+            if s.startswith("#"):
+                continue
+            m = re.match(r'-?\s*model_name:\s*(\S+)', s)
+            if m:
+                names.add(m.group(1))
+            if re.match(r'master_key:\s*\S+', s):
+                master = True
+    mode = "lines"
 missing = expected - names
-active_stubs = {"gen-deepseek","gen-kimi"} & names
+active_stubs = stubs & names
 assert not missing, f"missing non-stub groups: {missing}"
 assert not active_stubs, f"stub groups must stay commented: {active_stubs}"
-assert cfg.get("general_settings",{}).get("master_key"), "master_key not wired to env"
-print("ok: groups=" + ",".join(sorted(names)))
+assert master, "master_key not wired to env"
+print(f"ok ({mode}): groups=" + ",".join(sorted(names)))
 PY
 if [[ $? -eq 0 ]]; then pass "YAML parses; all non-stub groups present; stubs inactive"; else fail "litellm structural validation"; fi
 if have litellm; then

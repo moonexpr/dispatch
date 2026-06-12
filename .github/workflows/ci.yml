@@ -31,6 +31,9 @@ jobs:
       - name: Install jq + shellcheck
         run: sudo apt-get update && sudo apt-get install -y jq shellcheck
 
+      - name: Install PyYAML (litellm config structural check)
+        run: python3 -m pip install --quiet pyyaml
+
       - name: Shellcheck scripts
         run: shellcheck -x --severity=warning --source-path=SCRIPTDIR scripts/*.sh scripts/lib/*.sh
 
