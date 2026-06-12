@@ -1,0 +1,72 @@
+# notify-openclaw (HANDOFF §5.5) — on CI conclusion or a submitted review,
+# POST {pr, conclusion, review_state, attempt, branch} to the OpenClaw Gateway
+# webhook (bearer-token auth). The Gateway routes to an isolated session that
+# runs fix-dispatch.sh (failure) or closure.sh (success). The retry counter
+# lives in GitHub labels, so the Gateway/fix-dispatch derive `attempt` there;
+# this job sends the trigger, not the counter.
+name: Notify OpenClaw
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build payload and POST to Gateway
+        env:
+          OPENCLAW_WEBHOOK_URL: ${{ secrets.OPENCLAW_WEBHOOK_URL }}
+          OPENCLAW_WEBHOOK_BEARER_TOKEN: ${{ secrets.OPENCLAW_WEBHOOK_BEARER_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          # workflow_run context (CI completion)
+          WR_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WR_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          WR_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          # pull_request_review context
+          PRR_PR: ${{ github.event.pull_request.number }}
+          PRR_STATE: ${{ github.event.review.state }}
+          PRR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENCLAW_WEBHOOK_URL:-}" ] || [ -z "${OPENCLAW_WEBHOOK_BEARER_TOKEN:-}" ]; then
+            echo "Gateway webhook not configured (secrets unset); skipping notify."
+            exit 0
+          fi
+
+          if [ "${EVENT_NAME}" = "workflow_run" ]; then
+            pr="${WR_PR:-}"; branch="${WR_BRANCH:-}"
+            conclusion="${WR_CONCLUSION:-}"; review_state="null"
+          else
+            pr="${PRR_PR:-}"; branch="${PRR_BRANCH:-}"
+            conclusion="null"; review_state="${PRR_STATE:-}"
+          fi
+
+          if [ -z "${pr}" ]; then
+            echo "No PR associated with this event; nothing to notify."
+            exit 0
+          fi
+
+          payload="$(jq -nc \
+            --argjson pr "${pr}" \
+            --arg conclusion "${conclusion}" \
+            --arg review_state "${review_state}" \
+            --arg branch "${branch}" \
+            '{pr: $pr,
+              conclusion: (if $conclusion == "null" then null else $conclusion end),
+              review_state: (if $review_state == "null" then null else $review_state end),
+              branch: $branch}')"
+
+          echo "POSTing: ${payload}"
+          curl -sS --fail-with-body -X POST "${OPENCLAW_WEBHOOK_URL}" \
+            -H "Authorization: Bearer ${OPENCLAW_WEBHOOK_BEARER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}"

@@ -1,0 +1,11 @@
+{
+  "_comment": "CI failed again on PR #202 after three fix attempts (label fix-attempt-3). The pipeline would dispatch attempt 4, which exceeds the cap of 3. Both paths agree: explicit .attempt=4 AND (max fix-attempt label = 3) + 1 = 4. tier_for_attempt(4) => needs-human (escalate, no /fix-ci).",
+  "pr": 202,
+  "issue": 110,
+  "conclusion": "failure",
+  "review_state": "changes_requested",
+  "branch": "pipeline/issue-110",
+  "attempt": 4,
+  "labels": ["pr-open", "fix-attempt-3"],
+  "brief": "build: type error in src/server.ts persists across local/default/frontier fixes."
+}

@@ -1,0 +1,6 @@
+{
+  "number": 102,
+  "title": "Add pagination to the issues list API endpoint",
+  "body": "The `/api/issues` endpoint returns every issue at once. Add limit/offset pagination with sensible defaults plus tests, and update the OpenAPI schema accordingly.",
+  "labels": ["queued"]
+}

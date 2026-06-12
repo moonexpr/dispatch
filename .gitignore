@@ -1,0 +1,15 @@
+# Secrets live ONLY in env (HANDOFF §8) — never commit the filled-in file.
+pipeline.env
+
+# Worker session worktrees (isolation; transient).
+.worktrees/
+
+# Python / tooling noise
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Editor / OS
+.DS_Store
+*.swp
