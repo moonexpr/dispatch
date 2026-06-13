@@ -25,7 +25,7 @@ slash-commands, and project memory all non-functional.
 subdirectory of a larger monorepo), you must add a sync/symlink step so the
 two framework dirs reach the repo root.
 
-### A2. `claude -p ... --args '<json>'` — the `--args` flag does not exist  **[verify]**
+### A2. `claude -p ... --args '<json>'` — the `--args` flag does not exist  **[decided]**
 The handoff (§3, §5.1, §5.8) invokes workflows as
 `claude -p "/implement-task" --args '{...}'`. Current Claude Code (verified
 against `code.claude.com/docs`) has **no `--args` flag**; the documented
@@ -36,17 +36,19 @@ named `args`. §10 already flags these surfaces as moving.
 `claude -p "Run /<wf> with args <json>"`. Set `CLAUDE_ARGS_MODE=flag` to use
 `--args` if/when that flag ships. The workflow `.js` files read the `args`
 global accordingly.
-**Human:** confirm the arg-passing convention against the version you deploy.
+**Confirmed 2026-06-13:** operator confirmed `CLAUDE_ARGS_MODE=prompt` is
+correct for the deployed version. No further verification needed.
 
-### A3. Workflow `.js` runtime API (subagent spawning) is undocumented  **[verify]**
+### A3. Workflow `.js` runtime API (subagent spawning) is undocumented  **[decided]**
 The public docs confirm `.claude/workflows/*.js` auto-registers, args arrive
 via the `args` global, and scripts must be deterministic — but they do **not**
 specify the primitive used to spawn subagents from inside a workflow.
 **Decision:** each workflow feature-detects `globalThis.spawnSubagent` /
 `globalThis.agent`; absent either, it logs the planned subagent call (so the
 file is still inspectable/validatable). All three pass `node --check`.
-**Human:** replace the feature-detected primitive with the real runtime API
-once confirmed, then dry-run one workflow end-to-end before trusting it.
+**Confirmed 2026-06-13:** operator confirmed `globalThis.agent` is the correct
+runtime primitive. The feature-detect order (`spawnSubagent` → `agent`) already
+tries `agent` second; swap to prefer `agent` first when updating the workflows.
 
 ### A4. Fix-ladder attempt counter semantics  **[decided]**
 §5.5 says "read `fix-attempt-N` label … increment label" and §7.6 says a
@@ -78,10 +80,14 @@ This repo's "product" is the pipeline itself, so the deterministic gate
 dry-run, no secrets). When you point the pipeline at a *product* repo, that
 repo supplies its own `ci.yml` (tests/typecheck/build).
 
-### A8. `claude-code-action@v1` review is gated off by default  **[verify]**
+### A8. `claude-code-action@v1` review is gated off by default  **[decided]**
 `review.yml` runs only when repo **variable** `ENABLE_CLAUDE_REVIEW=true`, so
 PRs stay green before the key/secret exists. Exact action inputs are a moving
 surface — verify against the action README before enabling.
+**Confirmed 2026-06-13:** operator confirmed `ENABLE_CLAUDE_REVIEW=true` should
+be set now. Action: set the repo variable and wire `ANTHROPIC_API_KEY` as a
+GitHub Actions secret. Verify action inputs against the action README before
+the first PR review fires.
 
 ### A9. Cross-family critic in v0 = local/open-weight  **[decided]**
 §5.2 wants the `critic` "cross-family vs the generator". `update-docs.js`
@@ -112,6 +118,8 @@ critic. The `critic` LiteLLM group remains declared for direct use.
 - **B4. LiteLLM model ids.** `gen-frontier` reads `ANTHROPIC_FRONTIER_MODEL`
   (an Opus-tier id you must fill); `gen-default`/`haiku-tier` ship with
   current Sonnet/Haiku ids — confirm they match what you intend to run.
+  **Confirmed 2026-06-13:** `ANTHROPIC_FRONTIER_MODEL=anthropic/claude-opus-4-8`
+  set in `pipeline.env`. Sonnet/Haiku ids already current.
 - **B5. `litellm --health`/`/v1/models`.** smoke does a structural YAML check
   offline; run the real proxy once and confirm `/v1/models` lists every
   non-stub group.
@@ -155,6 +163,18 @@ Copy `pipeline.env.example` → `pipeline.env` (gitignored) and fill:
 6. Leave `PIPELINE_DRY_RUN=1` until 1–5 are verified; then flip to `0`.
 
 ---
+
+## E.0 pipeline.env bugs caught during live run (fixed 2026-06-13)
+
+- `ANTHROPIC_FRONTIER_MODEL=anthropic/<opus-tier-model-id>` — unquoted angle
+  brackets caused a bash parse error on `source`. Fixed: real model id filled.
+- `OPENCLAW_DISPATCH_SCHEDULE=*/10 * * * *` and `OPENCLAW_DIGEST_SCHEDULE=0 8 * * *`
+  — unquoted cron expressions were glob-expanded by `set -a; source`. Fixed:
+  values now quoted in `pipeline.env` (update `pipeline.env.example` to match).
+- `scripts/lib/common.sh` sourcing with `set -a` silently clobbered
+  caller-exported env vars (e.g. `PIPELINE_DRY_RUN=0` on the command line).
+  Fixed: caller values for `PIPELINE_DRY_RUN`, `PIPELINE_CONCURRENCY`, and
+  `PIPELINE_REPO` are saved before the source and restored after.
 
 ## E. Deliberately deferred (per §9, not open questions)
 

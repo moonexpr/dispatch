@@ -133,8 +133,8 @@ fi
 # ---------------------------------------------------------------------------
 section "§7.5 dry-run dispatch prints correct gh/claude calls, mutates nothing"
 disp="$(PIPELINE_FIXTURE_ISSUES="${FIX}/queued-issues.json" scripts/dispatch.sh 2>&1)"
-assert_contains "launches /implement-task" "$disp" "/implement-task"
-assert_contains "passes the routed group (gen-local for #101)" "$disp" "gen-local"
+assert_contains "launches engineer_dispatch for #101" "$disp" "job_id"
+assert_contains "passes the routed group (gen-default for #101)" "$disp" "gen-default"
 assert_contains "passes the issue number" "$disp" '"issue":101'
 assert_contains "swaps queued -> claimed" "$disp" "--add-label claimed"
 assert_contains "routes low-confidence #103 to needs-human" "$disp" "#103 -> needs-human"
