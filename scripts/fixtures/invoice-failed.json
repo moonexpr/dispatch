@@ -1,0 +1,23 @@
+{
+  "invoice_id": "issue-102-20260613T130000Z",
+  "issue": 102,
+  "repo": "Mendo-AI-Consulting/dispatch",
+  "status": "failed",
+  "branch": "pipeline/issue-102",
+  "pr_number": null,
+  "scope_actual": "m",
+  "route_used": "gen-default",
+  "cost": {
+    "tokens_in": 8400,
+    "tokens_out": 2100,
+    "duration_seconds": 142.7,
+    "model": "anthropic/claude-sonnet-4-6"
+  },
+  "artifacts": [],
+  "errors": [
+    "Test suite failed: 3 pagination tests assert offset behaviour that conflicts with existing cursor-based pagination in the DB layer.",
+    "CI check 'test' exited 1 after 2 fix attempts; escalating per fix-ladder cap."
+  ],
+  "summary": "Attempted to add limit/offset pagination to /api/issues. Implementation complete but CI failed: existing tests assert cursor-based pagination and conflict with the new offset logic. Reached fix-ladder cap (attempt 3). Needs human resolution of the pagination strategy before the branch can merge.",
+  "timestamp": "2026-06-13T13:00:00Z"
+}

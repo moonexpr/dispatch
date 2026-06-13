@@ -209,6 +209,56 @@ for wf in implement-task fix-ci update-docs; do
 done
 
 # ---------------------------------------------------------------------------
+section "§7.10 Invoice schema: all three status-case fixtures are schema-valid"
+python3 - "${FIX}/invoice-completed.json" \
+          "${FIX}/invoice-failed.json" \
+          "${FIX}/invoice-needs-human.json" <<'PY'
+import json, sys, re
+
+REQUIRED = {"invoice_id","issue","repo","status","route_used","cost","summary","timestamp"}
+COST_REQUIRED = {"tokens_in","tokens_out","duration_seconds"}
+STATUS_VALUES = {"completed","failed","partial","needs-human"}
+SCOPE_VALUES  = {"xs","s","m","l","xl"}
+ROUTE_VALUES  = {"gen-local","gen-default","gen-frontier"}
+
+errors = []
+for path in sys.argv[1:]:
+    name = path.split("/")[-1]
+    try:
+        with open(path) as fh:
+            inv = json.load(fh)
+    except Exception as e:
+        errors.append(f"{name}: JSON parse error: {e}")
+        continue
+    missing = REQUIRED - inv.keys()
+    if missing:
+        errors.append(f"{name}: missing required fields: {sorted(missing)}")
+    if not isinstance(inv.get("issue"), int):
+        errors.append(f"{name}: 'issue' must be integer")
+    if inv.get("status") not in STATUS_VALUES:
+        errors.append(f"{name}: 'status' must be one of {STATUS_VALUES}")
+    if "scope_actual" in inv and inv["scope_actual"] not in SCOPE_VALUES:
+        errors.append(f"{name}: 'scope_actual' must be one of {SCOPE_VALUES}")
+    if inv.get("route_used") not in ROUTE_VALUES:
+        errors.append(f"{name}: 'route_used' must be one of {ROUTE_VALUES}")
+    cost = inv.get("cost", {})
+    if not isinstance(cost, dict) or not COST_REQUIRED.issubset(cost.keys()):
+        errors.append(f"{name}: 'cost' missing sub-fields {COST_REQUIRED - set(cost)}")
+    ts = inv.get("timestamp", "")
+    if not re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', ts):
+        errors.append(f"{name}: 'timestamp' must be ISO 8601")
+
+if errors:
+    for e in errors: print(f"  ERR {e}")
+    sys.exit(1)
+PY
+if [[ $? -eq 0 ]]; then
+  pass "invoice-completed, invoice-failed, invoice-needs-human all pass schema check"
+else
+  fail "one or more invoice fixtures failed schema validation"
+fi
+
+# ---------------------------------------------------------------------------
 section "§8 security guardrails (checkable)"
 # Dry-run defaults ON.
 dflt="$(env -u PIPELINE_DRY_RUN bash -c 'source "'"${ROOT}"'/scripts/lib/common.sh"; echo "$PIPELINE_DRY_RUN"')"

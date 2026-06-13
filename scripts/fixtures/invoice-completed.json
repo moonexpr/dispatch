@@ -1,0 +1,23 @@
+{
+  "invoice_id": "issue-101-20260613T120000Z",
+  "issue": 101,
+  "repo": "Mendo-AI-Consulting/dispatch",
+  "status": "completed",
+  "branch": "pipeline/issue-101",
+  "pr_number": 42,
+  "scope_actual": "xs",
+  "route_used": "gen-local",
+  "cost": {
+    "tokens_in": 1200,
+    "tokens_out": 340,
+    "duration_seconds": 18.4,
+    "model": "openai/Qwen3-Coder"
+  },
+  "artifacts": [
+    "README.md",
+    "https://github.com/Mendo-AI-Consulting/dispatch/pull/42"
+  ],
+  "errors": [],
+  "summary": "Fixed typo in README installation command: changed `pyhton` to `python` on line 14. One-line change, no logic impact. CI green.",
+  "timestamp": "2026-06-13T12:00:00Z"
+}
