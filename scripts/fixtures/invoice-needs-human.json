@@ -1,22 +1,22 @@
 {
   "invoice_id": "issue-103-20260613T140000Z",
   "issue": 103,
-  "repo": "Mendo-AI-Consulting/dispatch",
+  "repo": "ReclaimByDesign/dispatch",
   "status": "needs-human",
   "branch": null,
   "pr_number": null,
   "scope_actual": "xs",
   "route_used": "gen-local",
   "cost": {
-    "tokens_in": 620,
-    "tokens_out": 95,
-    "duration_seconds": 4.1,
+    "tokens_in": 540,
+    "tokens_out": 88,
+    "duration_seconds": 3.9,
     "model": "openai/Qwen3-Coder"
   },
   "artifacts": [],
   "errors": [
-    "Issue body is too vague to act on: no reproduction steps, no metric, no component identified."
+    "Issue body is too vague to act on: no page, no metric, no reproduction steps, no browser/device reported."
   ],
-  "summary": "Issue #103 ('Something feels off with performance?') does not contain enough information to begin work. No reproduction steps, no baseline metric, and no component identified. Returning to Architect for human clarification before a job can be issued.",
+  "summary": "Issue #103 ('The site feels slow I think?') cannot be actioned without reproduction steps, a specific page or flow, a measurable baseline, and environment details. Returning to operator for clarification before a job can be issued.",
   "timestamp": "2026-06-13T14:00:00Z"
 }

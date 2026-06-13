@@ -1,0 +1,9 @@
+{
+  "_comment": "Expected dispatch outcome for issue #105. The classifier returns action=wont-do; dispatch labels it accordingly and never issues a Job Request to the Engineer.",
+  "issue": 105,
+  "repo": "ReclaimByDesign/dispatch",
+  "dispatch_action": "wont-do",
+  "rationale": "Request is for a product category outside the current scope of this repository (hotdog menu only). Classifier action='wont-do' — not implementable autonomously.",
+  "labels_applied": ["needs-human", "wont-do"],
+  "engineer_called": false
+}

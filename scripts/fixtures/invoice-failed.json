@@ -1,23 +1,23 @@
 {
   "invoice_id": "issue-102-20260613T130000Z",
   "issue": 102,
-  "repo": "Mendo-AI-Consulting/dispatch",
+  "repo": "ReclaimByDesign/dispatch",
   "status": "failed",
   "branch": "pipeline/issue-102",
   "pr_number": null,
   "scope_actual": "m",
   "route_used": "gen-default",
   "cost": {
-    "tokens_in": 8400,
-    "tokens_out": 2100,
-    "duration_seconds": 142.7,
+    "tokens_in": 9200,
+    "tokens_out": 2640,
+    "duration_seconds": 187.4,
     "model": "anthropic/claude-sonnet-4-6"
   },
   "artifacts": [],
   "errors": [
-    "Test suite failed: 3 pagination tests assert offset behaviour that conflicts with existing cursor-based pagination in the DB layer.",
-    "CI check 'test' exited 1 after 2 fix attempts; escalating per fix-ladder cap."
+    "Test suite failed: 4 checkout integration tests assert total calculation before loyalty discount; the new redeem-points flow changes the order of operations and breaks the existing assertions.",
+    "Fix-ladder cap reached after 3 attempts. Checkout test contract needs human resolution before merging."
   ],
-  "summary": "Attempted to add limit/offset pagination to /api/issues. Implementation complete but CI failed: existing tests assert cursor-based pagination and conflict with the new offset logic. Reached fix-ladder cap (attempt 3). Needs human resolution of the pagination strategy before the branch can merge.",
+  "summary": "Implemented loyalty points (DB column, /api/account/points, /api/cart/redeem-points, dashboard widget). CI failed: existing checkout integration tests assert subtotal before discounts and conflict with the new redemption step. Reached fix-ladder cap (attempt 3). A human needs to decide whether to update the test contract or refactor the checkout calculation order.",
   "timestamp": "2026-06-13T13:00:00Z"
 }

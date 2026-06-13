@@ -1,0 +1,27 @@
+{
+  "invoice_id": "issue-104-20260613T160000Z",
+  "issue": 104,
+  "repo": "ReclaimByDesign/dispatch",
+  "status": "completed",
+  "branch": "pipeline/issue-104",
+  "pr_number": 47,
+  "scope_actual": "l",
+  "route_used": "gen-frontier",
+  "cost": {
+    "tokens_in": 48200,
+    "tokens_out": 12100,
+    "duration_seconds": 1843.0,
+    "model": "anthropic/claude-opus-4-8"
+  },
+  "artifacts": [
+    "src/lib/cms-client.ts",
+    "src/pages/api/revalidate.ts",
+    "scripts/migrate-menu-to-cms.ts",
+    "docs/cms-schema.md",
+    "docs/cms-publish-workflow.md",
+    "https://github.com/ReclaimByDesign/dispatch/pull/47"
+  ],
+  "errors": [],
+  "summary": "Migrated menu catalog from hardcoded JSON to Contentful. Modelled categories, products, ingredients, allergens, and pricing tiers. Wrote and ran the seed migration script (all 34 items imported). Replaced the static import with a Contentful client using ISR (60s revalidation). Added a webhook handler at /api/revalidate that invalidates the Next.js cache on publish. Updated all affected components and tests. Documented the CMS schema and publish workflow for non-technical staff. CI green.",
+  "timestamp": "2026-06-13T16:00:00Z"
+}
