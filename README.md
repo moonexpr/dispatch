@@ -57,70 +57,54 @@ stateless — there is no shared memory between runs.
 
 ## Testing on another repo
 
-The fastest path to a working pipeline run on a target repo:
+The single entry point is `scripts/pipeline.sh`. It wires the full cycle —
+select → engineer → intake — in one command.
 
-### 1. Point dispatch at the target repo
+```
+bash scripts/pipeline.sh [OPTIONS]
 
-```bash
-export PIPELINE_REPO=owner/target-repo
+  -b, --bootstrap         provision pipeline labels on PIPELINE_REPO first
+  -r, --repo  owner/repo  target repo
+  -l, --live              PIPELINE_DRY_RUN=0 — mutate GitHub (default: dry-run)
+  -e, --engineer  BIN     Engineer binary (default: scripts/mock-engineer.sh)
+  -f, --fixture   FILE    offline issue list JSON
+  -h, --help
 ```
 
-Or set it in `pipeline.env` (copy `pipeline.env.example` and fill in secrets).
-
-### 2. Provision labels
+### Quickstart for a new repo
 
 ```bash
-PIPELINE_DRY_RUN=0 bash scripts/bootstrap-labels.sh
+# 1. Copy and fill secrets
+cp pipeline.env.example pipeline.env
+# edit pipeline.env: set PIPELINE_REPO, tokens, model keys
+
+# 2. Dry-run preview against the target repo (no mutations)
+bash scripts/pipeline.sh --repo owner/target-repo
+
+# 3. Provision labels, then run live with the mock engineer
+bash scripts/pipeline.sh --bootstrap --repo owner/target-repo --live
+
+# 4. Same, with Ruflo as the real Engineer
+bash scripts/pipeline.sh --repo owner/target-repo --live --engineer ruflo
 ```
 
-Idempotent — safe to re-run. Creates the full label vocabulary on `PIPELINE_REPO`.
+The only prerequisite on the target repo: add the `queued` label to any issue
+you want the pipeline to pick up. `--bootstrap` creates the full label
+vocabulary (idempotent).
 
-### 3. Label issues you want the pipeline to pick up
-
-On the target repo, add the `queued` label to any issue you want dispatched.
-The pipeline only touches issues that carry this label.
-
-### 4. Dry-run selection (no mutations)
+### Offline / fixture testing (no GitHub)
 
 ```bash
-PIPELINE_REPO=owner/target-repo bash scripts/dispatch.sh
-```
+# Fully offline with the mock engineer and fixture issues:
+bash scripts/pipeline.sh --fixture scripts/fixtures/queued-issues.json
 
-Prints what dispatch *would* claim and route. Nothing is written to GitHub.
-
-### 5. Run one issue end-to-end (manual Engineer)
-
-Select an issue number and run the scripts individually:
-
-```bash
-# Step 1: dispatch claims the issue and emits a Job Request
-PIPELINE_DRY_RUN=0 PIPELINE_REPO=owner/target-repo bash scripts/dispatch.sh
-
-# Step 2: Engineer works the job, returns an Invoice JSON.
-# If using the mock stub for testing:
-ENGINEER_BIN=scripts/mock-engineer.sh bash scripts/dispatch.sh
-
-# Step 3: feed the Invoice to architect-intake
-PIPELINE_DRY_RUN=0 bash scripts/architect-intake.sh "$(cat invoice.json)"
-```
-
-### 6. Full mocked roundtrip (no Engineer, no GitHub mutations)
-
-```bash
+# Full mocked roundtrip across all fixture issues:
 bash scripts/roundtrip.sh
 ```
 
-Classifies all fixtures, routes each issue to the mock Engineer, processes
-every Invoice through architect-intake, and prints the full audit trail.
-No network calls. No GitHub mutations.
-
-To run against live fixture issues from a real repo:
-
-```bash
-PIPELINE_REPO=owner/target-repo \
-PIPELINE_FIXTURE_ISSUES=scripts/fixtures/queued-issues.json \
-bash scripts/roundtrip.sh
-```
+`roundtrip.sh` classifies all fixture issues, routes each to the mock
+Engineer, processes every Invoice through intake, and prints a summary.
+No network calls, no GitHub mutations.
 
 ---
 
