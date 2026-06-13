@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "job-request",
+  "title": "Job Request",
+  "description": "Structured work order issued by the Architect to the Engineer. The Engineer identity (Ruflo, Claude, stub) is irrelevant here — any process that accepts this schema and returns a valid Invoice can serve as the Engineer.",
+  "type": "object",
+  "required": ["job_id", "issue", "repo", "title", "body", "route", "scope", "confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "description": "Unique identifier for this job (e.g. issue-101-20260613T120000Z)."
+    },
+    "issue": {
+      "type": "integer",
+      "description": "GitHub issue number."
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$",
+      "description": "owner/repo the issue belongs to."
+    },
+    "title": {
+      "type": "string",
+      "description": "Issue title — the Engineer's one-line task description."
+    },
+    "body": {
+      "type": "string",
+      "description": "Issue body — full requirements and acceptance criteria."
+    },
+    "route": {
+      "type": "string",
+      "enum": ["gen-local", "gen-default", "gen-frontier"],
+      "description": "Model tier the Architect selected for this job based on scope."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["xs", "s", "m", "l"],
+      "description": "Architect's estimated complexity. Engineer reports scope_actual in the Invoice."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Classifier confidence that this issue is implementable autonomously."
+    }
+  }
+}

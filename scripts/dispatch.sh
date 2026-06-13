@@ -82,10 +82,19 @@ claim_issue() {
   # Worktree isolation for the worker session (§5.4 step 3).
   run git -C "${PIPELINE_ROOT}" worktree add \
     "${PIPELINE_WORKTREE_ROOT}/issue-${num}" -b "pipeline/issue-${num}"
-  # Launch the saved dynamic workflow headlessly.
-  local args; args="$(jq -nc --argjson issue "${num}" --arg route "${route}" \
-                        '{issue: $issue, route: $route}')"
-  claude_invoke implement-task "${args}"
+  # Submit a Job Request to the Engineer (identity governed by ENGINEER_BIN).
+  local args; args="$(jq -nc \
+    --argjson issue  "${num}"        \
+    --arg     repo   "${PIPELINE_REPO:-}" \
+    --arg     title  "${title}"      \
+    --arg     body   "${body}"       \
+    --arg     route  "${route}"      \
+    --arg     scope  "${scope}"      \
+    --argjson conf   "${confidence}" \
+    '{job_id: ("issue-\($issue)"),
+      issue: $issue, repo: $repo, title: $title, body: $body,
+      route: $route, scope: $scope, confidence: $conf}')"
+  engineer_dispatch "${args}"
 }
 
 main() {

@@ -217,3 +217,26 @@ tier_for_attempt() {
 # the worker plane where the generator route is known — see criticRoute() in
 # .claude/workflows/update-docs.js. It is intentionally NOT a bash helper here,
 # since no bash script invokes the critic directly.
+
+# ------------------------- Engineer interface -------------------------------
+# ENGINEER_BIN: the configured Engineer backend. Swapping this swaps the
+# entire Engineer identity without changing any Architect code.
+#   (unset)                  → fall back to claude_invoke implement-task
+#   scripts/mock-engineer.sh → offline test stub (returns fixture invoices)
+#   ruflo                    → production Ruflo CLI
+: "${ENGINEER_BIN:=}"
+export ENGINEER_BIN
+
+# engineer_dispatch: submit a Job Request JSON to the Engineer.
+#   $1 = Job Request JSON string (must satisfy schemas/job-request.json)
+# Non-dry-run: calls ENGINEER_BIN and returns Invoice JSON on stdout.
+# Dry-run:     prints the intended call; no Invoice is produced.
+# The Architect is blind to which Engineer backs this call.
+engineer_dispatch() {
+  local job_request_json="$1"
+  if [[ -n "${ENGINEER_BIN}" ]]; then
+    run "${ENGINEER_BIN}" "${job_request_json}"
+  else
+    claude_invoke implement-task "${job_request_json}"
+  fi
+}
