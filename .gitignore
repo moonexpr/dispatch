@@ -1,5 +1,6 @@
 # Secrets live ONLY in env (HANDOFF §8) — never commit the filled-in file.
 pipeline.env
+tokens.txt
 
 # Worker session worktrees (isolation; transient).
 .worktrees/

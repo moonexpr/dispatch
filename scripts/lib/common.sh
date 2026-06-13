@@ -25,12 +25,21 @@ export PIPELINE_ROOT
 
 # --- Load pipeline.env if present (never overrides already-exported vars) ---
 # Operators copy pipeline.env.example -> pipeline.env (gitignored) and fill it.
+# Save vars that callers may have set on the command line before sourcing, so
+# pipeline.env defaults do not clobber explicit overrides (e.g. PIPELINE_DRY_RUN=0).
+_pre_dry_run="${PIPELINE_DRY_RUN:-}"
+_pre_concurrency="${PIPELINE_CONCURRENCY:-}"
+_pre_repo="${PIPELINE_REPO:-}"
 if [[ -f "${PIPELINE_ROOT}/pipeline.env" ]]; then
   set -a
   # shellcheck disable=SC1091  # operator-provided file; absent at lint time
   source "${PIPELINE_ROOT}/pipeline.env"
   set +a
 fi
+[[ -n "${_pre_dry_run}"    ]] && export PIPELINE_DRY_RUN="${_pre_dry_run}"
+[[ -n "${_pre_concurrency}" ]] && export PIPELINE_CONCURRENCY="${_pre_concurrency}"
+[[ -n "${_pre_repo}"       ]] && export PIPELINE_REPO="${_pre_repo}"
+unset _pre_dry_run _pre_concurrency _pre_repo
 
 # --------------------------- Env-var defaults ------------------------------
 # Safety-critical: dry-run is ON unless explicitly disabled by the operator.
@@ -108,13 +117,17 @@ have_tool() { command -v "$1" >/dev/null 2>&1; }
 # expansion of operator/attacker-influenced values).
 gh_repo_args() {
   REPO_ARGS=()
-  [[ -n "${PIPELINE_REPO}" ]] && REPO_ARGS=(--repo "${PIPELINE_REPO}")
+  if [[ -n "${PIPELINE_REPO}" ]]; then
+    REPO_ARGS=(--repo "${PIPELINE_REPO}")
+  fi
 }
 
 # gh_mutate: a gh call that changes GitHub state -> always via run() (dry-run aware).
+# Note: bash 3.2 (macOS default) raises nounset on "${arr[@]}" when arr is empty.
+# The ${arr[@]+"${arr[@]}"} form is safe on bash 3.2+.
 gh_mutate() {
   local REPO_ARGS=(); gh_repo_args
-  run "${GH_BIN}" "$@" "${REPO_ARGS[@]}"
+  run "${GH_BIN}" "$@" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"}
 }
 
 # claude_invoke: launch a saved dynamic workflow headlessly (dry-run aware).
