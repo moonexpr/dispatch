@@ -67,7 +67,7 @@ to_needs_human() {
     "duplicate?") extra=(--add-label duplicate) ;;
   esac
   log "#${num} -> needs-human: ${reason}"
-  gh_mutate issue edit "${num}" --remove-label queued --add-label needs-human "${extra[@]}"
+  gh_mutate issue edit "${num}" --remove-label queued --add-label needs-human ${extra[@]+"${extra[@]}"}
   gh_mutate issue comment "${num}" \
     --body "Pipeline dispatch routed this to **needs-human**. Rationale: ${reason}"
 }

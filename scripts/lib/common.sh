@@ -30,6 +30,7 @@ export PIPELINE_ROOT
 _pre_dry_run="${PIPELINE_DRY_RUN:-}"
 _pre_concurrency="${PIPELINE_CONCURRENCY:-}"
 _pre_repo="${PIPELINE_REPO:-}"
+_pre_engineer="${ENGINEER_BIN:-}"
 if [[ -f "${PIPELINE_ROOT}/pipeline.env" ]]; then
   set -a
   # shellcheck disable=SC1091  # operator-provided file; absent at lint time
@@ -39,7 +40,8 @@ fi
 [[ -n "${_pre_dry_run}"    ]] && export PIPELINE_DRY_RUN="${_pre_dry_run}"
 [[ -n "${_pre_concurrency}" ]] && export PIPELINE_CONCURRENCY="${_pre_concurrency}"
 [[ -n "${_pre_repo}"       ]] && export PIPELINE_REPO="${_pre_repo}"
-unset _pre_dry_run _pre_concurrency _pre_repo
+[[ -n "${_pre_engineer}"   ]] && export ENGINEER_BIN="${_pre_engineer}"
+unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 
 # --------------------------- Env-var defaults ------------------------------
 # Safety-critical: dry-run is ON unless explicitly disabled by the operator.
