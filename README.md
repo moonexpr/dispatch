@@ -55,13 +55,10 @@ stateless — there is no shared memory between runs.
 
 ---
 
-## Testing on another repo
+## Usage
 
-The single entry point is `scripts/pipeline.sh`. It wires the full cycle —
-select → engineer → intake — in one command.
-
-```
-bash scripts/pipeline.sh [OPTIONS]
+```bash
+bash entrypoint.sh [OPTIONS]
 
   -b, --bootstrap         provision pipeline labels on PIPELINE_REPO first
   -r, --repo  owner/repo  target repo
@@ -71,6 +68,10 @@ bash scripts/pipeline.sh [OPTIONS]
   -h, --help
 ```
 
+`entrypoint.sh` wires the full cycle — select → engineer → intake — in one
+command. (`scripts/pipeline.sh` is the same thing; each component script
+remains independently runnable.)
+
 ### Quickstart for a new repo
 
 ```bash
@@ -78,14 +79,14 @@ bash scripts/pipeline.sh [OPTIONS]
 cp pipeline.env.example pipeline.env
 # edit pipeline.env: set PIPELINE_REPO, tokens, model keys
 
-# 2. Dry-run preview against the target repo (no mutations)
-bash scripts/pipeline.sh --repo owner/target-repo
+# 2. Dry-run preview — prints what would happen, mutates nothing
+bash entrypoint.sh --repo owner/target-repo
 
 # 3. Provision labels, then run live with the mock engineer
-bash scripts/pipeline.sh --bootstrap --repo owner/target-repo --live
+bash entrypoint.sh --bootstrap --repo owner/target-repo --live
 
 # 4. Same, with Ruflo as the real Engineer
-bash scripts/pipeline.sh --repo owner/target-repo --live --engineer ruflo
+bash entrypoint.sh --repo owner/target-repo --live --engineer ruflo
 ```
 
 The only prerequisite on the target repo: add the `queued` label to any issue
@@ -96,7 +97,7 @@ vocabulary (idempotent).
 
 ```bash
 # Fully offline with the mock engineer and fixture issues:
-bash scripts/pipeline.sh --fixture scripts/fixtures/queued-issues.json
+bash entrypoint.sh --fixture scripts/fixtures/queued-issues.json
 
 # Full mocked roundtrip across all fixture issues:
 bash scripts/roundtrip.sh
@@ -151,10 +152,11 @@ no GitHub, no Gateway, no model calls. This is also what CI runs.
 ## Layout
 
 ```
+entrypoint.sh            ← start here
 schemas/                 invoice.json · job-request.json
 config/                  litellm.pipeline.yaml
 services/classifier/     classify.py · fixtures/
-scripts/                 dispatch.sh · fix-dispatch.sh · closure.sh
+scripts/                 pipeline.sh · dispatch.sh · fix-dispatch.sh · closure.sh
                          architect-intake.sh · roundtrip.sh · mock-engineer.sh
                          bootstrap-labels.sh
                          smoke.sh · lib/common.sh · fixtures/
