@@ -5,12 +5,11 @@
 # Sourced by every script under scripts/. Defines the SINGLE source of truth
 # for: env-var defaults, the label vocabulary + state machine, the
 # scope->route map, the fix-ladder, dry-run semantics, and the thin wrappers
-# around `gh` / `claude` / `openclaw` that make those engines honour
-# PIPELINE_DRY_RUN.
+# around `gh` / `claude` that make those engines honour PIPELINE_DRY_RUN.
 #
 # Design rules (see HANDOFF-pipeline-v0.md §2):
 #   - We do NOT build engines. These helpers only *shape calls* to existing
-#     engines (gh, claude, openclaw, litellm, python).
+#     engines (gh, claude, python).
 #   - Dry-run defaults ON (§8). Nothing mutates unless PIPELINE_DRY_RUN=0.
 #   - All durable state lives in GitHub (labels/comments/PRs), never on disk.
 #
@@ -53,7 +52,6 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 # Tool binaries (overridable so tests / odd PATHs work).
 : "${GH_BIN:=gh}"
 : "${CLAUDE_BIN:=claude}"
-: "${OPENCLAW_BIN:=openclaw}"
 : "${PYTHON_BIN:=python3}"
 
 # How `claude` workflow args are passed. The CURRENT CLI has no `--args` flag
@@ -66,14 +64,6 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 # Worktree isolation root for worker sessions (§5.1 / §5.4 step 3).
 : "${PIPELINE_WORKTREE_ROOT:=${PIPELINE_ROOT}/.worktrees}"
 
-# OpenClaw operational defaults (real values come from pipeline.env; these
-# fallbacks keep scripts safe under `set -u` when pipeline.env is absent).
-: "${OPENCLAW_BIND_ADDR:=127.0.0.1}"
-: "${OPENCLAW_OPERATOR_CHANNEL:=}"
-: "${OPENCLAW_DISPATCH_SCHEDULE:=*/10 * * * *}"
-: "${OPENCLAW_DIGEST_SCHEDULE:=0 8 * * *}"
-: "${OPENCLAW_MODEL_CHEAP:=haiku-tier}"
-
 # Test seams (only consulted when set). Let smoke.sh drive scripts without a
 # live GitHub / HF / Gateway. Never required in production.
 : "${PIPELINE_FIXTURE_ISSUES:=}"   # JSON array of queued issues for dispatch
@@ -82,7 +72,7 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 : "${CLASSIFIER_OFFLINE:=}"        # 1 => deterministic offline classification
 
 export PIPELINE_DRY_RUN PIPELINE_REPO PIPELINE_CONFIDENCE_THRESHOLD \
-       PIPELINE_CONCURRENCY GH_BIN CLAUDE_BIN OPENCLAW_BIN PYTHON_BIN \
+       PIPELINE_CONCURRENCY GH_BIN CLAUDE_BIN PYTHON_BIN \
        CLAUDE_ARGS_MODE PIPELINE_WORKTREE_ROOT
 
 # ------------------------------- Logging -----------------------------------
@@ -144,14 +134,6 @@ claude_invoke() {
     prompt|*)
       run "${CLAUDE_BIN}" -p "Run /${workflow} with args ${args_json}" ;;
   esac
-}
-
-# openclaw_announce: notify the operator channel (dry-run aware).
-openclaw_announce() {
-  local message="$1"
-  run "${OPENCLAW_BIN}" announce \
-      ${OPENCLAW_OPERATOR_CHANNEL:+--channel "${OPENCLAW_OPERATOR_CHANNEL}"} \
-      --message "${message}"
 }
 
 # --------------------- Label vocabulary / state machine --------------------
@@ -228,15 +210,9 @@ tier_for_attempt() {
   esac
 }
 
-# NOTE: cross-family critic selection (§5.2 "route opposite of route") lives in
-# the worker plane where the generator route is known — see criticRoute() in
-# .claude/workflows/update-docs.js. It is intentionally NOT a bash helper here,
-# since no bash script invokes the critic directly.
-
 # ------------------------- Engineer interface -------------------------------
 # ENGINEER_BIN: the configured Engineer backend. Swapping this swaps the
 # entire Engineer identity without changing any Architect code.
-#   (unset)                  → fall back to claude_invoke implement-task
 #   scripts/mock-engineer.sh → offline test stub (returns fixture invoices)
 #   ruflo                    → production Ruflo CLI
 : "${ENGINEER_BIN:=}"
@@ -249,9 +225,6 @@ export ENGINEER_BIN
 # The Architect is blind to which Engineer backs this call.
 engineer_dispatch() {
   local job_request_json="$1"
-  if [[ -n "${ENGINEER_BIN}" ]]; then
-    run "${ENGINEER_BIN}" "${job_request_json}"
-  else
-    claude_invoke implement-task "${job_request_json}"
-  fi
+  [[ -n "${ENGINEER_BIN}" ]] || die "ENGINEER_BIN is not set; configure it in pipeline.env"
+  run "${ENGINEER_BIN}" "${job_request_json}"
 }

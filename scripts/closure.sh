@@ -2,24 +2,19 @@
 # ---------------------------------------------------------------------------
 # closure.sh — success path (HANDOFF §5.8)
 #
-# Invoked by the OpenClaw github webhook's isolated session. Two phases,
-# selected by the payload:
+# Two phases, selected by the payload:
 #
 #   Phase A (success payload: CI green + review approved, .merged != true):
-#     1. flip in-review -> docs-pending
-#     2. invoke /update-docs {pr}
-#     3. re-check CI on the docs commit via gh
-#     4. gh pr merge --auto --squash   (branch protection holds the merge for
+#     1. flip in-review -> done-pending-merge
+#     2. gh pr merge --auto --squash   (branch protection holds the merge for
 #        the operator's approval tap — no custom gating code; §5.8)
-#     5. post a closure summary comment
-#     6. flip docs-pending -> done-pending-merge
+#     3. post a closure summary comment
 #
 #   Phase B (merged event: .merged == true):
 #     - post a summary comment on the (auto-closed) issue
 #     - flip the issue to done
-#     - notify the operator channel
 #
-# OWNS: in-review -> docs-pending -> done-pending-merge -> done.
+# OWNS: in-review -> done-pending-merge -> done.
 # NEVER bypasses branch protection. Dry-run aware (default ON); §7.8.
 # ---------------------------------------------------------------------------
 set -euo pipefail
@@ -43,25 +38,16 @@ phase_success() {
     log "closure: PR #${pr} not ready (conclusion=${conclusion}, review=${review}); no-op exit 0."
     return 0
   fi
-  log "closure(success): PR #${pr} (Closes #${issue}) -> docs + auto-merge."
-  gh_mutate pr edit "${pr}" --remove-label in-review --add-label docs-pending
+  log "closure(success): PR #${pr} (Closes #${issue}) -> auto-merge."
+  gh_mutate pr edit "${pr}" --remove-label in-review --add-label done-pending-merge
 
-  # 2. docs/CHANGELOG update on the same branch.
-  local args; args="$(jq -nc --argjson pr "${pr}" '{pr: $pr}')"
-  claude_invoke update-docs "${args}"
-
-  # 3. re-check CI on the docs commit before arming the merge.
-  gh_mutate pr checks "${pr}" --watch=false
-
-  # 4. arm auto-merge (squash). Branch protection still requires the human tap.
+  # Arm auto-merge (squash). Branch protection still requires the human approval tap.
   gh_mutate pr merge "${pr}" --auto --squash
 
-  # 5. closure summary comment.
+  # Closure summary comment.
   gh_mutate pr comment "${pr}" \
-    --body "Pipeline closure summary: docs/CHANGELOG updated, CI re-checked green, auto-merge armed (squash). Awaiting the required human approval; merging will Closes #${issue}."
+    --body "Pipeline closure summary: CI green, auto-merge armed (squash). Awaiting the required human approval; merging will close #${issue}."
 
-  # 6. record state.
-  gh_mutate pr edit "${pr}" --remove-label docs-pending --add-label done-pending-merge
   log "closure(success): PR #${pr} armed; waiting on human approval tap."
 }
 
@@ -69,9 +55,9 @@ phase_merged() {
   local pr="$1" issue="$2"
   log "closure(merged): PR #${pr} merged; finalizing issue #${issue}."
   gh_mutate issue comment "${issue}" \
-    --body "Pipeline summary: PR #${pr} merged and this issue auto-closed. CI was green and the adversarial review was addressed. Closing out as done."
+    --body "Pipeline summary: PR #${pr} merged and this issue auto-closed. Closing out as done."
   gh_mutate issue edit "${issue}" --add-label "done" --remove-label done-pending-merge
-  openclaw_announce "Pipeline: issue #${issue} is DONE (PR #${pr} merged)."
+  log "closure(merged): issue #${issue} is DONE."
 }
 
 main() {

@@ -2,9 +2,9 @@
 # ---------------------------------------------------------------------------
 # smoke.sh — acceptance runner (HANDOFF §7). Exit 0 == all asserts pass.
 #
-# Runs fully OFFLINE and DRY-RUN: no network, no GitHub, no Gateway, no model
-# calls, no mutations. Checks that need an absent engine (openclaw/litellm/gh)
-# degrade to a structural/dry-run proxy and emit a SKIP for the live portion.
+# Runs fully OFFLINE and DRY-RUN: no network, no GitHub, no model calls,
+# no mutations. Checks that need an absent engine (gh) degrade to a
+# structural/dry-run proxy and emit a SKIP for the live portion.
 # ---------------------------------------------------------------------------
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,75 +63,7 @@ for n in 1 2 3; do
 done
 
 # ---------------------------------------------------------------------------
-section "§7.3 litellm config validates; non-stub groups present"
-python3 - "$ROOT/config/litellm.pipeline.yaml" <<'PY'
-import sys, re
-path = sys.argv[1]
-expected = {"triage","distill","gen-local","gen-default","gen-frontier","haiku-tier","critic"}
-stubs = {"gen-deepseek","gen-kimi"}
-try:
-    import yaml
-    with open(path) as fh:
-        cfg = yaml.safe_load(fh)
-    names = {m["model_name"] for m in cfg.get("model_list", [])}
-    master = bool(cfg.get("general_settings", {}).get("master_key"))
-    mode = "yaml"
-except ModuleNotFoundError:
-    # Degraded (no PyYAML): scan uncommented `model_name:` / `master_key:` lines.
-    names, master = set(), False
-    with open(path) as fh:
-        for line in fh:
-            s = line.strip()
-            if s.startswith("#"):
-                continue
-            m = re.match(r'-?\s*model_name:\s*(\S+)', s)
-            if m:
-                names.add(m.group(1))
-            if re.match(r'master_key:\s*\S+', s):
-                master = True
-    mode = "lines"
-missing = expected - names
-active_stubs = stubs & names
-assert not missing, f"missing non-stub groups: {missing}"
-assert not active_stubs, f"stub groups must stay commented: {active_stubs}"
-assert master, "master_key not wired to env"
-print(f"ok ({mode}): groups=" + ",".join(sorted(names)))
-PY
-if [[ $? -eq 0 ]]; then pass "YAML parses; all non-stub groups present; stubs inactive"; else fail "litellm structural validation"; fi
-if have litellm; then
-  if litellm --config "$ROOT/config/litellm.pipeline.yaml" --health >/dev/null 2>&1; then
-    pass "litellm binary validated config"
-  else
-    skip "litellm present but live validation needs keys/endpoints"
-  fi
-else
-  skip "litellm binary absent — structural validation only (live /v1/models needs proxy)"
-fi
-
-# ---------------------------------------------------------------------------
-section "§7.4 openclaw cron jobs (dispatch + digest) after bootstrap"
-# Offline proxy: assert bootstrap *intends* to register both jobs (dry-run echo).
-oc="$(scripts/bootstrap-openclaw.sh 2>/dev/null)"
-assert_contains "bootstrap intends to register pipeline-dispatch" "$oc" "pipeline-dispatch"
-assert_contains "bootstrap intends to register pipeline-digest" "$oc" "pipeline-digest"
-assert_contains "dispatch cron is a command job" "$oc" "--type command"
-assert_contains "digest cron is an isolated agent job" "$oc" "--type isolated"
-# Live: when a Gateway is reachable, actually register (idempotent) and verify
-# that `openclaw cron list` reflects both jobs — the literal §7.4 criterion.
-if have openclaw; then
-  PIPELINE_DRY_RUN=0 scripts/bootstrap-openclaw.sh >/dev/null 2>&1 || true
-  cl="$(openclaw cron list 2>/dev/null || true)"
-  case "$cl" in *pipeline-dispatch*) cd1=1 ;; *) cd1=0 ;; esac
-  case "$cl" in *pipeline-digest*)  cd2=1 ;; *) cd2=0 ;; esac
-  [[ "$cd1" == 1 && "$cd2" == 1 ]] \
-    && pass "openclaw cron list shows dispatch + digest after bootstrap" \
-    || fail "openclaw cron list missing dispatch/digest after bootstrap"
-else
-  skip "openclaw binary absent — live 'cron list' registration check (Gateway required)"
-fi
-
-# ---------------------------------------------------------------------------
-section "§7.5 dry-run dispatch prints correct gh/claude calls, mutates nothing"
+section "§7.3 dry-run dispatch prints correct gh/claude calls, mutates nothing"
 disp="$(PIPELINE_FIXTURE_ISSUES="${FIX}/queued-issues.json" scripts/dispatch.sh 2>&1)"
 assert_contains "launches engineer_dispatch for #101" "$disp" "job_id"
 assert_contains "passes the routed group (gen-default for #101)" "$disp" "gen-default"
@@ -146,14 +78,13 @@ if git -C "$ROOT" rev-parse --verify --quiet "pipeline/issue-101" >/dev/null 2>&
   fail "branch pipeline/issue-101 leaked"; else pass "no branch created"; fi
 
 # ---------------------------------------------------------------------------
-section "§7.6 fix-dispatch ladder: attempt 2 -> gen-default; >3 -> operator notify"
+section "§7.4 fix-dispatch ladder: attempt 2 -> gen-default; >3 -> operator notify"
 f2="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-2.json" scripts/fix-dispatch.sh 2>&1)"
 assert_contains "attempt 2 selects gen-default" "$f2" "gen-default"
-assert_contains "attempt 2 invokes /fix-ci" "$f2" "/fix-ci"
 assert_not_contains "attempt 2 does not escalate" "$f2" "needs-human"
 fc="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-over-cap.json" scripts/fix-dispatch.sh 2>&1)"
 assert_contains "attempt >3 labels needs-human" "$fc" "needs-human"
-assert_contains "attempt >3 notifies the operator" "$fc" "openclaw announce"
+assert_contains "attempt >3 posts a PR comment for the operator" "$fc" "pr comment"
 assert_not_contains "attempt >3 does NOT invoke /fix-ci" "$fc" "/fix-ci"
 
 # Also exercise the label-derivation path (no explicit attempt) for robustness.
@@ -161,11 +92,10 @@ der="$(PIPELINE_FIXTURE_PR=<(jq 'del(.attempt)' "${FIX}/pr-fix-attempt-2.json") 
 assert_contains "label-derived attempt (fix-attempt-1 -> 2) also picks gen-default" "$der" "gen-default"
 
 # ---------------------------------------------------------------------------
-section "§7.7 every secret referenced is documented in pipeline.env.example"
+section "§7.5 every secret referenced is documented in pipeline.env.example"
 ENVF="${ROOT}/pipeline.env.example"
 required_secrets=(GITHUB_TOKEN TRIAGE_GITHUB_TOKEN WORKER_GITHUB_TOKEN CLOSURE_GITHUB_TOKEN \
-  HF_TOKEN ANTHROPIC_API_KEY DEEPSEEK_API_KEY MOONSHOT_API_KEY MLX_QWEN_API_KEY \
-  LITELLM_MASTER_KEY OPENCLAW_WEBHOOK_BEARER_TOKEN OPENCLAW_WEBHOOK_URL)
+  ANTHROPIC_API_KEY)
 for v in "${required_secrets[@]}"; do
   ln="$(grep -nE "^${v}=" "$ENVF" | head -1 | cut -d: -f1)"
   if [[ -z "$ln" ]]; then fail "secret ${v} not declared in example"; continue; fi
@@ -179,7 +109,7 @@ done
 # Reverse scan: any *_TOKEN/_KEY/_SECRET referenced in pipeline runtime files
 # must be documented. Exclude smoke.sh itself (its regex literals self-match).
 referenced="$(grep -rhoE '[A-Z][A-Z0-9_]*(_TOKEN|_KEY|_SECRET)' \
-  scripts services config .github --exclude=smoke.sh 2>/dev/null | sort -u)"
+  scripts services .github --exclude=smoke.sh 2>/dev/null | sort -u)"
 undocumented=""
 while IFS= read -r v; do
   [[ -z "$v" ]] && continue
@@ -189,27 +119,15 @@ done <<< "$referenced"
   || fail "undocumented secret-like vars" "$undocumented"
 
 # ---------------------------------------------------------------------------
-section "§7.8 closure.sh dry-run (success payload): docs + auto-merge + summary"
+section "§7.6 closure.sh dry-run (success payload): auto-merge + summary"
 clo="$(PIPELINE_FIXTURE_PR="${FIX}/closure-success.json" scripts/closure.sh 2>&1)"
-assert_contains "invokes /update-docs" "$clo" "/update-docs"
 assert_contains "arms auto-merge (--auto)" "$clo" "--auto"
 assert_contains "squash merge" "$clo" "--squash"
 assert_contains "posts a closure summary comment" "$clo" "closure summary"
 assert_not_contains "does not hard-merge (no 'merge --admin')" "$clo" "--admin"
 
 # ---------------------------------------------------------------------------
-section "§7.9 all three workflow .js files exist and pass node --check"
-for wf in implement-task fix-ci update-docs; do
-  p="${ROOT}/.claude/workflows/${wf}.js"
-  if [[ -f "$p" ]] && node --check "$p" 2>/dev/null; then
-    pass "${wf}.js exists and node --check passes"
-  else
-    fail "${wf}.js missing or fails node --check"
-  fi
-done
-
-# ---------------------------------------------------------------------------
-section "§7.10 Invoice schema: all three status-case fixtures are schema-valid"
+section "§7.7 Invoice schema: all three status-case fixtures are schema-valid"
 python3 - "${FIX}/invoice-completed.json" \
           "${FIX}/invoice-failed.json" \
           "${FIX}/invoice-needs-human.json" <<'PY'
@@ -298,13 +216,6 @@ then
 else
   fail "classifier exposes exec capability"
 fi
-# Gateway bind must be loopback/tailnet (read default from example).
-bind="$(grep -E '^OPENCLAW_BIND_ADDR=' "$ENVF" | head -1 | cut -d= -f2)"
-case "$bind" in
-  127.0.0.1|::1|localhost|100.*|*.ts.net) pass "Gateway bind '$bind' is loopback/tailnet" ;;
-  0.0.0.0|"") fail "Gateway bind '$bind' is public/unset — must be loopback/tailnet" ;;
-  *) skip "Gateway bind '$bind' — verify it is tailnet-only" ;;
-esac
 # No real secret values committed: required-secret lines in example are empty/placeholder.
 leaked=""
 for v in "${required_secrets[@]}"; do

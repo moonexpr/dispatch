@@ -2,9 +2,6 @@
 # ---------------------------------------------------------------------------
 # dispatch.sh — deterministic dispatch engine (HANDOFF §5.1)
 #
-# Run as an OpenClaw COMMAND cron (every 10m). No agent turn, no tokens —
-# exit-code semantics only (non-zero => OpenClaw notifies the operator).
-#
 # OWNS these label transitions:
 #   queued -> claimed       (issue picked up for implementation)
 #   queued -> needs-human   (low confidence or non-implement action)
@@ -14,8 +11,8 @@
 #   2. classify each via services/classifier/classify.py -> {action,scope,route,confidence}
 #   3. confidence < THRESHOLD or action != implement  -> needs-human + rationale, skip
 #   4. else, respecting concurrency (v0 = 1): post route JSON as a durable
-#      comment, swap queued->claimed, create a worktree, and launch
-#      `/implement-task`.
+#      comment, swap queued->claimed, create a worktree, and dispatch to
+#      the configured Engineer (ENGINEER_BIN).
 #
 # Dry-run (default ON) prints every intended gh/git/claude call and mutates
 # nothing (§7.5).
@@ -116,7 +113,7 @@ main() {
 
     # Classify (quarantine reader; offline in tests, HF live in prod).
     if ! result="$("${PYTHON_BIN}" "${CLASSIFIER}" --title "${title}" --body "${body}")"; then
-      die "classifier failed for #${num} (see stderr) — aborting so OpenClaw notifies."
+      die "classifier failed for #${num} (see stderr)"
     fi
     action="$(jq -r '.action' <<<"${result}")"
     scope="$(jq -r '.scope' <<<"${result}")"

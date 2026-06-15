@@ -2,9 +2,8 @@
 # ---------------------------------------------------------------------------
 # fix-dispatch.sh — CI-failure fix ladder (HANDOFF §5.5)
 #
-# Invoked by the OpenClaw github webhook's isolated session when CI fails on a
-# pipeline PR. The retry counter lives in GitHub labels (NOT in OpenClaw
-# memory). Ladder (by the attempt about to run):
+# Triggered when CI fails on a pipeline PR. The retry counter lives in
+# GitHub labels. Ladder (by the attempt about to run):
 #     1 -> gen-local   2 -> gen-default   3 -> gen-frontier   >3 -> needs-human
 #
 # OWNS these label transitions:
@@ -17,7 +16,7 @@
 #   3. (max fix-attempt-N label present) + 1
 #   4. default 1
 #
-# Dry-run (default) prints intended gh/claude/openclaw calls; mutates nothing.
+# Dry-run (default) prints intended gh/claude calls; mutates nothing.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,25 +76,23 @@ main() {
   fi
 
   if [[ "${tier}" == "needs-human" ]]; then
-    # Retry cap exceeded (>3): escalate, do NOT invoke /fix-ci.
+    # Retry cap exceeded (>3): escalate, label the PR, post a comment for the operator.
     log "PR #${pr}: attempt ${attempt} exceeds cap (3) -> escalating to operator."
     gh_mutate pr edit "${pr}" --add-label needs-human
-    openclaw_announce "Pipeline: PR #${pr} hit the fix-attempt cap (attempt ${attempt} > 3). Distilled failure brief: ${brief}. Needs human."
+    gh_mutate pr comment "${pr}" \
+      --body "Pipeline: fix-attempt cap exceeded (attempt ${attempt} > 3). Brief: ${brief}. Needs human."
     log "operator-notification path taken for PR #${pr}."
     return 0
   fi
 
-  # Increment the retry counter label (prev -> current), then invoke /fix-ci.
+  # Increment the retry counter label (prev -> current).
   local prev=$(( attempt - 1 ))
   if (( prev >= 1 )); then
     gh_mutate pr edit "${pr}" --remove-label "fix-attempt-${prev}" --add-label "fix-attempt-${attempt}"
   else
     gh_mutate pr edit "${pr}" --add-label "fix-attempt-${attempt}"
   fi
-  log "PR #${pr}: dispatching /fix-ci on tier ${tier} (attempt ${attempt})."
-  local args; args="$(jq -nc --argjson pr "${pr}" --argjson attempt "${attempt}" \
-                        '{pr: $pr, attempt: $attempt}')"
-  claude_invoke fix-ci "${args}"
+  log "PR #${pr}: labeled fix-attempt-${attempt} (tier ${tier}); engineer handles CI fix."
 }
 
 main "$@"

@@ -7,14 +7,14 @@
 # (schemas/invoice.json) can trigger this handler.
 #
 # Input:  Invoice JSON as $1 (or on stdin)
-# Output: dry-run-aware gh/claude/openclaw calls (same as other pipeline scripts)
+# Output: dry-run-aware gh/claude calls (same as other pipeline scripts)
 # Exit:   0 on all handled paths (including escalation); non-zero on bad input
 #
 # Status → action mapping:
-#   completed   → trigger /update-docs + arm auto-merge on the PR
+#   completed   → post invoice summary + arm auto-merge on the PR
 #   partial     → same as failed (work done but CI still red)
-#   failed      → add fix-attempt-1 label + invoke /fix-ci at gen-local tier
-#   needs-human → add needs-human label + notify operator channel
+#   failed      → add fix-attempt-1 label; fix-dispatch.sh handles progression
+#   needs-human → add needs-human label + post issue comment
 # ---------------------------------------------------------------------------
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,35 +45,25 @@ log "architect-intake: issue=#${issue} status=${status} pr=${pr_number:-none}"
 case "${status}" in
 
   completed)
-    log "#${issue}: completed — triggering docs update and auto-merge"
-    # Post the Engineer's summary as a PR comment for human review.
+    log "#${issue}: completed — arming auto-merge"
     if [[ -n "${pr_number}" ]]; then
       gh_mutate pr comment "${pr_number}" \
         --body "**Engineer invoice:** ${summary}"
-      # Trigger docs update workflow, then arm auto-merge.
-      claude_invoke update-docs \
-        "$(jq -nc --argjson pr "${pr_number}" --argjson issue "${issue}" \
-             '{pr: $pr, issue: $issue}')"
+      # Arm auto-merge; branch protection still requires the human approval tap.
       gh_mutate pr merge "${pr_number}" --auto --squash \
         --subject "Closes #${issue}"
     fi
     gh_mutate issue edit "${issue}" \
-      --remove-label claimed --add-label docs-pending
+      --remove-label claimed --add-label done-pending-merge
     ;;
 
   partial|failed)
-    log "#${issue}: ${status} — escalating to fix ladder (attempt 1, tier gen-local)"
+    log "#${issue}: ${status} — labeling fix-attempt-1; fix-dispatch.sh handles progression"
     gh_mutate issue edit "${issue}" --add-label fix-attempt-1
     if [[ -n "${pr_number}" ]]; then
       gh_mutate pr comment "${pr_number}" \
         --body "**Engineer invoice (${status}):** ${summary}"
     fi
-    # Invoke fix-ci at the base ladder tier; fix-dispatch.sh handles progression.
-    claude_invoke fix-ci \
-      "$(jq -nc --argjson pr "${pr_number:-0}" \
-           --arg tier "gen-local" \
-           --argjson issue "${issue}" \
-           '{pr: $pr, tier: $tier, issue: $issue, attempt: 1}')"
     ;;
 
   needs-human)
@@ -82,8 +72,6 @@ case "${status}" in
       --remove-label claimed --add-label needs-human
     gh_mutate issue comment "${issue}" \
       --body "**Engineer returned needs-human.** ${summary}"
-    openclaw_announce \
-      "Issue #${issue} needs operator attention: ${summary}"
     ;;
 
   *)
