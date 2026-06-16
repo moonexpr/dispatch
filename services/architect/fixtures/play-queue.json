@@ -1,0 +1,42 @@
+[
+  {
+    "number": 2,
+    "title": "feat: wire gh-intake.sh data-sourcing layer into the pipeline",
+    "body": "The intake layer converts raw GitHub project items into queued issues the pipeline can act on. dispatch.sh has a seam in load_queued_issues() where the intake binary slots in. This is connective tissue with no dependencies on other issues. Unblocks: issue #3 (going-live checklist) depends on this.",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/dispatch/issues/2"
+  },
+  {
+    "number": 3,
+    "title": "docs: update CLAUDE.md worker contract for the stripped-down system",
+    "body": "CLAUDE.md still references removed systems. Follow-up to #2. Blocked by #2: the contract must describe the intake layer once it lands. A small docs adjustment, but a correctness fix — every Engineer session opens with CLAUDE.md.",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/dispatch/issues/3"
+  },
+  {
+    "number": 5,
+    "title": "feat: going-live checklist — secrets, branch protection, bootstrap",
+    "body": "Blocked by #2: you cannot verify go-live readiness until the pipeline can pull its own queue via the intake layer. Depends on #2. Update the checklist to match the current system before anyone attempts go-live.",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/dispatch/issues/5"
+  },
+  {
+    "number": 7,
+    "title": "Assess subsystems needed for prototype",
+    "body": "Map each named subsystem to its implementation and find the gaps. Depends on #2 (intake must exist to assess job issuance end to end). It is unclear which gaps remain; mostly investigate and discuss.",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/dispatch/issues/7"
+  },
+  {
+    "number": 9,
+    "title": "Set main as the repository default branch",
+    "body": "One click in GitHub Settings. This is a human task, not autonomous pipeline work. Won't do via the pipeline — flag it for the operator to handle manually.",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/dispatch/issues/9"
+  }
+]

@@ -113,14 +113,93 @@ def _extract_json(text: str) -> Dict[str, Any]:
         raise RuntimeError(f"LLM returned non-JSON output: {exc}\n\nRaw output:\n{text[:500]}") from exc
 
 
+# --------------------------------------------------------------------------
+# Offline deterministic ranking (RANKER_OFFLINE=1) — no network, no model.
+# Mirrors the CLASSIFIER_OFFLINE seam: identical input always yields identical
+# order. Parses dependency cross-references from issue text and orders items
+# foundational -> dependent, tie-breaking by lower issue number.
+# --------------------------------------------------------------------------
+# Forward refs: "this issue depends on #N".
+_FWD_DEP_PATTERNS = (
+    r"blocked\s+by\s+#(\d+)",
+    r"depends?\s+on\s+#(\d+)",
+    r"requires?\s+#(\d+)",
+    r"needs\s+#(\d+)",
+    r"parent\s+epic:?\s*#(\d+)",
+    r"follow[-\s]?up\s+to\s+#(\d+)",
+    r"prerequisite:?\s*#(\d+)",
+    r"after\s+#(\d+)",
+)
+# Reverse refs: "this issue unblocks/blocks #N" => #N depends on this issue.
+_REV_DEP_PATTERNS = (
+    r"unblocks?:?\s*(?:issue\s*)?#(\d+)",
+    r"blocks?\s+#(\d+)",
+    r"prerequisite\s+for\s+#(\d+)",
+)
+
+
+def _refs(text: str, patterns: tuple) -> set:
+    out: set = set()
+    for pat in patterns:
+        for m in re.finditer(pat, text, re.IGNORECASE):
+            out.add(int(m.group(1)))
+    return out
+
+
+def _rank_offline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    present = {int(i["number"]) for i in items}
+    deps: Dict[int, set] = {int(i["number"]): set() for i in items}
+    for item in items:
+        n = int(item["number"])
+        text = f"{item.get('title', '')}\n{item.get('body', '')}"
+        for r in _refs(text, _FWD_DEP_PATTERNS):
+            if r in present and r != n:
+                deps[n].add(r)
+        for r in _refs(text, _REV_DEP_PATTERNS):
+            if r in present and r != n:
+                deps[r].add(n)
+
+    depth_cache: Dict[int, int] = {}
+
+    def depth(n: int, stack: frozenset) -> int:
+        if n in depth_cache:
+            return depth_cache[n]
+        if n in stack:                       # cycle guard
+            return 0
+        d = 0
+        for p in deps[n]:
+            d = max(d, 1 + depth(p, stack | {n}))
+        depth_cache[n] = d
+        return d
+
+    ordered = sorted(items, key=lambda i: (depth(int(i["number"]), frozenset()),
+                                           int(i["number"])))
+
+    print("ranker: offline deterministic dependency ranking", file=sys.stderr)
+    for i in ordered:
+        n = int(i["number"])
+        ds = sorted(deps[n])
+        note = "foundational (no deps)" if not ds else \
+            "depends on " + ", ".join(f"#{x}" for x in ds)
+        print(f"  #{n}: depth={depth(n, frozenset())} — {note}", file=sys.stderr)
+    return ordered
+
+
 def rank(
     items: List[Dict[str, Any]],
     *,
     model: str = DEFAULT_MODEL,
 ) -> List[Dict[str, Any]]:
-    """Return items re-ordered by the LLM's dependency ranking."""
+    """Return items re-ordered foundational -> dependent.
+
+    With RANKER_OFFLINE set, uses a deterministic, network-free dependency
+    parse. Otherwise asks the LLM (default: haiku) to resolve the ordering.
+    """
     if len(items) <= 1:
         return items
+
+    if os.environ.get("RANKER_OFFLINE"):
+        return _rank_offline(items)
 
     issue_list = _format_issues(items)
     prompt = USER_PROMPT_TEMPLATE.format(issue_list=issue_list)
@@ -152,11 +231,16 @@ def main(argv: List[str]) -> int:
                    help="JSON array of IntakeItems (default: stdin)")
     p.add_argument("--model", default=DEFAULT_MODEL,
                    help=f"model alias (default: {DEFAULT_MODEL})")
+    p.add_argument("--offline", action="store_true",
+                   help="deterministic dependency parse; no network/model (sets RANKER_OFFLINE)")
     p.add_argument("--dry-run", action="store_true",
                    help="print ranking reasoning only; do not reorder or emit JSON")
     p.add_argument("--output", metavar="FILE",
                    help="write ranked JSON to FILE instead of stdout")
     args = p.parse_args(argv)
+
+    if args.offline:
+        os.environ["RANKER_OFFLINE"] = "1"
 
     # Load items
     try:

@@ -177,6 +177,38 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "§7.9 dispatch work-order emission (offline, deterministic)"
+FXQ="${ROOT}/services/architect/fixtures/play-queue.json"
+wo1="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" 2>/dev/null)"; wc1=$?
+wo2="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" 2>/dev/null)"
+[[ $wc1 -eq 0 ]] && pass "dispatch exits 0 on the fixture queue" || fail "dispatch exit" "got $wc1"
+[[ "$wo1" == "$wo2" ]] && pass "work order is deterministic across runs" || fail "work order nondeterministic"
+assert_contains "emits a WORK PLAN header" "$wo1" "WORK PLAN"
+assert_contains "selects the foundational primary (#2)" "$wo1" "Closes #2"
+assert_contains "carries the routed tier (gen-default for #2)" "$wo1" "gen-default"
+assert_contains "carries the scope budget (m -> 80,000)" "$wo1" "80,000 tokens"
+assert_contains "has prompt-master STOP CONDITIONS" "$wo1" "STOP CONDITIONS"
+assert_contains "has FORBIDDEN ACTIONS (ADMIN constraint)" "$wo1" "FORBIDDEN ACTIONS"
+assert_contains "carries the DRY_RUN flag" "$wo1" "DRY_RUN=1"
+assert_contains "names the Engineer's verify gate" "$wo1" "bash scripts/smoke.sh"
+assert_contains "includes the Invoice format" "$wo1" "INVOICE FORMAT"
+assert_contains "frames issue text as untrusted data" "$wo1" "untrusted data"
+# --all emits one work order per eligible job (#2,#3,#5).
+allc="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" --all 2>/dev/null | grep -c '^# OBJECTIVE')"
+[[ "$allc" == "3" ]] && pass "--all emits 3 eligible work orders (#2,#3,#5)" || fail "--all count" "got $allc"
+# --json is a valid envelope carrying work_order + authorization.
+if PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" --json 2>/dev/null \
+   | jq -e '.work_order and .authorization.budget_tokens and (.issue==2)' >/dev/null; then
+  pass "--json emits a valid envelope (work_order + authorization)"
+else
+  fail "--json envelope invalid"
+fi
+# Selection filters the wont-do human task (#9) and the low-confidence defer (#7).
+elig="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" 2>&1 >/dev/null)"
+assert_contains "skips the wont-do human task (#9)" "$elig" "wont-do"
+assert_contains "defers low-confidence #7" "$elig" "conf 0.34"
+
+# ---------------------------------------------------------------------------
 section "§8 security guardrails (checkable)"
 # Dry-run defaults ON.
 dflt="$(env -u PIPELINE_DRY_RUN bash -c 'source "'"${ROOT}"'/scripts/lib/common.sh"; echo "$PIPELINE_DRY_RUN"')"
