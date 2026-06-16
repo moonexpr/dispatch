@@ -11,6 +11,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
+# Transient run/test output
+test_results.txt
+
 # Editor / OS
 .DS_Store
 *.swp
