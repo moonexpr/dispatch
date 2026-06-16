@@ -225,6 +225,14 @@ export ENGINEER_BIN
 # The Architect is blind to which Engineer backs this call.
 engineer_dispatch() {
   local job_request_json="$1"
+  if is_dry_run; then
+    # Surface the Job Request we *would* hand the Engineer. The backend binary
+    # is a live-path requirement (like require_tool), so do not hard-fail when
+    # ENGINEER_BIN is unset — just show the intended call (matches this
+    # function's contract above).
+    run "${ENGINEER_BIN:-<ENGINEER_BIN>}" "${job_request_json}"
+    return 0
+  fi
   [[ -n "${ENGINEER_BIN}" ]] || die "ENGINEER_BIN is not set; configure it in pipeline.env"
   run "${ENGINEER_BIN}" "${job_request_json}"
 }
