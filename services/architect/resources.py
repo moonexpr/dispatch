@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""resources.py — ARCHITECT resource gathering for self-contained work orders.
+
+Operator requirement: a work plan must embed every resource the Engineer would
+otherwise have to read, so engineering needs NO further reading or research.
+This module discovers the files a job references and reads them — plus the
+repo's worker contract (CLAUDE.md) and the Invoice schema — so workorder.py can
+inline them directly.
+
+Deterministic and offline: identical (job, repo state) -> identical output.
+Reads only regular files inside repo_root; issue text is used merely to
+*discover* candidate paths, and every candidate is validated against the real
+filesystem before anything is embedded (issue text stays untrusted data).
+"""
+from __future__ import annotations
+
+import os
+import re
+from typing import Any, Dict, List
+
+# Explicit repo-relative paths, e.g. scripts/lib/common.sh, services/intake/x.py
+_PATH_RE = re.compile(r'(?:scripts|services|schemas|\.github|docs)/[\w./-]+\.\w+')
+# Bare filenames with a known extension, e.g. dispatch.sh, models.py
+_FILE_RE = re.compile(r'\b[\w-]+\.(?:sh|py|json|md|ya?ml)\b')
+# Referenced function names, e.g. load_queued_issues()
+_FUNC_RE = re.compile(r'\b([a-z_][a-z0-9_]+)\(\)')
+
+_MAX_FILES = 6          # cap embedded referenced files (logged when exceeded)
+_CAP_BYTES = 6000       # cap bytes per embedded file (logged when truncated)
+
+
+def _safe_isfile(repo_root: str, rel: str):
+    p = os.path.normpath(os.path.join(repo_root, rel))
+    if not p.startswith(os.path.abspath(repo_root) + os.sep):
+        return None                          # path traversal guard
+    return p if os.path.isfile(p) else None
+
+
+def _resolve_basename(repo_root: str, name: str):
+    """Find a bare filename under common dirs. Deterministic (sorted walk)."""
+    for base in ("scripts", "services", "schemas", ".github", "."):
+        root = os.path.join(repo_root, base)
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            filenames.sort()
+            if name in filenames:
+                return os.path.join(dirpath, name)
+    return None
+
+
+def discover(text: str, repo_root: str) -> List[str]:
+    """Return repo-relative paths referenced by `text` that actually exist."""
+    repo_root = os.path.abspath(repo_root)
+    found: List[str] = []
+    seen = set()
+
+    def add(abspath):
+        rel = os.path.relpath(abspath, repo_root)
+        if rel not in seen:
+            seen.add(rel)
+            found.append(rel)
+
+    for m in _PATH_RE.findall(text):
+        p = _safe_isfile(repo_root, m)
+        if p:
+            add(p)
+    for name in _FILE_RE.findall(text):
+        if any(os.path.basename(r) == name for r in found):
+            continue
+        p = _resolve_basename(repo_root, name)
+        if p:
+            add(p)
+
+    found.sort()
+    return found
+
+
+def functions(text: str) -> List[str]:
+    return sorted(set(_FUNC_RE.findall(text)))
+
+
+def _read_capped(path: str, cap: int = _CAP_BYTES):
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        data = fh.read()
+    if len(data) > cap:
+        return data[:cap].rstrip() + "\n… (truncated)\n", True
+    return data, False
+
+
+def gather(job: Dict[str, Any], repo_root: str) -> Dict[str, Any]:
+    """Collect everything the work order should embed for `job`."""
+    repo_root = os.path.abspath(repo_root)
+    text = f"{job.get('title', '')}\n{job.get('body', '')}"
+
+    discovered = discover(text, repo_root)
+    truncations: List[str] = []
+
+    files = []
+    for rel in discovered[:_MAX_FILES]:
+        content, trunc = _read_capped(os.path.join(repo_root, rel))
+        if trunc:
+            truncations.append(rel)
+        files.append({"path": rel, "content": content, "truncated": trunc})
+    dropped = discovered[_MAX_FILES:]
+
+    contract = None
+    cpath = os.path.join(repo_root, "CLAUDE.md")
+    if os.path.isfile(cpath):
+        contract, ctr = _read_capped(cpath, cap=4000)
+        if ctr:
+            truncations.append("CLAUDE.md")
+
+    schema = None
+    spath = os.path.join(repo_root, "schemas", "invoice.json")
+    if os.path.isfile(spath):
+        schema, _ = _read_capped(spath, cap=4000)
+
+    return {
+        "discovered": discovered,
+        "files": files,
+        "dropped": dropped,
+        "truncations": truncations,
+        "functions": functions(text),
+        "contract": contract,
+        "invoice_schema": schema,
+    }

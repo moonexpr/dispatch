@@ -47,10 +47,12 @@ sys.path.insert(0, _HERE)                              # approval, workorder
 sys.path.insert(0, os.path.join(_HERE, "../intake"))  # intake, ranker
 sys.path.insert(0, os.path.join(_HERE, "../models"))  # models (ranker/--llm)
 
-import intake as _intake        # noqa: E402
-import ranker as _ranker        # noqa: E402
-import approval as _approval    # noqa: E402
-import workorder as _workorder  # noqa: E402
+import intake as _intake          # noqa: E402
+import ranker as _ranker          # noqa: E402
+import approval as _approval      # noqa: E402
+import resources as _resources    # noqa: E402
+import decompose as _decompose    # noqa: E402
+import workorder as _workorder    # noqa: E402
 
 _CLASSIFIER = os.path.join(_HERE, "../classifier/classify.py")
 _DIVIDER = "\n\n" + ("─" * 72) + "\n\n"
@@ -172,7 +174,8 @@ def main(argv: List[str]) -> int:
 
     chosen = eligible if args.all else eligible[:1]
 
-    # 4. APPROVE + 5. ISSUE
+    # 4. APPROVE + 5. ISSUE (with embedded resources + decomposition/staffing)
+    repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
     envelopes, texts = [], []
     for e in chosen:
         item, triage = e["item"], e["triage"]
@@ -182,10 +185,15 @@ def main(argv: List[str]) -> int:
             "title": item.get("title", ""), "body": item.get("body", ""),
             "route": triage["route"], "scope": triage["scope"], "confidence": triage["confidence"],
         }
+        res = _resources.gather(job, repo_root)
+        wplan = _decompose.plan(job, res["discovered"], verify_cmd=args.verify_cmd)
         auth = _approval.approve(job, triage, dry_run=dry_run)
-        text = _workorder.render(job, triage, auth, llm=args.llm, verify_cmd=args.verify_cmd)
+        text = _workorder.render(job, triage, auth, resources=res, plan=wplan,
+                                 llm=args.llm, verify_cmd=args.verify_cmd)
         texts.append(text)
-        envelopes.append({**job, "authorization": auth.to_dict(), "work_order": text})
+        envelopes.append({**job, "authorization": auth.to_dict(),
+                          "units": wplan["units"], "staffing": wplan["staffing"],
+                          "work_order": text})
 
     primary = chosen[0]["item"]["number"]
     print(f"── ARCHITECT: primary #{primary} "
