@@ -1,0 +1,72 @@
+{
+  "items": [
+    {
+      "id": "PVTI_lADOER_Yhc4BaZMOzgvdbm0",
+      "title": "Penofin Discovery",
+      "status": "⌛️ Development",
+      "assignees": ["moonexpr"],
+      "repository": "https://github.com/ReclaimByDesign/penofintree",
+      "hours Estimate": 20,
+      "dispatch": null,
+      "content": {
+        "type": "Issue",
+        "number": 1,
+        "title": "Penofin Discovery",
+        "body": "",
+        "repository": "ReclaimByDesign/penofintree",
+        "url": "https://github.com/ReclaimByDesign/penofintree/issues/1"
+      }
+    },
+    {
+      "id": "PVTI_lADOER_Yhc4BaZMOzgvpta8",
+      "title": "strip-bg exists for your use — hosting deferred (FYI / low priority)",
+      "status": "🛠️ Scheduled",
+      "assignees": ["moonexpr"],
+      "repository": "https://github.com/ReclaimByDesign/strip-bg",
+      "hours Estimate": null,
+      "dispatch": null,
+      "content": {
+        "type": "Issue",
+        "number": 1,
+        "title": "strip-bg exists for your use — hosting deferred (FYI / low priority)",
+        "body": "No action requested — just visibility. Close whenever appropriate.",
+        "repository": "ReclaimByDesign/strip-bg",
+        "url": "https://github.com/ReclaimByDesign/strip-bg/issues/1"
+      }
+    },
+    {
+      "id": "PVTI_lADOER_Yhc4BaZMOzgvpNAQ",
+      "title": "Architecture: Google Search Console + Business Profile access model for clients",
+      "status": "🛠️ Scheduled",
+      "assignees": ["moonexpr"],
+      "repository": "https://github.com/ReclaimByDesign/rlscustomcarpentry.com",
+      "hours Estimate": null,
+      "dispatch": null,
+      "content": {
+        "type": "Issue",
+        "number": 4,
+        "title": "Architecture: Google Search Console + Business Profile access model for clients (follow-up to #2)",
+        "body": "Follow-up to #2 (domain transfer) and the DNS cutover...",
+        "repository": "ReclaimByDesign/rlscustomcarpentry.com",
+        "url": "https://github.com/ReclaimByDesign/rlscustomcarpentry.com/issues/4"
+      }
+    },
+    {
+      "id": "PVTI_lADOER_draft001",
+      "title": "Draft: new feature idea",
+      "status": "Triage / Unscheduled",
+      "assignees": [],
+      "repository": "",
+      "hours Estimate": null,
+      "dispatch": null,
+      "content": {
+        "type": "DraftIssue",
+        "number": 0,
+        "title": "Draft: new feature idea",
+        "body": "Just an idea not yet filed as an issue.",
+        "repository": "",
+        "url": ""
+      }
+    }
+  ]
+}
