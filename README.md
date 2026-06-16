@@ -1,16 +1,16 @@
 # dispatch
 
 **dispatch** selects engineering jobs from a GitHub Issues queue, issues them
-to an Engineer, and processes the Invoice the Engineer returns — closing the
-loop or escalating based on outcome.
+to a ruflo engineer agent, and processes the Invoice the agent returns —
+closing the loop or escalating based on outcome.
 
 Three responsibilities, nothing more:
 
-1. **Issue intake** — classify queued issues, route each to the right tier,
-   claim one at a time.
-2. **Job issuance** — hand a structured Job Request to the Engineer
-   (`ENGINEER_BIN`) with the issue, route, and scope.
-3. **Work plan approval** — receive the Engineer's Invoice; on success arm
+1. **Issue intake** — fetch and classify queued issues via `gh-intake.sh`,
+   store them in the ruflo task queue, claim one at a time.
+2. **Job issuance** — the ruflo swarm coordinator hands a structured Job
+   Request to an engineer agent with the issue, route, and scope.
+3. **Work plan approval** — receive the agent's Invoice; on success arm
    auto-merge (awaiting human approval); on failure advance the fix-attempt
    ladder; on ambiguity escalate to the operator via a GitHub comment.
 
@@ -24,11 +24,12 @@ Three responsibilities, nothing more:
 
 | Role | What it does | Backed by |
 |------|-------------|-----------|
-| **Architect** (this repo) | Issue intake → Job Request → Invoice review | dispatch scripts |
-| **Engineer** | Executes the job, returns an Invoice | set `ENGINEER_BIN` |
+| **Coordinator** | Intake → Job Request → Invoice review | ruflo swarm (hierarchical-mesh) |
+| **Engineer** | Executes the job in a git worktree, returns an Invoice | ruflo engineer agent (`ENGINEER_BIN`) |
 
-The two roles are fully decoupled. Set `ENGINEER_BIN` to any binary that reads
-a Job Request JSON and writes an Invoice JSON to stdout.
+The two roles are fully decoupled. `ENGINEER_BIN` can be any binary that reads
+a Job Request JSON and writes an Invoice JSON to stdout; the default is a ruflo
+engineer agent spawned by the coordinator via the claude-flow MCP.
 
 ## Flow
 
@@ -36,22 +37,27 @@ a Job Request JSON and writes an Invoice JSON to stdout.
 GitHub Issues (queued)
         │
         ▼
-  [INTAKE] dispatch.sh
-    classify → route → claim one issue
+  [INTAKE] gh-intake.sh → intake-to-ruflo bridge
+    fetch → normalize → store in ruflo task queue
+        │
+        ▼
+  [COORDINATOR] ruflo hierarchical swarm
+    classify → route → claim one issue (SubagentStart hook: queued → claimed)
         │
         ▼ Job Request {issue, route, scope, confidence}
-  [ENGINEER] ENGINEER_BIN
+  [ENGINEER] ruflo engineer agent
     implement → test → open PR
         │
         ▼ Invoice {status, pr_number, cost, summary, …}
-  [APPROVAL] architect-intake.sh
+  [APPROVAL] SubagentStop hook → architect-intake.sh
     completed   → post summary + arm auto-merge (human approves to merge)
     failed      → fix-attempt ladder (fix-dispatch.sh, up to 3 attempts)
     needs-human → label + comment on the issue for the operator
 ```
 
-All state lives in **GitHub** (issues, labels, PRs, comments). Sessions are
-stateless — there is no shared memory between runs.
+All durable state lives in **GitHub** (issues, labels, PRs, comments).
+Ruflo provides session memory and swarm coordination; GitHub is the
+source of truth across runs.
 
 ---
 
@@ -105,9 +111,13 @@ dispatch assembles existing engines; it builds nothing custom.
 
 | Concern | Engine |
 |---------|--------|
-| Queue + state machine | GitHub Issues + labels (`scripts/bootstrap-labels.sh`) |
+| Swarm coordination | ruflo V3 (hierarchical-mesh, up to 15 agents, `.claude-flow/config.yaml`) |
+| Session memory | ruflo hybrid memory (HNSW + file, `.claude-flow/data/`) |
+| Hook lifecycle | ruflo hooks in `.claude/settings.json` (SubagentStart/Stop, PostToolUse) |
+| Issue intake | `scripts/gh-intake.sh` → `scripts/intake-to-ruflo.sh` bridge |
 | Issue classification | Deterministic keyword classifier (`services/classifier/classify.py`) |
-| Job execution | Any binary that speaks Job Request / Invoice JSON (`ENGINEER_BIN`) |
+| Queue + state machine | GitHub Issues + labels (`scripts/bootstrap-labels.sh`) |
+| Job execution | ruflo engineer agent (or any binary speaking Job Request / Invoice JSON) |
 | CI gate | GitHub Actions (`.github/workflows/ci.yml`) |
 
 ## Label state machine
@@ -139,13 +149,18 @@ no GitHub, no model calls. This is also what CI runs.
 ## Layout
 
 ```
-entrypoint.sh            ← start here
+entrypoint.sh            ← start here (ruflo swarm bootstrap)
 schemas/                 invoice.json · job-request.json
-services/classifier/     classify.py · fixtures/
-scripts/                 pipeline.sh · dispatch.sh · fix-dispatch.sh · closure.sh
+services/intake/         intake.py · pipeline.py · ranker.py
+services/models/         models.py (LiteLLM / Anthropic / HF / CLI)
+scripts/                 gh-intake.sh · intake-to-ruflo.sh (bridge)
+                         pipeline.sh · dispatch.sh · fix-dispatch.sh · closure.sh
                          architect-intake.sh · mock-engineer.sh
-                         bootstrap-labels.sh
+                         bootstrap-labels.sh · deploy-remote.sh
                          smoke.sh · lib/common.sh · fixtures/
+.claude/                 settings.json (hooks) · agents/ · skills/ · helpers/
+.claude-flow/            config.yaml · data/ · logs/ · sessions/
+.mcp.json                claude-flow MCP config
 .github/workflows/       ci.yml
 ```
 

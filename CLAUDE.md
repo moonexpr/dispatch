@@ -1,10 +1,17 @@
 # CLAUDE.md — Unit-of-Work Contract
 
-This repository is an **unattended engineering pipeline**. If you are a worker
-session invoked by it (via `/implement-task`, `/fix-ci`, or `/update-docs`),
-this contract is binding. Read it before acting. The full design is in
+This repository is an **unattended engineering pipeline** backed by ruflo V3
+swarm coordination. If you are a worker session invoked by it (via
+`/implement-task`, `/fix-ci`, or `/update-docs`), this contract is binding.
+Read it before acting. The full design is in
 [`HANDOFF-pipeline-v0.md`](./HANDOFF-pipeline-v0.md); the spec there wins on
 any detail this summary omits.
+
+**Execution layer:** ruflo hierarchical-mesh swarm (`.claude-flow/config.yaml`,
+up to 15 agents). The coordinator picks up tasks from the ruflo memory store
+(fed by `gh-intake.sh`) and spawns engineer agents via the claude-flow MCP.
+Hook lifecycle events (`SubagentStart`, `SubagentStop`) drive the GitHub label
+state machine and the approval/fix-dispatch ladder.
 
 ## The contract (HANDOFF §5.7)
 
@@ -21,10 +28,11 @@ any detail this summary omits.
   (`queued → claimed → pr-open → in-review → docs-pending → done`) is owned by
   `dispatch.sh`, `fix-dispatch.sh`, the workflow steps, and `closure.sh`. Touch
   only the transition your stage owns.
-- **All knowledge for the next session goes into the PR/issue thread.**
-  Sessions are stateless workers. There is no shared memory, no scratch file,
-  no database — only the durable GitHub artifacts (PR body, comments, labels).
-  Write down anything the next session needs there.
+- **All durable knowledge goes into the PR/issue thread.** GitHub (PR body,
+  comments, labels) is the source of truth across runs. Ruflo session memory
+  (`.claude-flow/data/`) provides within-run coordination but is not durable
+  across independent pipeline ticks — do not rely on it for cross-session state.
+  Write anything the next session needs into the PR/issue thread.
 
 ## Security posture (HANDOFF §8)
 
