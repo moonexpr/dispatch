@@ -31,9 +31,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from typing import List, Tuple
+
+# Tunables (hint lists, confidence weights, scope->route) live in the shared
+# declarative config. tuning.py is exec-free, so importing it preserves this
+# module's quarantine-reader posture (HANDOFF §8 asserts no exec capability).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tuning  # noqa: E402
 
 # --- Schema (HANDOFF §5.3) -------------------------------------------------
 ACTIONS = ("implement", "needs-human", "wont-do", "duplicate?")
@@ -41,8 +48,8 @@ SCOPES = ("xs", "s", "m", "l")
 ROUTES = ("gen-local", "gen-default", "gen-frontier")
 
 # scope -> route map (mirrors scripts/lib/common.sh route_for_scope).
-_SCOPE_ROUTE = {"xs": "gen-local", "s": "gen-local",
-                "m": "gen-default", "l": "gen-frontier"}
+# Tunable via services/tuning.json (selection.classify.scope_route).
+_SCOPE_ROUTE = tuning.SCOPE_ROUTE
 
 
 @dataclass(frozen=True)
@@ -62,16 +69,14 @@ class TriageResult:
 
 # --- Deterministic classifier -----------------------------------------------
 # Keyword signals are intentionally simple and fully deterministic: identical
-# (title, body) always yields identical output (HANDOFF §7.2).
-_XS_HINTS = ("typo", "rename", "comment", "one-line", "one line", "wording",
-             "docstring", "lint", "format")
-_S_HINTS = ("add a flag", "small", "minor", "tweak", "adjust", "bump version")
-_L_HINTS = ("refactor", "redesign", "architecture", "migration", "epic",
-            "rewrite", "overhaul", "multi-service", "breaking change")
-_WONTDO_HINTS = ("wontfix", "won't do", "wont do", "by design", "not planned")
-_DUP_HINTS = ("duplicate", "dupe", "already reported", "same as #")
-_VAGUE_HINTS = ("not sure", "maybe", "somehow", "investigate", "unclear",
-                "?", "thoughts", "discuss")
+# (title, body) always yields identical output (HANDOFF §7.2). The signal lists
+# are tunable via services/tuning.json (selection.classify.hints).
+_XS_HINTS = tuning.CLASSIFY_HINTS["xs"]
+_S_HINTS = tuning.CLASSIFY_HINTS["s"]
+_L_HINTS = tuning.CLASSIFY_HINTS["l"]
+_WONTDO_HINTS = tuning.CLASSIFY_HINTS["wontdo"]
+_DUP_HINTS = tuning.CLASSIFY_HINTS["dup"]
+_VAGUE_HINTS = tuning.CLASSIFY_HINTS["vague"]
 
 
 def _norm(title: str, body: str) -> str:
@@ -104,18 +109,22 @@ def classify(title: str, body: str) -> TriageResult:
         action = "implement"
 
     # Confidence: start from a base and add/subtract deterministic signals.
+    # Weights/thresholds are tunable via services/tuning.json
+    # (selection.classify.conf).
+    c = tuning.CONF
     vague = has(_VAGUE_HINTS)
     body_len = len((body or "").strip())
-    conf = 0.60
-    conf += 0.10 * min(has(_XS_HINTS) + has(_S_HINTS) + has(_L_HINTS), 3)
-    conf += 0.10 if body_len >= 80 else 0.0      # detailed issues read clearer
-    conf -= 0.12 * min(vague, 3)                 # vague language lowers it
-    conf -= 0.15 if body_len < 25 else 0.0       # near-empty issues are murky
-    conf = max(0.05, min(0.99, round(conf, 4)))
+    conf = c["base"]
+    conf += c["scope_signal_weight"] * min(
+        has(_XS_HINTS) + has(_S_HINTS) + has(_L_HINTS), c["scope_signal_cap"])
+    conf += c["body_long_bonus"] if body_len >= c["body_long_threshold"] else 0.0
+    conf -= c["vague_weight"] * min(vague, c["vague_cap"])
+    conf -= c["body_short_penalty"] if body_len < c["body_short_threshold"] else 0.0
+    conf = max(c["clamp_min"], min(c["clamp_max"], round(conf, c["round_ndigits"])))
 
     # An uncertain duplicate signal collapses confidence (human should confirm).
     if action == "duplicate?":
-        conf = min(conf, 0.50)
+        conf = min(conf, c["dup_cap"])
 
     return TriageResult(action, scope, _SCOPE_ROUTE[scope], conf).validate()
 

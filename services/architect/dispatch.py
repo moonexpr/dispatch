@@ -44,15 +44,18 @@ from typing import Any, Dict, List
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)                              # approval, workorder
-sys.path.insert(0, os.path.join(_HERE, "../intake"))  # intake, ranker
+sys.path.insert(0, os.path.join(_HERE, "../intake"))  # intake, ranker, dag
 sys.path.insert(0, os.path.join(_HERE, "../models"))  # models (ranker/--llm)
+sys.path.insert(0, os.path.dirname(_HERE))            # services (tuning)
 
 import intake as _intake          # noqa: E402
 import ranker as _ranker          # noqa: E402
+import dag as _dag                # noqa: E402
 import approval as _approval      # noqa: E402
 import resources as _resources    # noqa: E402
 import decompose as _decompose    # noqa: E402
 import workorder as _workorder    # noqa: E402
+import tuning                     # noqa: E402
 
 _CLASSIFIER = os.path.join(_HERE, "../classifier/classify.py")
 _DIVIDER = "\n\n" + ("─" * 72) + "\n\n"
@@ -107,12 +110,209 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="have ARCHITECT sharpen the work order via a model (opt-in)")
     p.add_argument("--all", action="store_true",
                    help="emit a work order for every eligible job, in ranked order")
+    p.add_argument("--dag", action="store_true",
+                   help="write a static issue DAG (.claude/artifacts/issue-dag.{json,md}) for "
+                        "browsing/selection instead of emitting a work order. Artifact dir "
+                        "overridable via DISPATCH_ARTIFACTS_DIR")
+    p.add_argument("--issue", type=int, metavar="N",
+                   help="emit the work order for issue N chosen from the DAG (operator override: "
+                        "bypasses the eligibility filter; notes unmet dependencies)")
     p.add_argument("--json", action="store_true",
                    help="emit a machine envelope instead of plain work-order text")
     p.add_argument("--verify-cmd", default=os.environ.get("DISPATCH_VERIFY_CMD",
                    "bash scripts/smoke.sh"), metavar="CMD",
                    help="the gate the Engineer must make green (default: bash scripts/smoke.sh)")
     return p
+
+
+def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
+                   args: argparse.Namespace, *, dry_run: bool, repo_root: str):
+    """Approve + gather resources + decompose + render one job's work order.
+
+    Returns (text, envelope). Shared by the default/--all dispatch path and the
+    --issue operator-selection path so both emit byte-identical work orders.
+    """
+    n = item["number"]
+    job = {
+        "job_id": f"dispatch-issue-{n}", "issue": n, "repo": item.get("repository", ""),
+        "title": item.get("title", ""), "body": item.get("body", ""),
+        "route": triage["route"], "scope": triage["scope"], "confidence": triage["confidence"],
+    }
+    res = _resources.gather(job, repo_root)
+    wplan = _decompose.plan(job, res["discovered"], verify_cmd=args.verify_cmd)
+    auth = _approval.approve(job, triage, dry_run=dry_run)
+    text = _workorder.render(job, triage, auth, resources=res, plan=wplan,
+                             llm=args.llm, verify_cmd=args.verify_cmd)
+    envelope = {**job, "authorization": auth.to_dict(),
+                "units": wplan["units"], "staffing": wplan["staffing"],
+                "work_order": text}
+    return text, envelope
+
+
+def _source_label(args: argparse.Namespace) -> str:
+    """Deterministic descriptor of where the queue came from (no absolute paths)."""
+    if args.project:
+        return f"project:{args.project}"
+    if args.repo:
+        return f"repo:{args.repo}"
+    if args.fixture:
+        return f"fixture:{os.path.basename(args.fixture)}"
+    return os.environ.get("INTAKE_REPO") or os.environ.get("PIPELINE_REPO") or "queue"
+
+
+def _eligibility_map(ranked: List[Dict[str, Any]], python_bin: str,
+                     confidence: float) -> Dict[int, str]:
+    """Classify each item; return {number: short eligibility note} for the DAG view."""
+    out: Dict[int, str] = {}
+    for item in ranked:
+        n = int(item["number"])
+        try:
+            triage = _classify(item, python_bin)
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            out[n] = "classify-error"
+            continue
+        action, conf = triage.get("action"), triage.get("confidence", 0.0)
+        if action == "implement" and conf >= confidence:
+            out[n] = "eligible"
+        elif action != "implement":
+            out[n] = f"skip ({action})"
+        else:
+            out[n] = f"defer (conf {conf} < {confidence})"
+    return out
+
+
+def _run_dag(args: argparse.Namespace, ranked: List[Dict[str, Any]],
+             python_bin: str) -> int:
+    """Build the issue DAG and persist it as a static, browsable artifact."""
+    graph = _dag.build(ranked, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+    source = _source_label(args)
+    envelope = _dag.to_json(graph, source=source)
+    elig = _eligibility_map(ranked, python_bin, args.confidence)
+
+    md = "\n".join([
+        f"# Issue DAG — {source}",
+        "",
+        "Static dependency view of the queue. Pick a **root** (no unmet "
+        "dependencies) and dispatch it directly with `./dispatch --issue <N>` — "
+        "no need to resolve the ordering in conversation.",
+        "",
+        "- Roots (ready to start): " + (", ".join(f"#{n}" for n in graph.roots) or "—"),
+        f"- Issues: {len(graph.numbers)} · edges: {len(envelope['edges'])}"
+        + (" · cycles: " + ", ".join(f"#{n}" for n in graph.cycles) if graph.cycles else ""),
+        "",
+        "## Dependency graph",
+        "",
+        _dag.render_mermaid(graph),
+        "",
+        "## Issues",
+        "",
+        _dag.render_markdown_table(graph, eligibility=elig),
+        "",
+    ])
+
+    artifacts_dir = (os.environ.get("DISPATCH_ARTIFACTS_DIR")
+                     or os.path.join(os.environ.get("PIPELINE_ROOT") or os.getcwd(),
+                                     ".claude", "artifacts"))
+    os.makedirs(artifacts_dir, exist_ok=True)
+    json_path = os.path.join(artifacts_dir, "issue-dag.json")
+    md_path = os.path.join(artifacts_dir, "issue-dag.md")
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(envelope, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    with open(md_path, "w", encoding="utf-8") as fh:
+        fh.write(md)
+
+    print(f"── ADMIN: issue DAG — {len(graph.numbers)} issue(s), roots "
+          f"{', '.join('#'+str(n) for n in graph.roots) or '—'} ──", file=sys.stderr)
+    print(json_path)
+    print(md_path)
+    return 0
+
+
+def _run_issue(args: argparse.Namespace, ranked: List[Dict[str, Any]],
+               python_bin: str) -> int:
+    """Emit the work order for an operator-selected issue (eligibility overridden)."""
+    target = int(args.issue)
+    item = next((it for it in ranked if int(it["number"]) == target), None)
+    if item is None:
+        print(f"dispatch: issue #{target} is not in the queue", file=sys.stderr)
+        return 3
+    try:
+        triage = _classify(item, python_bin)
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        print(f"dispatch: classify failed for #{target} ({exc})", file=sys.stderr)
+        return 1
+
+    action, conf = triage.get("action"), triage.get("confidence", 0.0)
+    note = ("eligible" if action == "implement" and conf >= args.confidence
+            else f"OPERATOR OVERRIDE ({action})")
+    print(f"── ADMIN: dispatching #{target} by operator selection "
+          f"[{triage.get('scope')}/{triage.get('route')} conf {conf}] {action} — {note} ──",
+          file=sys.stderr)
+    graph = _dag.build(ranked, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+    deps = graph.deps.get(target, [])
+    if deps:
+        print(f"   note: #{target} depends on " + ", ".join(f"#{d}" for d in deps)
+              + " — ensure those are done first", file=sys.stderr)
+
+    dry_run = os.environ.get("PIPELINE_DRY_RUN", "1") != "0"
+    repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
+    text, envelope = _workorder_for(item, triage, args, dry_run=dry_run, repo_root=repo_root)
+    if args.json:
+        print(json.dumps(envelope, ensure_ascii=False, indent=2))
+    else:
+        print(text)
+    return 0
+
+
+def _run_dispatch(args: argparse.Namespace, ranked: List[Dict[str, Any]],
+                  python_bin: str) -> int:
+    """Default path: select eligible job(s) and emit the primary (or --all) work order."""
+    dry_run = os.environ.get("PIPELINE_DRY_RUN", "1") != "0"
+    eligible: List[Dict[str, Any]] = []
+    print("── ADMIN: queue ranked by independence/blocking ──", file=sys.stderr)
+    for pos, item in enumerate(ranked, 1):
+        n = item["number"]
+        try:
+            triage = _classify(item, python_bin)
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+            print(f"  {pos}. #{n}: classify failed ({exc}) — skipping", file=sys.stderr)
+            continue
+        action, conf = triage.get("action"), triage.get("confidence", 0.0)
+        ok = action == "implement" and conf >= args.confidence
+        reason = "eligible" if ok else (
+            f"skip ({action})" if action != "implement" else f"skip (conf {conf} < {args.confidence})")
+        print(f"  {pos}. #{n} [{triage.get('scope')}/{triage.get('route')} "
+              f"conf {conf}] {action} — {reason}: {item.get('title','')}", file=sys.stderr)
+        if ok:
+            eligible.append({"item": item, "triage": triage})
+
+    if not eligible:
+        print("dispatch: no eligible jobs (need action=implement and confidence >= "
+              f"{args.confidence})", file=sys.stderr)
+        return 3
+
+    chosen = eligible if args.all else eligible[:1]
+
+    # APPROVE + ISSUE (with embedded resources + decomposition/staffing)
+    repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
+    envelopes, texts = [], []
+    for e in chosen:
+        text, envelope = _workorder_for(e["item"], e["triage"], args,
+                                        dry_run=dry_run, repo_root=repo_root)
+        texts.append(text)
+        envelopes.append(envelope)
+
+    primary = chosen[0]["item"]["number"]
+    print(f"── ARCHITECT: primary #{primary} "
+          f"(scope {chosen[0]['triage']['scope']}, route {chosen[0]['triage']['route']}, "
+          f"budget {envelopes[0]['authorization']['budget_tokens']:,} tok) ──", file=sys.stderr)
+
+    if args.json:
+        print(json.dumps(envelopes if args.all else envelopes[0], ensure_ascii=False, indent=2))
+    else:
+        print(_DIVIDER.join(texts) if args.all else texts[0])
+    return 0
 
 
 def main(argv: List[str]) -> int:
@@ -147,65 +347,13 @@ def main(argv: List[str]) -> int:
         print(f"dispatch: ranker failed ({exc}); continuing unranked", file=sys.stderr)
         ranked = items
 
-    # 3. CLASSIFY + select
-    dry_run = os.environ.get("PIPELINE_DRY_RUN", "1") != "0"
-    eligible: List[Dict[str, Any]] = []
-    print("── ADMIN: queue ranked by independence/blocking ──", file=sys.stderr)
-    for pos, item in enumerate(ranked, 1):
-        n = item["number"]
-        try:
-            triage = _classify(item, python_bin)
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-            print(f"  {pos}. #{n}: classify failed ({exc}) — skipping", file=sys.stderr)
-            continue
-        action, conf = triage.get("action"), triage.get("confidence", 0.0)
-        ok = action == "implement" and conf >= args.confidence
-        reason = "eligible" if ok else (
-            f"skip ({action})" if action != "implement" else f"skip (conf {conf} < {args.confidence})")
-        print(f"  {pos}. #{n} [{triage.get('scope')}/{triage.get('route')} "
-              f"conf {conf}] {action} — {reason}: {item.get('title','')}", file=sys.stderr)
-        if ok:
-            eligible.append({"item": item, "triage": triage})
-
-    if not eligible:
-        print("dispatch: no eligible jobs (need action=implement and confidence >= "
-              f"{args.confidence})", file=sys.stderr)
-        return 3
-
-    chosen = eligible if args.all else eligible[:1]
-
-    # 4. APPROVE + 5. ISSUE (with embedded resources + decomposition/staffing)
-    repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
-    envelopes, texts = [], []
-    for e in chosen:
-        item, triage = e["item"], e["triage"]
-        n = item["number"]
-        job = {
-            "job_id": f"dispatch-issue-{n}", "issue": n, "repo": item.get("repository", ""),
-            "title": item.get("title", ""), "body": item.get("body", ""),
-            "route": triage["route"], "scope": triage["scope"], "confidence": triage["confidence"],
-        }
-        res = _resources.gather(job, repo_root)
-        wplan = _decompose.plan(job, res["discovered"], verify_cmd=args.verify_cmd)
-        auth = _approval.approve(job, triage, dry_run=dry_run)
-        text = _workorder.render(job, triage, auth, resources=res, plan=wplan,
-                                 llm=args.llm, verify_cmd=args.verify_cmd)
-        texts.append(text)
-        envelopes.append({**job, "authorization": auth.to_dict(),
-                          "units": wplan["units"], "staffing": wplan["staffing"],
-                          "work_order": text})
-
-    primary = chosen[0]["item"]["number"]
-    print(f"── ARCHITECT: primary #{primary} "
-          f"(scope {chosen[0]['triage']['scope']}, route {chosen[0]['triage']['route']}, "
-          f"budget {envelopes[0]['authorization']['budget_tokens']:,} tok) ──", file=sys.stderr)
-
-    # 6. EMIT
-    if args.json:
-        print(json.dumps(envelopes if args.all else envelopes[0], ensure_ascii=False, indent=2))
-    else:
-        print(_DIVIDER.join(texts) if args.all else texts[0])
-    return 0
+    # 3. Branch by mode: --dag writes the static artifact; --issue N dispatches an
+    #    operator-chosen issue; default/--all emits the primary/every work order.
+    if args.dag:
+        return _run_dag(args, ranked, python_bin)
+    if args.issue is not None:
+        return _run_issue(args, ranked, python_bin)
+    return _run_dispatch(args, ranked, python_bin)
 
 
 if __name__ == "__main__":

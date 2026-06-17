@@ -16,7 +16,11 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from typing import Any, Dict, List
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tuning  # noqa: E402
 
 # Explicit repo-relative paths, e.g. scripts/lib/common.sh, services/intake/x.py
 _PATH_RE = re.compile(r'(?:scripts|services|schemas|\.github|docs)/[\w./-]+\.\w+')
@@ -25,8 +29,9 @@ _FILE_RE = re.compile(r'\b[\w-]+\.(?:sh|py|json|md|ya?ml)\b')
 # Referenced function names, e.g. load_queued_issues()
 _FUNC_RE = re.compile(r'\b([a-z_][a-z0-9_]+)\(\)')
 
-_MAX_FILES = 6          # cap embedded referenced files (logged when exceeded)
-_CAP_BYTES = 6000       # cap bytes per embedded file (logged when truncated)
+# Embedding caps — tunable via services/tuning.json (generation.resources).
+_MAX_FILES = tuning.RES_CAPS["max_files"]   # cap embedded referenced files (logged when exceeded)
+_CAP_BYTES = tuning.RES_CAPS["cap_bytes"]   # cap bytes per embedded file (logged when truncated)
 
 
 def _safe_isfile(repo_root: str, rel: str):
@@ -108,14 +113,14 @@ def gather(job: Dict[str, Any], repo_root: str) -> Dict[str, Any]:
     contract = None
     cpath = os.path.join(repo_root, "CLAUDE.md")
     if os.path.isfile(cpath):
-        contract, ctr = _read_capped(cpath, cap=4000)
+        contract, ctr = _read_capped(cpath, cap=tuning.RES_CAPS["contract_cap"])
         if ctr:
             truncations.append("CLAUDE.md")
 
     schema = None
     spath = os.path.join(repo_root, "schemas", "invoice.json")
     if os.path.isfile(spath):
-        schema, _ = _read_capped(spath, cap=4000)
+        schema, _ = _read_capped(spath, cap=tuning.RES_CAPS["schema_cap"])
 
     return {
         "discovered": discovered,

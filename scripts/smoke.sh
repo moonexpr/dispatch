@@ -222,6 +222,55 @@ assert_contains "skips the wont-do human task (#9)" "$elig" "wont-do"
 assert_contains "defers low-confidence #7" "$elig" "conf 0.34"
 
 # ---------------------------------------------------------------------------
+section "§7.10 static issue DAG + operator issue selection (offline, deterministic)"
+DAGDIR="$(mktemp -d 2>/dev/null || mktemp -d -t dag)"
+DISPATCH_ARTIFACTS_DIR="$DAGDIR/a" ./dispatch --dag --fixture "$FXQ" >/dev/null 2>&1; dc=$?
+DISPATCH_ARTIFACTS_DIR="$DAGDIR/b" ./dispatch --dag --fixture "$FXQ" >/dev/null 2>&1
+[[ $dc -eq 0 ]] && pass "dispatch --dag exits 0" || fail "dispatch --dag exit" "got $dc"
+[[ -f "$DAGDIR/a/issue-dag.json" && -f "$DAGDIR/a/issue-dag.md" ]] \
+  && pass "writes issue-dag.json and issue-dag.md" || fail "DAG artifacts missing"
+djson="$(cat "$DAGDIR/a/issue-dag.json" 2>/dev/null)"
+dmd="$(cat "$DAGDIR/a/issue-dag.md" 2>/dev/null)"
+# Machine view: roots are the unblocked issues; edges encode the dependencies.
+if printf '%s' "$djson" | jq -e '.roots == [2,9]' >/dev/null 2>&1; then
+  pass "DAG json roots are the unblocked issues (#2,#9)"
+else
+  fail "DAG json roots wrong" "$(printf '%s' "$djson" | jq -c '.roots' 2>/dev/null)"
+fi
+if printf '%s' "$djson" | jq -e 'any(.edges[]; .==[5,2]) and any(.edges[]; .==[7,2])' >/dev/null 2>&1; then
+  pass "DAG json edges encode #5->#2 and #7->#2 (dependents -> dependency)"
+else
+  fail "DAG json edges wrong"
+fi
+# Human views: a Mermaid graph and a Markdown table (the operator browses these).
+assert_contains "DAG md carries a Mermaid graph" "$dmd" '```mermaid'
+assert_contains "DAG md carries an issues table" "$dmd" "| Issue | Title |"
+assert_contains "DAG md names the selection command" "$dmd" "--issue"
+# The static artifact is deterministic across runs (no wall-clock, sorted output).
+if diff -q "$DAGDIR/a/issue-dag.json" "$DAGDIR/b/issue-dag.json" >/dev/null 2>&1 \
+   && diff -q "$DAGDIR/a/issue-dag.md" "$DAGDIR/b/issue-dag.md" >/dev/null 2>&1; then
+  pass "DAG artifacts are byte-identical across runs"
+else
+  fail "DAG artifacts nondeterministic"
+fi
+# Operator selection: --issue N emits that issue's work order (override) and notes deps.
+i5out="$(./dispatch --issue 5 --fixture "$FXQ" 2>/dev/null)"; i5c=$?
+i5err="$(./dispatch --issue 5 --fixture "$FXQ" 2>&1 >/dev/null)"
+[[ $i5c -eq 0 ]] && pass "dispatch --issue 5 exits 0" || fail "--issue 5 exit" "got $i5c"
+assert_contains "--issue 5 emits the work order for #5 (Closes #5)" "$i5out" "Closes #5"
+assert_contains "--issue 5 notes the unmet dependency on #2" "$i5err" "depends on #2"
+# An unknown issue number is rejected (no eligible job).
+./dispatch --issue 999 --fixture "$FXQ" >/dev/null 2>&1; i9c=$?
+[[ $i9c -eq 3 ]] && pass "--issue with an unknown number exits 3" || fail "--issue 999 exit" "got $i9c"
+# The declarative tuning surface (the admin-editable config) is valid JSON.
+if jq -e . "${ROOT}/services/tuning.json" >/dev/null 2>&1; then
+  pass "services/tuning.json is valid JSON (the tuning surface)"
+else
+  fail "services/tuning.json is not valid JSON"
+fi
+rm -rf "$DAGDIR"
+
+# ---------------------------------------------------------------------------
 section "§8 security guardrails (checkable)"
 # Dry-run defaults ON.
 dflt="$(env -u PIPELINE_DRY_RUN bash -c 'source "'"${ROOT}"'/scripts/lib/common.sh"; echo "$PIPELINE_DRY_RUN"')"

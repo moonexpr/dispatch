@@ -41,9 +41,15 @@ import re
 import sys
 from typing import Any, Dict, List, Optional
 
-# Resolve models from sibling directory regardless of CWD.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../models"))
+# Resolve siblings regardless of CWD: models/ (LLM path), this dir (dag), and
+# services/ (the shared declarative tuning surface).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "../models"))
+sys.path.insert(0, os.path.dirname(_HERE))   # services/ for tuning
+sys.path.insert(0, _HERE)                     # this dir for dag
 import models as _models  # noqa: E402
+import dag as _dag        # noqa: E402
+import tuning             # noqa: E402
 
 DEFAULT_MODEL = os.environ.get("RANKER_MODEL", "haiku")
 
@@ -116,72 +122,23 @@ def _extract_json(text: str) -> Dict[str, Any]:
 # --------------------------------------------------------------------------
 # Offline deterministic ranking (RANKER_OFFLINE=1) — no network, no model.
 # Mirrors the CLASSIFIER_OFFLINE seam: identical input always yields identical
-# order. Parses dependency cross-references from issue text and orders items
+# order. The dependency graph itself is built by dag.build() (shared with the
+# static --dag artifact); the cross-reference patterns are tunable via
+# services/tuning.json (selection.ranker). Here we just order the items
 # foundational -> dependent, tie-breaking by lower issue number.
 # --------------------------------------------------------------------------
-# Forward refs: "this issue depends on #N".
-_FWD_DEP_PATTERNS = (
-    r"blocked\s+by\s+#(\d+)",
-    r"depends?\s+on\s+#(\d+)",
-    r"requires?\s+#(\d+)",
-    r"needs\s+#(\d+)",
-    r"parent\s+epic:?\s*#(\d+)",
-    r"follow[-\s]?up\s+to\s+#(\d+)",
-    r"prerequisite:?\s*#(\d+)",
-    r"after\s+#(\d+)",
-)
-# Reverse refs: "this issue unblocks/blocks #N" => #N depends on this issue.
-_REV_DEP_PATTERNS = (
-    r"unblocks?:?\s*(?:issue\s*)?#(\d+)",
-    r"blocks?\s+#(\d+)",
-    r"prerequisite\s+for\s+#(\d+)",
-)
-
-
-def _refs(text: str, patterns: tuple) -> set:
-    out: set = set()
-    for pat in patterns:
-        for m in re.finditer(pat, text, re.IGNORECASE):
-            out.add(int(m.group(1)))
-    return out
-
-
 def _rank_offline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    present = {int(i["number"]) for i in items}
-    deps: Dict[int, set] = {int(i["number"]): set() for i in items}
-    for item in items:
-        n = int(item["number"])
-        text = f"{item.get('title', '')}\n{item.get('body', '')}"
-        for r in _refs(text, _FWD_DEP_PATTERNS):
-            if r in present and r != n:
-                deps[n].add(r)
-        for r in _refs(text, _REV_DEP_PATTERNS):
-            if r in present and r != n:
-                deps[r].add(n)
-
-    depth_cache: Dict[int, int] = {}
-
-    def depth(n: int, stack: frozenset) -> int:
-        if n in depth_cache:
-            return depth_cache[n]
-        if n in stack:                       # cycle guard
-            return 0
-        d = 0
-        for p in deps[n]:
-            d = max(d, 1 + depth(p, stack | {n}))
-        depth_cache[n] = d
-        return d
-
-    ordered = sorted(items, key=lambda i: (depth(int(i["number"]), frozenset()),
+    g = _dag.build(items, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+    ordered = sorted(items, key=lambda i: (g.depth[int(i["number"])],
                                            int(i["number"])))
 
     print("ranker: offline deterministic dependency ranking", file=sys.stderr)
     for i in ordered:
         n = int(i["number"])
-        ds = sorted(deps[n])
+        ds = g.deps[n]
         note = "foundational (no deps)" if not ds else \
             "depends on " + ", ".join(f"#{x}" for x in ds)
-        print(f"  #{n}: depth={depth(n, frozenset())} — {note}", file=sys.stderr)
+        print(f"  #{n}: depth={g.depth[n]} — {note}", file=sys.stderr)
     return ordered
 
 

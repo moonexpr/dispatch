@@ -11,20 +11,22 @@ yields identical output (the same determinism contract as classify.py).
 """
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import asdict, dataclass
 from typing import Any, Dict
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tuning  # noqa: E402
+
 # scope -> total token budget ADMIN authorizes for the job.
-_SCOPE_BUDGET = {"xs": 20_000, "s": 40_000, "m": 80_000, "l": 160_000}
+# Tunable via services/tuning.json (generation.approval.scope_budget).
+_SCOPE_BUDGET = tuning.SCOPE_BUDGET
 
 # Fraction of the budget allocated per phase. The remainder (~0.20) is held as
 # contingency reserve — PLAY.md Act II: "hold the reserve, do not pre-spend it."
-_PHASE_SPLIT = (
-    ("READ", 0.15),
-    ("IMPLEMENT", 0.45),
-    ("VERIFY", 0.12),
-    ("COMMIT & PR", 0.08),
-)
+# Tunable via services/tuning.json (generation.approval.phase_split).
+_PHASE_SPLIT = tuning.PHASE_SPLIT
 
 
 @dataclass(frozen=True)

@@ -27,8 +27,12 @@ from typing import Any, Dict, List, Optional
 from approval import Authorization  # type: ignore  # sibling import (see dispatch.py path setup)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROUTE_ALIAS = {"gen-local": "local", "gen-default": "sonnet", "gen-frontier": "opus"}
-_BOX_W = 70
+sys.path.insert(0, os.path.dirname(_HERE))
+import tuning  # noqa: E402
+
+# Rendering knobs — tunable via services/tuning.json (generation.workorder).
+_ROUTE_ALIAS = tuning.ROUTE_ALIAS
+_BOX_W = tuning.BOX_W
 
 
 def _box(title: str, rows) -> str:

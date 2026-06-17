@@ -14,36 +14,25 @@ Offline + deterministic: identical inputs -> identical plan.
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any, Dict, List
 
-_SWARM_MAX = 15
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tuning  # noqa: E402
+
+# Hard cap on agents (= number of units). Tunable via services/tuning.json
+# (generation.decompose.swarm_max).
+_SWARM_MAX = tuning.SWARM_MAX
 
 
 def _spec_for(path: str):
-    """Map a file/area to a (function, domain) specialization."""
-    p = path.lower()
-    base = os.path.basename(p)
-    if "smoke" in base or "test" in p or "/fixtures/" in p:
-        return ("engineer", "QA / test automation")
-    if base.endswith(".sh") or p.startswith("scripts/"):
-        return ("engineer", "developer tooling (shell)")
-    if p.startswith("schemas/") or (base.endswith(".json") and "schema" in p):
-        return ("engineer", "data contracts / schema")
-    if p.startswith(".github/") or base.startswith("ci"):
-        return ("engineer", "CI/CD")
-    if base.endswith(".md") or base == "claude.md":
-        return ("writer", "developer documentation")
-    if p.startswith("services/intake/"):
-        return ("engineer", "data-pipeline (Python)")
-    if p.startswith("services/classifier/"):
-        return ("engineer", "ML / classification (Python)")
-    if p.startswith("services/models/"):
-        return ("engineer", "LLM integration (Python)")
-    if p.startswith("services/architect/"):
-        return ("engineer", "orchestration (Python)")
-    if base.endswith(".py") or p.startswith("services/"):
-        return ("engineer", "backend (Python)")
-    return ("engineer", "general software")
+    """Map a file/area to a (function, domain) specialization.
+
+    The ordered match rules live in services/tuning.json
+    (generation.decompose.specialization_rules) and are evaluated by
+    tuning.spec_for — edit the config to retune staffing labels.
+    """
+    return tuning.spec_for(path)
 
 
 def _spec(function: str, domain: str) -> Dict[str, str]:
