@@ -4,6 +4,12 @@ tokens.txt
 
 # Worker session worktrees (isolation; transient).
 .worktrees/
+# Claude Code session worktrees (transient).
+.claude/worktrees/
+# Generated dispatch artifacts (e.g. the static issue DAG — regenerable via ./dispatch --dag).
+.claude/artifacts/
+# Stray ruflo runtime state under services/ (NOT the tracked root .claude-flow/ config).
+services/.claude-flow/
 
 # Python / tooling noise
 __pycache__/

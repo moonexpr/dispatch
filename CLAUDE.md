@@ -7,6 +7,15 @@ Read it before acting. The full design is in
 [`HANDOFF-pipeline-v0.md`](./HANDOFF-pipeline-v0.md); the spec there wins on
 any detail this summary omits.
 
+## Development mode (current — solo dev)
+
+While this repo is in solo development, **operator-directed (interactive) sessions
+do not open pull requests** — they commit (signed) and **merge directly to `main`**.
+The PR / branch-protection / `pipeline/issue-*` review flow is deferred until the repo
+leaves solo dev. This is an *operator-session* posture only; it does **not** relax the
+worker contract below — autonomous pipeline workers (`/implement-task`, `/fix-ci`,
+`/update-docs`) still **never merge and never push to `main`**. (Set 2026-06-16.)
+
 **Execution layer:** ruflo hierarchical-mesh swarm (`.claude-flow/config.yaml`,
 up to 15 agents). The coordinator picks up tasks from the ruflo memory store
 (fed by `gh-intake.sh`) and spawns engineer agents via the claude-flow MCP.
