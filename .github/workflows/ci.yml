@@ -35,7 +35,13 @@ jobs:
         run: python3 -m pip install --quiet pyyaml
 
       - name: Shellcheck scripts
-        run: shellcheck -x --severity=warning --source-path=SCRIPTDIR scripts/*.sh scripts/lib/*.sh
+        # Lint every tracked shell script under scripts/ (recursive: scripts/*.sh
+        # also matches scripts/lib/*.sh, scripts/demo/*.sh (E8), and any future
+        # sprint script dir) so new shell can't land unlinted. Driven by
+        # `git ls-files` so a not-yet-created dir never breaks the glob, and so
+        # vendor scripts outside scripts/ (.claude/helpers — the ruflo path, #16)
+        # stay out of scope.
+        run: shellcheck -x --severity=warning --source-path=SCRIPTDIR $(git ls-files 'scripts/*.sh')
 
       - name: Smoke (dry-run, offline)
         run: bash scripts/smoke.sh
