@@ -174,6 +174,42 @@ never changes stdout or GitHub state and runs under `PIPELINE_DRY_RUN=1` too
 `pipeline.sh` threads one `DISPATCH_TICK_ID` across a tick so every stage's
 artifacts share the same `<tick-id>/` directory.
 
+## Scheduling unattended ticks
+
+The recommended 1.0 prototype scheduler is a plain host **`crontab`** (Linux) or
+**`launchd`** (macOS) entry that runs `entrypoint.sh` a few times a day. Committed
+examples: [`examples/dispatch.crontab`](examples/dispatch.crontab) and
+[`examples/dispatch.launchd.plist`](examples/dispatch.launchd.plist) — edit the
+paths and repo, then install:
+
+```bash
+# Linux: 4x/day at 00:07, 06:07, 12:07, 18:07
+crontab examples/dispatch.crontab
+
+# macOS:
+cp examples/dispatch.launchd.plist ~/Library/LaunchAgents/com.dispatch.tick.plist
+launchctl load ~/Library/LaunchAgents/com.dispatch.tick.plist
+```
+
+Both examples:
+
+- set `PIPELINE_REPO` and `PIPELINE_DRY_RUN` **explicitly** — **dry-run is the
+  default**, so a tick only mutates GitHub once you deliberately set
+  `PIPELINE_DRY_RUN=0`. A copy-paste never goes live by accident.
+- redirect output to a log file (`log()` writes to stderr); the per-tick run
+  record (E1-2, `DISPATCH_RUN_RECORD`) adds a structured start/end heartbeat.
+- rely on the **in-process `flock`** the pipeline ships (E1-1,
+  `DISPATCH_LOCK_FILE`): an overlapping tick is safely serialized — it logs and
+  exits 0 without double-claiming. The crontab example adds an outer `flock -n`
+  as a belt-and-suspenders guard.
+
+**Upgrade paths** (not the 1.0 default):
+
+- **(a) OpenClaw Gateway** — adds webhook receive + operator chat I/O on top of
+  scheduling; adopt when you want operator notifications in the loop.
+- **(c) `billy.maic` VPS** — an always-on remote host for the schedule; see
+  existing issue #15 (remote deployment) rather than duplicating it here.
+
 ## Layout
 
 ```

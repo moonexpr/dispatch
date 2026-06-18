@@ -493,6 +493,34 @@ assert_not_contains "crashed tick left NO ended record (reaper signal)" "$crashr
 rm -rf "${RRD}"
 
 # ---------------------------------------------------------------------------
+section "§7.15 cron: committed scheduler examples (crontab/launchd) — doc artifacts"
+# (§7.15 per the #51 section map — Pillar 1 cron range, scheduler slot. Issue
+# #29 is docs + example artifacts only; this validates the committed text.)
+CRONTAB_EX="${ROOT}/examples/dispatch.crontab"
+LAUNCHD_EX="${ROOT}/examples/dispatch.launchd.plist"
+# (1) The example artifacts exist and reference a REAL entrypoint path.
+[[ -f "${CRONTAB_EX}" ]] && pass "examples/dispatch.crontab exists" || fail "examples/dispatch.crontab missing"
+[[ -f "${LAUNCHD_EX}" ]] && pass "examples/dispatch.launchd.plist exists" || fail "examples/dispatch.launchd.plist missing"
+[[ -f "${ROOT}/entrypoint.sh" ]] && pass "entrypoint.sh is a real path in the repo" || fail "entrypoint.sh missing (examples reference it)"
+crontab_txt="$(cat "${CRONTAB_EX}" 2>/dev/null)"
+launchd_txt="$(cat "${LAUNCHD_EX}" 2>/dev/null)"
+assert_contains "crontab example invokes entrypoint.sh" "$crontab_txt" "entrypoint.sh"
+assert_contains "launchd example invokes entrypoint.sh" "$launchd_txt" "entrypoint.sh"
+# (2) Live-run is never accidental: PIPELINE_DRY_RUN is set explicitly, and the
+#     example serializes via flock (and/or documents the in-process E1-1 lock).
+assert_contains "crontab sets PIPELINE_DRY_RUN explicitly" "$crontab_txt" "PIPELINE_DRY_RUN"
+assert_contains "crontab sets PIPELINE_REPO explicitly" "$crontab_txt" "PIPELINE_REPO"
+assert_contains "crontab serializes overlapping ticks with flock" "$crontab_txt" "flock"
+assert_contains "crontab documents the E1-1 in-process lock" "$crontab_txt" "DISPATCH_LOCK_FILE"
+assert_contains "launchd sets PIPELINE_DRY_RUN explicitly" "$launchd_txt" "PIPELINE_DRY_RUN"
+# (3) Upgrade paths are documented as such, with the #15 pointer (AC).
+assert_contains "crontab notes OpenClaw + billy.maic (#15) as upgrade paths" "$crontab_txt" "#15"
+# (4) The README references the committed examples (discoverability).
+readme_txt="$(cat "${ROOT}/README.md" 2>/dev/null)"
+assert_contains "README references the committed crontab example" "$readme_txt" "examples/dispatch.crontab"
+assert_contains "README documents dry-run as the scheduler default" "$readme_txt" "dry-run is the"
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar
