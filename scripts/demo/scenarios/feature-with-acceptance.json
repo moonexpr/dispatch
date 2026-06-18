@@ -1,0 +1,6 @@
+{
+  "base": "snapshots/demo-current.json",
+  "ops": [
+    {"op": "set-body", "number": 102, "body": "Implement a loyalty points system: earn 1 point per dollar spent; show points on the account dashboard; 100 points = a 5 dollar checkout discount; add a loyalty_points column; add GET /api/account/points and POST /api/cart/redeem-points; update the checkout flow; add tests for the earn and redeem flows.\n\nAcceptance criteria:\n- [ ] points accrue on completed orders\n- [ ] points are redeemable at checkout\n- [ ] earn and redeem paths are tested"}
+  ]
+}

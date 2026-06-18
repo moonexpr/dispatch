@@ -1,0 +1,6 @@
+{
+  "base": "snapshots/demo-current.json",
+  "ops": [
+    {"op": "set-body", "number": 104, "body": "Full CMS migration: provision a headless CMS; model all menu entities (categories, products, ingredients, allergens, pricing tiers); write a migration script to seed the CMS from the existing JSON; replace the static import with a server-side CMS API client with caching; add a webhook handler to invalidate the cache on publish; update all affected page components and tests; document the schema and publish workflow for non-technical staff. Acceptance: a non-engineer updates a hotdog price and sees it live within 60 seconds without a code deploy."}
+  ]
+}

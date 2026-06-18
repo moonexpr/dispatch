@@ -1,0 +1,7 @@
+{
+  "base": "snapshots/demo-current.json",
+  "ops": [
+    {"op": "set-title", "number": 101, "title": "Fix typo on the Chicago Dog product page heading"},
+    {"op": "set-body", "number": 101, "body": "Small typo: the Chicago Dog product page heading reads \"Chigaco Dog\". One-word rename of the heading string, no logic change. Minor tweak — should be a quick fix."}
+  ]
+}

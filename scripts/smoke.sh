@@ -769,7 +769,7 @@ gov2="$(BUDGET_ORACLE_FIXTURE="$OVER" "$PYG" "$GUARD" 2>/dev/null)"
 [[ "$gov" == "$gov2" ]] && pass "guard decision is deterministic across runs" || fail "guard nondeterministic"
 
 # ---------------------------------------------------------------------------
-section "§7.18 demo harness: snapshot + mutator + replay (offline, deterministic, drop-in)"
+section "§7.18 demo harness: snapshot + mutator + replay + scenario catalog (offline, per-route)"
 # (§7.18 per the #51 section map — Pillar 5 debug & harness range, the shared
 # snapshot/mutate/replay slot. The issue #43 body's "§7.12" predates that map,
 # which reserves §7.12–§7.15 for the cron pillar. The mutator (#44) and replay
@@ -915,6 +915,46 @@ else fail "replay not repeatable"; fi
 DEMO_ROUNDS_DIR="$RPD" bash "$RP" --reset blank-vague-body >/dev/null 2>&1
 [[ -z "$(ls -A "$RPD/blank-vague-body" 2>/dev/null)" ]] && pass "replay --reset empties the scenario rounds dir" || fail "replay --reset left artifacts"
 rm -rf "$RPD"
+
+# --- E8-4 (#46) scenario catalog: EXTENDS §7.18 (shared harness slot). Committed
+# overlays, one per classifier route. The asserted action/route is a PROPERTY of
+# the real classify.py (resolve via mutate.py, classify the target) — honored
+# against the offline classifier's hint-token rules, not hardcoded.
+SCAT="${ROOT}/scripts/demo/scenarios"
+MUTC="${ROOT}/scripts/demo/mutate.py"
+CLSC="${ROOT}/services/classifier/classify.py"
+PYC="${PYTHON_BIN:-python3}"
+# Resolve a scenario, classify a target issue, echo "action route".
+classify_target() {  # $1 scenario file, $2 issue number
+  local fx it t b
+  fx="$("$PYC" "$MUTC" --scenario "$1" --base "$SNAP" 2>/dev/null)"
+  it="$(printf '%s' "$fx" | jq -c ".[] | select(.number==$2)")"
+  t="$(printf '%s' "$it" | jq -r '.title')"; b="$(printf '%s' "$it" | jq -r '.body // ""')"
+  CLASSIFIER_OFFLINE=1 "$PYC" "$CLSC" --title "$t" --body "$b" | jq -r '"\(.action) \(.route)"'
+}
+# Every catalog overlay is valid JSON.
+catalog_bad=0
+for f in "$SCAT"/*.json; do jq -e '.' "$f" >/dev/null 2>&1 || catalog_bad=1; done
+[[ $catalog_bad -eq 0 ]] && pass "all catalog scenarios are valid JSON" || fail "a catalog scenario is invalid JSON"
+# Per-route assertions (each route is a property of the real classifier).
+assert_contains "bug-fix routes implement/gen-local"           "$(classify_target "$SCAT/bug-fix.json" 101)"                 "implement gen-local"
+assert_contains "feature routes implement/gen-default"         "$(classify_target "$SCAT/feature-with-acceptance.json" 102)" "implement gen-default"
+assert_contains "large-refactor routes implement/gen-frontier" "$(classify_target "$SCAT/large-refactor.json" 104)"          "implement gen-frontier"
+assert_contains "out-of-scope routes wont-do"                  "$(classify_target "$SCAT/out-of-scope-wont-do.json" 105)"    "wont-do"
+# Vague item defers BELOW threshold. classify.py returns implement at low
+# confidence; ./dispatch prints 'skip (conf … < 0.55)' (NOT 'needs-human', a
+# dispatch.sh-only label) — assert the confidence is sub-threshold.
+vfxr="$("$PYC" "$MUTC" --scenario "$SCAT/vague-needs-human.json" --base "$SNAP" 2>/dev/null)"
+vit="$(printf '%s' "$vfxr" | jq -c '.[] | select(.number==103)')"
+vt="$(printf '%s' "$vit" | jq -r '.title')"; vb="$(printf '%s' "$vit" | jq -r '.body // ""')"
+if CLASSIFIER_OFFLINE=1 "$PYC" "$CLSC" --title "$vt" --body "$vb" | jq -e ".confidence < ${PIPELINE_CONFIDENCE_THRESHOLD:-0.55}" >/dev/null 2>&1; then
+  pass "vague scenario defers below PIPELINE_CONFIDENCE_THRESHOLD (operator/needs-human path)"
+else fail "vague scenario not below threshold"; fi
+# Catalog README documents each scenario.
+RMEC="${ROOT}/scripts/demo/README.md"
+if [[ -f "$RMEC" ]] && grep -q 'bug-fix.json' "$RMEC" && grep -q 'out-of-scope-wont-do.json' "$RMEC"; then
+  pass "scripts/demo/README.md carries the scenario catalog table"
+else fail "demo README catalog table missing"; fi
 
 # ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the

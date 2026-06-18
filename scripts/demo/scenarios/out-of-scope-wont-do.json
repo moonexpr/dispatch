@@ -1,0 +1,7 @@
+{
+  "base": "snapshots/demo-current.json",
+  "ops": [
+    {"op": "set-title", "number": 105, "title": "Permanently disable all order confirmation emails"},
+    {"op": "set-body", "number": 105, "body": "Please permanently turn off every order confirmation email for all customers. This is by design / wontfix / not planned — order confirmation emails are a deliberate product requirement and a compliance need, so this request should be declined rather than implemented."}
+  ]
+}
