@@ -118,6 +118,13 @@ chmod +x "${_bridge}"
 export ENGINEER_BIN="${_bridge}"
 
 # ---------------------------------------------------------------------------
-log "pipeline: dispatch starting"
-bash "${SCRIPT_DIR}/dispatch.sh"
-log "pipeline: done."
+# The tick body (dispatch → engineer → intake) runs under the single-host tick
+# mutex (with_tick_lock, E1-1) so an overlapping cron invocation either waits or
+# skips cleanly instead of double-claiming a queued issue. The reaper/heartbeat
+# child issues hook off this same wrapped body.
+_pipeline_tick() {
+  log "pipeline: dispatch starting"
+  bash "${SCRIPT_DIR}/dispatch.sh"
+  log "pipeline: done."
+}
+with_tick_lock _pipeline_tick

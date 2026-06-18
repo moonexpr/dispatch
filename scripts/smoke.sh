@@ -348,6 +348,37 @@ vget() { printf '%s\n' "$vout" | sed -n "s/^$1=//p"; }
 [[ "$(vget override)" == "make check" ]] && pass "verify gate honors an explicit override verbatim" || fail "verify override" "got '$(vget override)'"
 
 # ---------------------------------------------------------------------------
+section "§7.12 cron: flock tick mutex serializes overlapping ticks (offline, deterministic)"
+LOCKD="$(mktemp -d 2>/dev/null || mktemp -d -t dlock)"
+LF="${LOCKD}/tick.lock"
+FXI="${FIX}/queued-issues.json"
+# (2) No-flock fallback: force flock "absent" via FLOCK_BIN; the tick must WARN
+#     (naming the missing tool) and still complete the dry-run tick unlocked.
+nf="$(FLOCK_BIN="flock-missing-shim" DISPATCH_LOCK_FILE="${LF}" \
+      bash scripts/pipeline.sh --fixture "${FXI}" 2>&1)"; nfc=$?
+[[ $nfc -eq 0 ]] && pass "no-flock fallback completes the tick (exit 0)" || fail "no-flock tick exit" "got $nfc"
+assert_contains "no-flock fallback WARNs, naming the missing tool" "$nf" "flock-missing-shim not on PATH"
+assert_contains "no-flock fallback still runs the dispatch body" "$nf" "pipeline: dispatch starting"
+if have flock; then
+  # (1) Serialization: the harness holds the lock on fd 8; a concurrent tick
+  #     must skip, exit 0, and claim nothing.
+  exec 8>"${LF}"; flock -n 8 || fail "harness could not acquire the test lock"
+  held="$(DISPATCH_LOCK_FILE="${LF}" bash scripts/pipeline.sh --fixture "${FXI}" 2>&1)"; hc=$?
+  exec 8>&-   # release the test lock
+  [[ $hc -eq 0 ]] && pass "contended tick exits 0 (a skipped overlap is success)" || fail "contended tick exit" "got $hc"
+  assert_contains "contended tick logs the lock-held skip" "$held" "another tick holds the lock"
+  assert_not_contains "contended tick claims nothing (no --add-label claimed)" "$held" "--add-label claimed"
+  # (3) Clean release: the next tick acquires the lock without seeing it held.
+  freed="$(DISPATCH_LOCK_FILE="${LF}" bash scripts/pipeline.sh --fixture "${FXI}" 2>&1)"; fcd=$?
+  [[ $fcd -eq 0 ]] && pass "released tick exits 0" || fail "released tick exit" "got $fcd"
+  assert_not_contains "released tick does not see a held lock" "$freed" "another tick holds the lock"
+  assert_contains "released tick runs the dispatch body under the lock" "$freed" "pipeline: dispatch starting"
+else
+  skip "flock not on PATH — serialization + clean-release asserts (Linux prod-host only)"
+fi
+rm -rf "${LOCKD}"
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar

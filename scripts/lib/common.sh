@@ -53,6 +53,16 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 : "${GH_BIN:=gh}"
 : "${CLAUDE_BIN:=claude}"
 : "${PYTHON_BIN:=python3}"
+: "${FLOCK_BIN:=flock}"                       # tick mutex; absent on macOS dev hosts
+
+# --------------------------- Tick concurrency lock -------------------------
+# Single-host mutex around a whole tick so overlapping cron invocations can't
+# both claim the same queued issue (E1-1). Repo-scoped so distinct target
+# repos don't block each other. DISPATCH_LOCK_WAIT=0 (default) = non-blocking:
+# a second concurrent tick skips and exits 0; a positive value waits that many
+# seconds for the lock (passed to flock -w).
+: "${DISPATCH_LOCK_FILE:=${TMPDIR:-/tmp}/dispatch-${PIPELINE_REPO//\//-}.lock}"
+: "${DISPATCH_LOCK_WAIT:=0}"
 
 # How `claude` workflow args are passed. The CURRENT CLI has no `--args` flag
 # (verified against code.claude.com/docs); the documented headless form embeds
@@ -72,8 +82,9 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 : "${CLASSIFIER_OFFLINE:=}"        # 1 => deterministic offline classification
 
 export PIPELINE_DRY_RUN PIPELINE_REPO PIPELINE_CONFIDENCE_THRESHOLD \
-       PIPELINE_CONCURRENCY GH_BIN CLAUDE_BIN PYTHON_BIN \
-       CLAUDE_ARGS_MODE PIPELINE_WORKTREE_ROOT
+       PIPELINE_CONCURRENCY GH_BIN CLAUDE_BIN PYTHON_BIN FLOCK_BIN \
+       CLAUDE_ARGS_MODE PIPELINE_WORKTREE_ROOT \
+       DISPATCH_LOCK_FILE DISPATCH_LOCK_WAIT
 
 # ------------------------------- Logging -----------------------------------
 _ts() { date -u +%H:%M:%SZ 2>/dev/null || echo "--:--:--Z"; }
@@ -102,6 +113,43 @@ require_tool() {
 
 # have_tool: soft check.
 have_tool() { command -v "$1" >/dev/null 2>&1; }
+
+# with_tick_lock CMD [ARGS...]: run CMD under an exclusive single-host flock so
+# overlapping ticks can't double-claim a queued issue (E1-1). The lock is held
+# for CMD's entire lifetime and released by fd-close when the subshell exits —
+# even on a `set -e` failure inside CMD — so no manual trap can be skipped.
+#
+# Contention is governed by DISPATCH_LOCK_WAIT: 0 (default) is non-blocking — a
+# second concurrent tick logs and exits 0 (a skipped overlap is success, not a
+# failure cron should alarm on); a positive N waits up to N seconds (flock -w N).
+# If flock is absent (e.g. a macOS dev host; prod cron is Linux), WARN naming
+# the missing tool and run CMD UNLOCKED rather than aborting the tick.
+with_tick_lock() {
+  local lock="${DISPATCH_LOCK_FILE}" waitsec="${DISPATCH_LOCK_WAIT:-0}"
+  if ! have_tool "${FLOCK_BIN}"; then
+    warn "${FLOCK_BIN} not on PATH — running tick UNLOCKED (overlapping ticks not serialized)"
+    "$@"
+    return $?
+  fi
+  # Create the lockfile lazily; if its directory is unwritable, degrade to
+  # unlocked rather than failing the tick.
+  if ! ( umask 077; : >>"${lock}" ) 2>/dev/null; then
+    warn "cannot open lock file ${lock} — running tick UNLOCKED"
+    "$@"
+    return $?
+  fi
+  local fargs=(-n)
+  [[ "${waitsec}" =~ ^[1-9][0-9]*$ ]] && fargs=(-w "${waitsec}")
+  # fd 9 is a fresh open-file-description per subshell; flock on it conflicts
+  # with any other tick's lock and is dropped when the subshell exits.
+  (
+    if ! "${FLOCK_BIN}" "${fargs[@]}" 9; then
+      log "pipeline: another tick holds the lock; exiting 0"
+      exit 0
+    fi
+    "$@"
+  ) 9>>"${lock}"
+}
 
 # ------------------------- Engine call wrappers ----------------------------
 # gh_repo_args: set the global REPO_ARGS array to `--repo owner/repo` (or empty)
