@@ -1,0 +1,8 @@
+{
+  "captured_at": "2026-06-18T00:00:00Z",
+  "repo": "ReclaimByDesign/demo-repository",
+  "head_sha": "",
+  "gh_login": "",
+  "fields": "number,title,body,labels,assignees,url,state",
+  "note": "hand-built sample from scripts/fixtures/queued-issues.json shapes; canonical capture is post-E0-1 (#47) live seeding"
+}

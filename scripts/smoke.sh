@@ -682,6 +682,58 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "§7.18 demo harness: snapshot capture (offline, drop-in fidelity)"
+# (§7.18 per the #51 section map — Pillar 5 debug & harness range, the shared
+# snapshot/mutate/replay slot. The issue #43 body's "§7.12" predates that map,
+# which reserves §7.12–§7.15 for the cron pillar. The mutator (#44) and replay
+# (#45) EXTEND this same §7.18 section rather than claiming new numbers — the
+# harness pillar has one slot and the duplicate-id guard collapses any 7.18.x.)
+# All assertions run OFFLINE against the committed sample snapshots — no live gh.
+SNAP="${ROOT}/scripts/demo/snapshots/demo-current.json"
+EMPTY="${ROOT}/scripts/demo/snapshots/demo-empty.json"
+SNAPSH="${ROOT}/scripts/demo/snapshot.sh"
+# Schema: superset fields present; labels are {name} objects (dispatch+intake shape).
+if jq -e 'type=="array" and all(.[]; has("number") and has("title") and has("body") and has("labels") and has("assignees") and has("url"))' "$SNAP" >/dev/null 2>&1; then
+  pass "snapshot carries the dual-consumer superset (number,title,body,labels,assignees,url)"
+else
+  fail "snapshot missing superset fields"
+fi
+if jq -e 'all(.[]; (.labels|length==0) or (.labels[0]|has("name")))' "$SNAP" >/dev/null 2>&1; then
+  pass "labels captured as {name} objects (not flattened)"
+else
+  fail "labels not object-shaped — dispatch/intake fidelity broken"
+fi
+# Drop-in for ./dispatch --fixture (dispatch.py shares intake's loader).
+if PIPELINE_DRY_RUN=1 ./dispatch --fixture "$SNAP" >/dev/null 2>&1; then
+  pass "snapshot is a drop-in PIPELINE_FIXTURE_ISSUES (dispatch exit 0)"
+else
+  fail "dispatch rejected snapshot"
+fi
+# Drop-in for intake.py INTAKE_FIXTURE_REPO (object labels flatten via lbl['name']).
+if INTAKE_FIXTURE_REPO="$SNAP" "${PYTHON_BIN:-python3}" "${ROOT}/services/intake/intake.py" --repo ReclaimByDesign/demo-repository 2>/dev/null | jq -e 'length>=1' >/dev/null; then
+  pass "snapshot is a drop-in INTAKE_FIXTURE_REPO (intake emits items)"
+else
+  fail "intake rejected snapshot"
+fi
+# Provenance sidecar shape.
+PROV="${ROOT}/scripts/demo/snapshots/demo-current.provenance.json"
+if jq -e 'has("captured_at") and has("head_sha") and has("gh_login") and has("fields")' "$PROV" >/dev/null 2>&1; then
+  pass "provenance sidecar carries timestamp+sha+login+fields"
+else
+  fail "provenance sidecar incomplete"
+fi
+# Empty-queue snapshot replays cleanly: ./dispatch on an empty array exits 3
+# ("dispatch: queue is empty", dispatch.py:505-507) — assert 3, not 0.
+out="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$EMPTY" 2>&1)"; ec=$?
+[[ $ec -eq 3 ]] && assert_contains "empty snapshot reports empty queue" "$out" "queue is empty" || fail "empty snapshot exit" "got $ec"
+# Least-privilege: snapshot.sh never calls a mutating gh subcommand.
+if grep -nE 'issue (create|edit|comment|delete)|label create|pr (create|merge|comment)' "$SNAPSH" >/dev/null 2>&1; then
+  fail "snapshot.sh contains a mutating gh call"
+else
+  pass "snapshot.sh is read-only (no mutating gh subcommand)"
+fi
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar

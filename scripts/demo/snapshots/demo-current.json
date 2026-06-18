@@ -1,0 +1,67 @@
+[
+  {
+    "number": 101,
+    "title": "Fix broken 'Add to Cart' button on the Chicago Dog product page",
+    "body": "The 'Add to Cart' button on /menu/chicago-dog returns a 422 error when clicked. The button works fine on every other product page. Network tab shows the POST to /api/cart is sending `product_id: null` instead of the actual id.\n\nSteps to reproduce:\n1. Go to /menu/chicago-dog\n2. Click 'Add to Cart'\n3. See 422 in the console\n\nExpected: item added to cart. Actual: 422 Unprocessable Entity.",
+    "labels": [
+      {
+        "name": "queued"
+      }
+    ],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/101",
+    "state": "OPEN"
+  },
+  {
+    "number": 102,
+    "title": "Add a loyalty points system for repeat customers",
+    "body": "We want to reward customers who order frequently. Implement a loyalty points system:\n- Earn 1 point per $1 spent\n- Points are visible on the user's account dashboard (/account/points)\n- 100 points = $5 discount, redeemable at checkout\n- Points are stored in the `users` table (new `loyalty_points` integer column)\n- Add an endpoint GET /api/account/points and POST /api/cart/redeem-points\n- Update the checkout flow to show available points and allow redemption\n- Add tests for the earn and redeem flows",
+    "labels": [
+      {
+        "name": "queued"
+      }
+    ],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/102",
+    "state": "OPEN"
+  },
+  {
+    "number": 103,
+    "title": "The site feels slow I think?",
+    "body": "Hey, not sure if it's just me but the website seems kind of slow sometimes. Maybe the images? Or the server? Hard to say. Could you look into it?",
+    "labels": [
+      {
+        "name": "queued"
+      }
+    ],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/103",
+    "state": "OPEN"
+  },
+  {
+    "number": 104,
+    "title": "Migrate the menu catalog from hardcoded JSON to a CMS-backed API",
+    "body": "Currently the menu items in /data/menu.json are hardcoded and require a deploy to update. We need a full CMS migration:\n\n**Scope:**\n- Provision a headless CMS (Contentful or Sanity — TBD, evaluate both)\n- Model all menu entities: categories, products, ingredients, allergens, pricing tiers\n- Write a migration script to seed the CMS from the existing JSON\n- Replace the static import with a server-side CMS API client (with ISR/cache)\n- Add a webhook handler so CMS publishes invalidate the Next.js cache instantly\n- Update all affected page components and tests\n- Document the CMS schema and publish workflow for non-technical staff\n\n**Acceptance:** a non-engineer can update a hotdog price and see it live within 60 seconds without a code deploy.",
+    "labels": [
+      {
+        "name": "queued"
+      }
+    ],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/104",
+    "state": "OPEN"
+  },
+  {
+    "number": 105,
+    "title": "Add a pizza section to the menu",
+    "body": "My cousin thinks we should sell pizza too. Can we add a pizza section next to the hotdogs?",
+    "labels": [
+      {
+        "name": "queued"
+      }
+    ],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/105",
+    "state": "OPEN"
+  }
+]
