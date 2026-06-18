@@ -640,6 +640,44 @@ else fail "a ledger line not marked dry_run under a dry-run tick"; fi
 rm -rf "${LEDGERD}"
 
 # ---------------------------------------------------------------------------
+section "§7.20 monitoring: operator digest renderer (offline, deterministic)"
+# (§7.20 per the #51 section map — Pillar 4 monitoring range, digest-renderer
+# slot; the issue #37 body's "§7.17" predates that map, which reserves §7.17 for
+# the debug stage-gating slot. run-ledger = §7.19.)
+REP="${ROOT}/services/reports/report.py"
+RLF="${ROOT}/scripts/fixtures/run-ledger.jsonl"
+PYR="${PYTHON_BIN:-python3}"
+dig="$("$PYR" "$REP" --ledger "$RLF" --format markdown 2>/dev/null)"; drc=$?
+[[ $drc -eq 0 ]] && pass "digest renders (exit 0)" || fail "digest exit" "got $drc"
+# Distinct issue numbers from the fixture appear.
+if grep -q '#101' <<<"$dig" && grep -q '#102' <<<"$dig" && grep -q '#103' <<<"$dig"; then
+  pass "digest lists the distinct issue numbers (101, 102, 103)"
+else fail "digest missing issue numbers"; fi
+# A by-current-stage summary line.
+assert_contains "digest carries a by-current-stage summary" "$dig" "by current stage"
+# Per-issue token total is the EXACT hand-computed sum (#101: 18000 + 6000 = 24000).
+if grep -qE '#101 .*24000' <<<"$dig"; then
+  pass "per-issue token total is the exact sum (#101 -> 24000)"
+else fail "digest token total wrong for #101"; fi
+# Determinism: same ledger -> byte-identical digest.
+dig2="$("$PYR" "$REP" --ledger "$RLF" --format markdown 2>/dev/null)"
+[[ "$dig" == "$dig2" ]] && pass "digest is byte-identical across runs" || fail "digest nondeterministic"
+# Empty ledger -> 'no runs recorded', exit 0 (does not crash).
+empL="$(mktemp)"; eo="$("$PYR" "$REP" --ledger "$empL" 2>&1)"; erc=$?
+[[ $erc -eq 0 ]] && assert_contains "empty ledger renders 'no runs recorded'" "$eo" "no runs recorded" || fail "empty digest exit" "got $erc"
+rm -f "$empL"
+# --format text also exits 0 and carries the issue numbers.
+dtxt="$("$PYR" "$REP" --ledger "$RLF" --format text 2>/dev/null)"
+if grep -q '#101' <<<"$dtxt" && grep -q '#103' <<<"$dtxt"; then pass "--format text renders the issues"; else fail "--format text wrong"; fi
+# --comment prints the would-be GitHub comment under dry-run and never calls gh.
+dcm="$("$PYR" "$REP" --ledger "$RLF" --comment 2>/dev/null)"
+assert_contains "--comment prints a dry-run GitHub-comment stub" "$dcm" "would post"
+# Read-only / offline: report.py references no gh/claude/subprocess seam.
+if grep -nE 'subprocess|gh_mutate|claude_invoke|os\.system|gh issue' "$REP" >/dev/null 2>&1; then
+  fail "report.py references a gh/exec seam"
+else pass "report.py is read-only/offline (no gh/claude/subprocess)"; fi
+
+# ---------------------------------------------------------------------------
 section "§7.21 budget: claude-monitor usage oracle (offline fixture, deterministic)"
 # (§7.21 per the #51 section map — Pillar 3 budget range, claude-monitor slot;
 # the issue #36/#38 body's "§7.17" predates that map.) Exercised entirely via the
