@@ -722,6 +722,53 @@ if grep -nE 'subprocess|import os.*system|claude_invoke|gh_mutate| gh ' "$RECON"
 else pass "reconcile.py is pure/offline (no gh/claude/subprocess)"; fi
 
 # ---------------------------------------------------------------------------
+section "§7.23 budget: pre-flight soft-cap guard throttles the tick (offline)"
+# (§7.23 per the #51 section map — Pillar 3 budget range, soft-cap slot; the
+# issue #40 body's "§7.19" predates that map. claude-monitor = §7.21, invoice
+# reconcile = §7.22.)
+GUARD="${ROOT}/services/budget/guard.py"
+OVER="${ROOT}/services/budget/fixtures/window-state.over-cap.json"
+UNDER="${ROOT}/services/budget/fixtures/window-state.under-cap.json"
+FXQ_SC="${ROOT}/scripts/fixtures/queued-issues.json"
+PYG="${PYTHON_BIN:-python3}"
+# (1) Guard decision: over-cap -> throttle true; under-cap -> throttle false.
+gov="$(BUDGET_ORACLE_FIXTURE="$OVER" "$PYG" "$GUARD" 2>/dev/null)"
+if printf '%s' "$gov" | jq -e '.throttle==true and (.fraction>=.soft_cap)' >/dev/null 2>&1; then
+  pass "over-cap window -> throttle: true (fraction >= soft_cap)"
+else fail "over-cap did not throttle" "$gov"; fi
+gun="$(BUDGET_ORACLE_FIXTURE="$UNDER" "$PYG" "$GUARD" 2>/dev/null)"
+if printf '%s' "$gun" | jq -e '.throttle==false and (.fraction<.soft_cap)' >/dev/null 2>&1; then
+  pass "under-cap window -> throttle: false (fraction < soft_cap)"
+else fail "under-cap throttled unexpectedly" "$gun"; fi
+# (2) Fail-open: no fixture + no monitor -> throttle false (default path unchanged).
+gno="$(env -u BUDGET_ORACLE_FIXTURE CLAUDE_MONITOR_BIN=/nonexistent-monitor "$PYG" "$GUARD" 2>/dev/null)"
+if printf '%s' "$gno" | jq -e '.throttle==false' >/dev/null 2>&1; then
+  pass "no window data -> fail-open throttle: false (a missing oracle never blocks the tick)"
+else fail "guard did not fail open without oracle data" "$gno"; fi
+# (3) Dispatch pre-flight: over-cap + operator --live (DRY_RUN=0) -> forced
+#     dry-run, NO claim. The guard runs before any gh, so PIPELINE_DRY_RUN=0 is
+#     safe here — nothing mutates.
+SCLEDG="${_smoke_rrdir}/throttle-ledger.jsonl"; rm -f "$SCLEDG"
+tov="$(BUDGET_ORACLE_FIXTURE="$OVER" PIPELINE_FIXTURE_ISSUES="$FXQ_SC" PIPELINE_DRY_RUN=0 \
+       DISPATCH_LEDGER_FILE="$SCLEDG" bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+assert_contains "throttle: dispatch logs the soft-cap throttle (fraction + soft_cap)" "$tov" "soft-cap THROTTLE"
+assert_contains "throttle: forces PIPELINE_DRY_RUN=1 even when operator passed live" "$tov" "forcing PIPELINE_DRY_RUN=1"
+assert_not_contains "throttle: no issue is claimed (no queued->claimed transition)" "$tov" "-> claimed"
+# (4) The throttle event is recorded to the run-ledger (event/fraction/soft_cap).
+if [[ -s "$SCLEDG" ]] && jq -e 'select(.event=="throttled") | has("fraction") and has("soft_cap")' "$SCLEDG" >/dev/null 2>&1; then
+  pass "throttle event recorded to the run-ledger (event=throttled, fraction, soft_cap)"
+else fail "throttle ledger line missing/incomplete"; fi
+rm -f "$SCLEDG"
+# (5) Under-cap: dispatch proceeds and claims as today (reuse the §7.3 dry-run idiom).
+tun="$(BUDGET_ORACLE_FIXTURE="$UNDER" PIPELINE_FIXTURE_ISSUES="$FXQ_SC" PIPELINE_DRY_RUN=1 \
+       bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+assert_contains "no-throttle: under-cap tick claims normally (queued->claimed)" "$tun" "-> claimed"
+assert_not_contains "no-throttle: under-cap tick is not throttled" "$tun" "THROTTLE"
+# (6) Determinism: the guard decision is byte-identical across runs.
+gov2="$(BUDGET_ORACLE_FIXTURE="$OVER" "$PYG" "$GUARD" 2>/dev/null)"
+[[ "$gov" == "$gov2" ]] && pass "guard decision is deterministic across runs" || fail "guard nondeterministic"
+
+# ---------------------------------------------------------------------------
 section "§7.18 demo harness: snapshot + scenario mutator (offline, deterministic, drop-in)"
 # (§7.18 per the #51 section map — Pillar 5 debug & harness range, the shared
 # snapshot/mutate/replay slot. The issue #43 body's "§7.12" predates that map,

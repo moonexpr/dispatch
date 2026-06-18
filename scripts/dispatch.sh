@@ -132,7 +132,37 @@ claim_issue() {
   engineer_dispatch "${args}"
 }
 
+# --- pre-flight soft-cap guard (E5-3/#40) ----------------------------------
+# Consult the E5-1 budget oracle BEFORE claiming, but only when budget data is
+# actually available: a fixture (tests, BUDGET_ORACLE_FIXTURE) or a live
+# claude-monitor (prod). With neither there is nothing to throttle on, so the
+# tick proceeds exactly as today (no behaviour change). When the operator's 5h
+# usage window is at/over the soft cap (budget.window.soft_cap_fraction), force
+# PIPELINE_DRY_RUN=1 and skip claiming for this tick — logged here and recorded
+# to the run-ledger via `guard.py --record`. This is the pre-flight boundary
+# only (D2): a running engineer is never hard-stopped. Returns 0 to throttle.
+budget_preflight_throttles() {
+  [[ -n "${BUDGET_ORACLE_FIXTURE:-}" ]] || have_tool "${CLAUDE_MONITOR_BIN:-claude-monitor}" || return 1
+  local decision throttle fraction soft_cap plan
+  decision="$("${PYTHON_BIN}" "${PIPELINE_ROOT}/services/budget/guard.py" --record 2>/dev/null)" || return 1
+  throttle="$(printf '%s' "${decision}" | jq -r '.throttle // false' 2>/dev/null)" || return 1
+  [[ "${throttle}" == "true" ]] || return 1
+  fraction="$(printf '%s' "${decision}" | jq -r '.fraction')"
+  soft_cap="$(printf '%s' "${decision}" | jq -r '.soft_cap')"
+  plan="$(printf '%s' "${decision}" | jq -r '.plan')"
+  export PIPELINE_DRY_RUN=1
+  log "dispatch: budget soft-cap THROTTLE (fraction=${fraction} >= soft_cap=${soft_cap}, plan=${plan}) — forcing PIPELINE_DRY_RUN=1, skipping claim this tick"
+  return 0
+}
+
 main() {
+  # Pre-flight soft-cap guard (E5-3/#40): throttle to dry-run + skip the claim
+  # when the usage window is at/over the operator's soft cap. Sits before any
+  # claim; never aborts a job already past claim.
+  if budget_preflight_throttles; then
+    log "dispatch: throttled (soft-cap) — no issue claimed this tick."
+    return 0
+  fi
   local issues claimed concurrency
   issues="$(load_queued_issues)"
   claimed="$(count_claimed)"
