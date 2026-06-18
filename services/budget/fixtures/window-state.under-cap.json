@@ -1,0 +1,7 @@
+{
+  "_doc": "Offline window-state substitute for the budget oracle (E5-1 / #38). Under-cap case: 40000 of an 88000-token (Max5) 5h rolling window used -> fraction 0.4545. Set BUDGET_ORACLE_FIXTURE to this path so the oracle never reads ~/.claude or invokes claude-monitor in smoke. Reused by E5-3's over-cap variant.",
+  "plan": "max5",
+  "limit_tokens": 88000,
+  "used_tokens": 40000,
+  "window_start": "2026-06-18T15:00:00Z"
+}

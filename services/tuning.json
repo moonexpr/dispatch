@@ -116,7 +116,14 @@
       "plan_tier": "max20",
       "window_token_limit": 220000,
       "soft_cap_fraction": 0.80
-    }
+    },
+    "plan_limits": {
+      "_doc": "Canonical per-5h-window token caps by plan tier (D2). The oracle (E5-1/#38) resolves limit_tokens from window.window_token_limit when set, else from this table; 'custom' resolves from custom_limit_tokens (or claude-monitor's P90).",
+      "pro": 44000,
+      "max5": 88000,
+      "max20": 220000
+    },
+    "custom_limit_tokens": 0
   },
 
   "recovery": {

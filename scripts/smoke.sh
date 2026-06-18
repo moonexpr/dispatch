@@ -640,6 +640,48 @@ else fail "a ledger line not marked dry_run under a dry-run tick"; fi
 rm -rf "${LEDGERD}"
 
 # ---------------------------------------------------------------------------
+section "§7.21 budget: claude-monitor usage oracle (offline fixture, deterministic)"
+# (§7.21 per the #51 section map — Pillar 3 budget range, claude-monitor slot;
+# the issue #36/#38 body's "§7.17" predates that map.) Exercised entirely via the
+# committed offline fixture — never reads ~/.claude, never invokes claude-monitor.
+ORACLE="${ROOT}/services/budget/oracle.py"
+OFX="${ROOT}/services/budget/fixtures/window-state.under-cap.json"
+[[ -f "$OFX" ]] && pass "window-state.under-cap.json fixture exists" || fail "budget oracle fixture missing"
+ostate="$(BUDGET_ORACLE_FIXTURE="$OFX" python3 "$ORACLE" 2>/dev/null)"; orc=$?
+[[ $orc -eq 0 ]] && pass "oracle exits 0 in fixture mode" || fail "oracle exit" "got $orc"
+# (1) The normalized record carries every required key, sourced from the fixture.
+if jq -e '.source=="fixture" and has("plan") and has("limit_tokens") and has("used_tokens") and has("fraction") and has("window_start")' <<<"$ostate" >/dev/null 2>&1; then
+  pass "window_state has {plan,limit_tokens,used_tokens,fraction,window_start,source==fixture}"
+else
+  fail "window_state record missing keys / wrong source" "$ostate"
+fi
+# (2) fraction == used/limit (rounded to 4dp): 40000/88000 -> 0.4545.
+ofrac="$(jq -r '.fraction' <<<"$ostate")"
+oexp="$(python3 -c "import json,sys; d=json.load(open('$OFX')); print(round(d['used_tokens']/d['limit_tokens'],4))")"
+[[ "$ofrac" == "$oexp" ]] && pass "fraction == used/limit rounded (${ofrac})" || fail "fraction wrong" "got $ofrac want $oexp"
+# (3) Deterministic: same fixture in -> byte-identical stdout out.
+ostate2="$(BUDGET_ORACLE_FIXTURE="$OFX" python3 "$ORACLE" 2>/dev/null)"
+[[ "$ostate" == "$ostate2" ]] && pass "oracle is deterministic across runs (byte-identical)" || fail "oracle nondeterministic"
+# (4) Offline purity: fixture mode does not read the real session logs — the run
+#     is byte-identical with HOME pointed at an empty temp dir.
+OEMPTY="$(mktemp -d 2>/dev/null || mktemp -d -t orahome)"
+ostate3="$(HOME="$OEMPTY" BUDGET_ORACLE_FIXTURE="$OFX" python3 "$ORACLE" 2>/dev/null)"
+[[ "$ostate" == "$ostate3" ]] && pass "fixture mode is HOME-independent (no ~/.claude read)" || fail "oracle reads HOME in fixture mode"
+rm -rf "$OEMPTY"
+# (5) Live path is not exercised in CI — SKIP when claude-monitor is absent.
+if command -v claude-monitor >/dev/null 2>&1; then
+  pass "claude-monitor present (live path available)"
+else
+  skip "claude-monitor not installed — live oracle path not exercised (fixture path covered above)"
+fi
+# (6) The tuning surface carries the budget block the oracle reads.
+if jq -e '.budget.window.plan_tier and .budget.plan_limits' "${ROOT}/services/tuning.json" >/dev/null 2>&1; then
+  pass "services/tuning.json budget block carries plan_tier + plan_limits"
+else
+  fail "tuning.json budget block missing plan_tier/plan_limits"
+fi
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar

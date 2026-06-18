@@ -119,6 +119,18 @@ DEFAULTS: Dict[str, Any] = {
             "box_width": 70,
         },
     },
+    # Budget oracle / soft-cap config (Pillar 3). The committed tuning.json holds
+    # the operator-decided values (#48 via #68); these are the safe fallbacks so a
+    # missing budget block still deep-merges to a usable shape.
+    "budget": {
+        "window": {
+            "plan_tier": "max20",
+            "window_token_limit": 220000,
+            "soft_cap_fraction": 0.80,
+        },
+        "plan_limits": {"pro": 44000, "max5": 88000, "max20": 220000},
+        "custom_limit_tokens": 0,
+    },
 }
 
 
@@ -180,6 +192,17 @@ SPEC_RULES: List[Dict[str, Any]] = list(_GEN["decompose"]["specialization_rules"
 RES_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["resources"].items()}
 ROUTE_ALIAS: Dict[str, str] = dict(_GEN["workorder"]["route_alias"])
 BOX_W: int = int(_GEN["workorder"]["box_width"])
+
+# budget (Pillar 3 oracle / soft-cap) — exposed the same way as the above.
+# NOTE: deliberately NOT named *_TOKEN(S) — these are token-count limits, not
+# secrets, and the smoke §7.5 secret-scan keys off a *_TOKEN/_KEY/_SECRET regex.
+_BUD = _CFG.get("budget", {})
+_BUD_WINDOW = _BUD.get("window", {})
+BUDGET_PLAN_TIER: str = str(_BUD_WINDOW.get("plan_tier", "max20"))
+BUDGET_WINDOW_LIMIT: int = int(_BUD_WINDOW.get("window_token_limit") or 0)
+BUDGET_SOFT_CAP_FRACTION: float = float(_BUD_WINDOW.get("soft_cap_fraction", 0.80))
+BUDGET_PLAN_LIMITS: Dict[str, int] = {k: int(v) for k, v in (_BUD.get("plan_limits") or {}).items()}
+BUDGET_CUSTOM_LIMIT: int = int(_BUD.get("custom_limit_tokens") or 0)
 
 
 # --------------------------------------------------------------------------
