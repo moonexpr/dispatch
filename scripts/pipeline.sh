@@ -135,8 +135,22 @@ export ENGINEER_BIN="${_bridge}"
 # skips cleanly instead of double-claiming a queued issue. The reaper/heartbeat
 # child issues hook off this same wrapped body.
 _pipeline_tick() {
+  # Heartbeat seam (E1-2): emit a `started` record before the dispatch body and
+  # an `ended` record after it, both INSIDE the E1-1 lock so the record reflects
+  # exactly one serialized tick. dispatch.sh appends the issues it claims to the
+  # tick-scoped sink that tick_record_start initialised, so tick_record_end can
+  # name them without re-querying GitHub. Records are local-file only (no gh).
+  tick_record_start
+  # Test seam (never set in production): simulate a tick that crashes right after
+  # starting, so it leaves a `started` record with NO `ended` — exactly the
+  # stuck-tick signal the E1-3 reaper and E4 ledger key off.
+  [[ -n "${DISPATCH_CRASH_AFTER_START_TEST:-}" ]] && \
+    die "injected post-start crash (DISPATCH_CRASH_AFTER_START_TEST test seam)"
   log "pipeline: dispatch starting"
-  bash "${SCRIPT_DIR}/dispatch.sh"
+  local _rc=0
+  bash "${SCRIPT_DIR}/dispatch.sh" || _rc=$?
+  tick_record_end "${_rc}"
   log "pipeline: done."
+  return "${_rc}"
 }
 with_tick_lock _pipeline_tick

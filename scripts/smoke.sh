@@ -17,6 +17,12 @@ export CLASSIFIER_OFFLINE=1
 export PIPELINE_REPO="${PIPELINE_REPO:-acme/example}"
 unset PIPELINE_FIXTURE_ISSUES PIPELINE_FIXTURE_PR PIPELINE_FIX_ATTEMPT 2>/dev/null || true
 
+# Contain the per-tick run-record (E1-2) so ticks driven anywhere in this suite
+# never write into the working tree's default .dispatch/; §7.14 overrides this
+# per-invocation for its own assertions.
+_smoke_rrdir="$(mktemp -d 2>/dev/null || mktemp -d -t smoke-rr)"
+export DISPATCH_RUN_RECORD="${_smoke_rrdir}/run-record.log"
+
 FIX="${ROOT}/scripts/fixtures"
 CLS="${ROOT}/services/classifier"
 PASS=0; FAIL=0; SKIP=0
@@ -449,6 +455,42 @@ else
   skip "flock not on PATH — serialization + clean-release asserts (Linux prod-host only)"
 fi
 rm -rf "${LOCKD}"
+
+# ---------------------------------------------------------------------------
+section "§7.14 cron: per-tick heartbeat / run-record seam (offline, deterministic)"
+# (§7.14 per the #51 section map — Pillar 1 cron range, heartbeat slot; the
+# issue #27 body's "§7.13" predates that map, which reserves §7.13 for the
+# reaper.) The run record is local-file only and is written even under dry-run.
+RRD="$(mktemp -d 2>/dev/null || mktemp -d -t rrec)"
+RR="${RRD}/run-record.log"
+RRFXI="${FIX}/queued-issues.json"
+# (1) A normal dry-run tick writes exactly one started + one ended record that
+#     share a tick id; the ended record names the claimed issue (#101), status 0.
+DISPATCH_RUN_RECORD="${RR}" DISPATCH_ARTIFACTS_DIR="${RRD}/art" \
+  bash scripts/pipeline.sh --fixture "${RRFXI}" >/dev/null 2>&1; trc=$?
+[[ $trc -eq 0 ]] && pass "dry-run tick exits 0" || fail "dry-run tick exit" "got $trc"
+nstart="$(grep -c '^event=started ' "${RR}" 2>/dev/null || true)"; nstart="${nstart:-0}"
+nend="$(grep -c '^event=ended ' "${RR}" 2>/dev/null || true)"; nend="${nend:-0}"
+[[ "$nstart" == "1" && "$nend" == "1" ]] && pass "exactly one started + one ended record" || fail "record count" "started=$nstart ended=$nend"
+sid="$(sed -n 's/^event=started tick_id=\([^ ]*\).*/\1/p' "${RR}" 2>/dev/null | head -1)"
+eid="$(sed -n 's/^event=ended tick_id=\([^ ]*\).*/\1/p' "${RR}" 2>/dev/null | head -1)"
+[[ -n "$sid" && "$sid" == "$eid" ]] && pass "started and ended share one tick id ($sid)" || fail "tick id mismatch" "start='$sid' end='$eid'"
+startline="$(grep '^event=started ' "${RR}" 2>/dev/null | head -1)"
+assert_contains "started record carries a UTC ISO-8601 timestamp" "$startline" "ts=$(date -u +%Y-)"
+assert_contains "started record carries the dry-run flag" "$startline" "dry_run=1"
+endline="$(grep '^event=ended ' "${RR}" 2>/dev/null | head -1)"
+assert_contains "ended record lists the claimed issue (#101)" "$endline" "claimed=101"
+assert_contains "ended record carries exit status 0" "$endline" "status=0"
+# (3) Crash-path proof — a tick that dies after start leaves a started record
+#     with NO ended record: the stuck-tick signal the E1-3 reaper / E4 ledger read.
+RR2="${RRD}/crash-record.log"
+DISPATCH_RUN_RECORD="${RR2}" DISPATCH_ARTIFACTS_DIR="${RRD}/art2" DISPATCH_CRASH_AFTER_START_TEST=1 \
+  bash scripts/pipeline.sh --fixture "${RRFXI}" >/dev/null 2>&1; ccode=$?
+[[ $ccode -ne 0 ]] && pass "crashed tick exits non-zero" || fail "crashed tick should fail" "got $ccode"
+crashrec="$(cat "${RR2}" 2>/dev/null)"
+assert_contains "crashed tick still wrote a started record" "$crashrec" "event=started"
+assert_not_contains "crashed tick left NO ended record (reaper signal)" "$crashrec" "event=ended"
+rm -rf "${RRD}"
 
 # ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the

@@ -64,6 +64,16 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 : "${DISPATCH_LOCK_FILE:=${TMPDIR:-/tmp}/dispatch-${PIPELINE_REPO//\//-}.lock}"
 : "${DISPATCH_LOCK_WAIT:=0}"
 
+# --------------------------- Per-tick run record (E1-2) --------------------
+# Heartbeat seam: pipeline.sh emits one `started` and one `ended` key=value line
+# per tick to DISPATCH_RUN_RECORD so that a tick that ran leaves a durable local
+# trace (today log() goes to stderr and is lost). A crashed tick leaves a
+# `started` with no matching success `ended` — exactly the signal the E1-3
+# reaper and the later E4 JSONL run-ledger key off. The record is ALWAYS written
+# (even under dry-run — a dry-run tick still produced a run worth recording) and
+# never calls `gh`. Default sink lives under DISPATCH_ARTIFACTS_DIR (or .dispatch).
+: "${DISPATCH_RUN_RECORD:=${DISPATCH_ARTIFACTS_DIR:-.dispatch}/run-record.log}"
+
 # How `claude` workflow args are passed. The CURRENT CLI has no `--args` flag
 # (verified against code.claude.com/docs); the documented headless form embeds
 # the args in the prompt and the workflow reads the `args` global. We default
@@ -84,10 +94,11 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 export PIPELINE_DRY_RUN PIPELINE_REPO PIPELINE_CONFIDENCE_THRESHOLD \
        PIPELINE_CONCURRENCY GH_BIN CLAUDE_BIN PYTHON_BIN FLOCK_BIN \
        CLAUDE_ARGS_MODE PIPELINE_WORKTREE_ROOT \
-       DISPATCH_LOCK_FILE DISPATCH_LOCK_WAIT
+       DISPATCH_LOCK_FILE DISPATCH_LOCK_WAIT DISPATCH_RUN_RECORD
 
 # ------------------------------- Logging -----------------------------------
 _ts() { date -u +%H:%M:%SZ 2>/dev/null || echo "--:--:--Z"; }
+_iso8601() { date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "1970-01-01T00:00:00Z"; }
 log()  { printf '[%s] %s\n'      "$(_ts)" "$*" >&2; }
 warn() { printf '[%s] WARN: %s\n' "$(_ts)" "$*" >&2; }
 err()  { printf '[%s] ERROR: %s\n' "$(_ts)" "$*" >&2; }
@@ -149,6 +160,56 @@ with_tick_lock() {
     fi
     "$@"
   ) 9>>"${lock}"
+}
+
+# --------------------------- Tick run-record helpers (E1-2) ----------------
+# tick_record_start / tick_record_end emit the per-tick heartbeat. Both write a
+# single structured key=value line to DISPATCH_RUN_RECORD and NEVER call `gh`,
+# so they are safe on the dry-run path. pipeline.sh calls them INSIDE the E1-1
+# lock so the record reflects exactly one serialized tick. The format is stable
+# (key=value, one record per line) so the E4 ledger can parse it unchanged.
+
+# _tick_claimed_file: the tick-scoped sink dispatch.sh appends claimed issue
+# numbers to, so tick_record_end reports them without re-querying GitHub.
+# Keyed by the shared DISPATCH_TICK_ID under DISPATCH_ARTIFACTS_DIR (or .dispatch).
+_tick_claimed_file() {
+  echo "${DISPATCH_CLAIMED_FILE:-${DISPATCH_ARTIFACTS_DIR:-.dispatch}/${DISPATCH_TICK_ID:-tick-unknown}.claimed}"
+}
+
+# tick_record_start: write the `started` record (tick-id, UTC start, repo,
+# dry-run flag) and (re)initialise this tick's claimed sink. Exports
+# DISPATCH_CLAIMED_FILE so child scripts append to the very same path.
+tick_record_start() {
+  : "${DISPATCH_TICK_ID:=tick-$(date -u +%Y%m%dT%H%M%SZ)}"; export DISPATCH_TICK_ID
+  DISPATCH_CLAIMED_FILE="$(_tick_claimed_file)"; export DISPATCH_CLAIMED_FILE
+  mkdir -p "$(dirname "${DISPATCH_RUN_RECORD}")" "$(dirname "${DISPATCH_CLAIMED_FILE}")" 2>/dev/null || true
+  : >"${DISPATCH_CLAIMED_FILE}" 2>/dev/null || true   # fresh sink per tick
+  printf 'event=started tick_id=%s ts=%s repo=%s dry_run=%s\n' \
+    "${DISPATCH_TICK_ID}" "$(_iso8601)" "${PIPELINE_REPO:-}" "${PIPELINE_DRY_RUN}" \
+    >>"${DISPATCH_RUN_RECORD}"
+}
+
+# tick_record_claim NUM: append a claimed issue number to this tick's sink.
+tick_record_claim() {
+  local f="${DISPATCH_CLAIMED_FILE:-$(_tick_claimed_file)}"
+  [[ -n "${f}" ]] || return 0
+  printf '%s\n' "$1" >>"${f}" 2>/dev/null || true
+}
+
+# tick_record_end STATUS: write the `ended` record (UTC end, exit status, and
+# the count + numbers of issues claimed this tick). A non-zero status — or, when
+# the tick is hard-killed, a missing `ended` entirely — marks a stuck tick.
+tick_record_end() {
+  local status="${1:-0}" f claimed_csv="" claimed_count=0
+  f="${DISPATCH_CLAIMED_FILE:-$(_tick_claimed_file)}"
+  if [[ -n "${f}" && -s "${f}" ]]; then
+    claimed_count="$(grep -c . "${f}" 2>/dev/null)"; claimed_count="${claimed_count:-0}"
+    claimed_csv="$(tr '\n' ',' <"${f}" 2>/dev/null | sed 's/,$//')"
+  fi
+  mkdir -p "$(dirname "${DISPATCH_RUN_RECORD}")" 2>/dev/null || true
+  printf 'event=ended tick_id=%s ts=%s status=%s claimed_count=%s claimed=%s\n' \
+    "${DISPATCH_TICK_ID:-tick-unknown}" "$(_iso8601)" "${status}" "${claimed_count}" "${claimed_csv}" \
+    >>"${DISPATCH_RUN_RECORD}"
 }
 
 # ------------------------- Engine call wrappers ----------------------------

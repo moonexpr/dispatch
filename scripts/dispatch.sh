@@ -72,6 +72,10 @@ to_needs_human() {
 claim_issue() {
   local num="$1" route="$2" result_json="$3"
   log "#${num} -> claimed (route=${route})"
+  # Heartbeat seam (E1-2): record which issue this tick claimed so the
+  # pipeline's tick_record_end can report it without re-querying GitHub. No-op
+  # when not run under pipeline.sh (DISPATCH_CLAIMED_FILE unset).
+  tick_record_claim "${num}"
   # Durable routing decision (machine-findable marker) as an issue comment.
   gh_mutate issue comment "${num}" \
     --body "<!-- pipeline:route --> Routing decision: ${result_json}"

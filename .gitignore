@@ -4,6 +4,8 @@ tokens.txt
 
 # Worker session worktrees (isolation; transient).
 .worktrees/
+# Default per-tick run-record / heartbeat sink (E1-2); regenerable each tick.
+.dispatch/
 # Claude Code session worktrees (transient).
 .claude/worktrees/
 # Generated dispatch artifacts (e.g. the static issue DAG — regenerable via ./dispatch --dag).
