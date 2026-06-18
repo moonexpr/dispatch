@@ -42,25 +42,30 @@ def _spec(function: str, domain: str) -> Dict[str, str]:
     return {"function": function, "domain": domain, "label": f"{domain} {function}"}
 
 
-# A heading line ("## Acceptance criteria", "**Success criteria**", etc.) and a
-# bullet line ("- ...", "* ...", "1. ..."). Used to lift the issue's own criteria
-# into the work order so DONE CRITERIA is concrete, not a generic placeholder.
+# A heading line ("## Acceptance criteria", "**Success criteria**", "## Definition
+# of Done", etc.) and a bullet line ("- ...", "* ...", "1. ..."). Used to lift the
+# issue's own criteria into the work order so DONE CRITERIA is concrete, not a
+# generic placeholder. Acceptance/Success Criteria takes precedence over a
+# Definition of Done section when both are present.
 _CRIT_HEADING = re.compile(
     r"^\s*(?:#{1,6}\s*|\*\*\s*)?(?:acceptance|success)\s+criteria\b", re.IGNORECASE)
+_DOD_HEADING = re.compile(
+    r"^\s*(?:#{1,6}\s*|\*\*\s*)?definition\s+of\s+done\b", re.IGNORECASE)
 _BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)\s*$")
 _MD = re.compile(r"[*_`]+")
 
 
-def extract_criteria(body: str, *, limit: int = 12) -> List[str]:
-    """Return the bullet items under an 'Acceptance criteria' / 'Success criteria'
-    heading in an issue body, with markdown emphasis stripped. ``[]`` when no such
-    section is present. Issue text is parsed as data only."""
-    if not body:
-        return []
+def _capture_under(body: str, heading: "re.Pattern[str]", limit: int) -> List[str]:
+    """Bullet items under the first heading matching ``heading``; ``[]`` if none.
+
+    Stops at the next Markdown heading or the first blank line after the items.
+    Markdown emphasis is stripped and internal whitespace/newlines collapse to a
+    single space, so no extracted line can break the ``- [ ]`` framing downstream
+    (issue text is parsed as untrusted data only)."""
     out: List[str] = []
     capturing = False
     for line in body.splitlines():
-        if _CRIT_HEADING.search(line):
+        if heading.search(line):
             capturing = True
             continue
         if not capturing:
@@ -69,12 +74,25 @@ def extract_criteria(body: str, *, limit: int = 12) -> List[str]:
             break
         m = _BULLET.match(line)
         if m:
-            item = _MD.sub("", m.group(1)).strip()
+            item = " ".join(_MD.sub("", m.group(1)).split())
             if item:
                 out.append(item)
         elif line.strip() == "" and out:             # blank line after items ends it
             break
     return out[:limit]
+
+
+def extract_criteria(body: str, *, limit: int = 12) -> List[str]:
+    """Return the bullet items under the issue body's own acceptance section, with
+    markdown stripped. Prefers an 'Acceptance criteria' / 'Success criteria'
+    heading; falls back to a 'Definition of Done' heading. ``[]`` when neither is
+    present. Issue text is parsed as data only."""
+    if not body:
+        return []
+    items = _capture_under(body, _CRIT_HEADING, limit)
+    if not items:
+        items = _capture_under(body, _DOD_HEADING, limit)
+    return items
 
 
 def plan(job: Dict[str, Any], discovered: List[str],

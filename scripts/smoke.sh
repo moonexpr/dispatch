@@ -245,6 +245,35 @@ elig="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" 2>&1 >/dev/null)"
 assert_contains "skips the wont-do human task (#9)" "$elig" "wont-do"
 assert_contains "defers low-confidence #7" "$elig" "conf 0.34"
 
+# #33: the issue's own Acceptance Criteria / Definition of Done section is lifted
+# into DONE CRITERIA (extract_criteria is wired into the general work-order path
+# via decompose.plan). Asserted at the extraction + render seam — no fixture-queue
+# change, so the §7.9/§7.10 ranking/root invariants above are untouched.
+ACP="${ROOT}/services/architect"
+dod7_9="$(python3 -c "import sys;sys.path.insert(0,'${ACP}');import decompose;print('|'.join(decompose.extract_criteria('## Definition of Done\n- ship it\n- test it\n')))")"
+[[ "$dod7_9" == "ship it|test it" ]] && pass "extract_criteria lifts a Definition of Done section" || fail "DoD extraction" "got '$dod7_9'"
+prec7_9="$(python3 -c "import sys;sys.path.insert(0,'${ACP}');import decompose;print('|'.join(decompose.extract_criteria('## Definition of Done\n- dod one\n\n## Acceptance Criteria\n- acc one\n- acc two\n')))")"
+[[ "$prec7_9" == "acc one|acc two" ]] && pass "Acceptance Criteria takes precedence over Definition of Done" || fail "criteria precedence" "got '$prec7_9'"
+crender7_9="$(python3 - "${ACP}" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import decompose, workorder
+body = "## Acceptance Criteria\n- The /healthz endpoint returns 200\n- A unit test covers the 503 path\n"
+job = {"issue": 99, "repo": "acme/x", "title": "t", "body": body,
+       "route": "gen-default", "scope": "m", "confidence": 0.9}
+crit = decompose.plan(job, [], verify_cmd="bash scripts/smoke.sh")["criteria"]
+cl = workorder._checklist(99, "bash scripts/smoke.sh", crit)
+gen_plan = decompose.plan({"issue": 2, "body": "no acceptance section here",
+                           "route": "gen-local", "scope": "s", "confidence": 0.9}, [])
+gen = workorder._checklist(2, "bash scripts/smoke.sh", gen_plan["criteria"])
+ok = ("The /healthz endpoint returns 200" in cl and "A unit test covers the 503 path" in cl
+      and "Closes #99" in cl and "bash scripts/smoke.sh" in cl
+      and "acceptance criteria in the issue body" in gen)
+print("OK" if ok else "FAIL")
+PY
+)"
+[[ "$crender7_9" == "OK" ]] && pass "issue acceptance items reach DONE CRITERIA (gate + Closes kept; no-section -> generic fallback)" || fail "DONE CRITERIA render path" "got '$crender7_9'"
+
 # ---------------------------------------------------------------------------
 section "§7.10 static issue DAG + operator issue selection (offline, deterministic)"
 DAGDIR="$(mktemp -d 2>/dev/null || mktemp -d -t dag)"
