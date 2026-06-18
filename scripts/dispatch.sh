@@ -48,6 +48,20 @@ count_claimed() {
   fi
 }
 
+# --- work-order render (debug-dump for --until, E2-2/#31) -------------------
+# Render a human-readable work order from the claimed issue's classified fields.
+# Used only for the gated --until artifact dump; the engineer receives the
+# job-request JSON, not this text.
+render_workorder() {  # num title route scope confidence body
+  cat <<EOF
+WORK PLAN — issue #${1}
+Title: ${2}
+Route: ${3}    Scope: ${4}    Confidence: ${5}
+
+${6}
+EOF
+}
+
 # --- threshold comparison (float) ------------------------------------------
 below_threshold() {  # below_threshold <confidence> <threshold> ; exit 0 if below
   awk -v c="$1" -v t="$2" 'BEGIN { exit (c + 0 < t + 0) ? 0 : 1 }'
@@ -95,6 +109,21 @@ claim_issue() {
     '{job_id: ("issue-\($issue)"),
       issue: $issue, repo: $repo, title: $title, body: $body,
       route: $route, scope: $scope, confidence: $conf}')"
+  # Stage gate (E2-2/#31): when --until is active, dump this issue's work order +
+  # job request so the operator can inspect the halted stage's artifacts. Pure
+  # local-file writes (dry-run-safe — the bridge/engineer never runs in dry-run).
+  if [[ -n "${DISPATCH_UNTIL_STAGE:-}" && -n "${DISPATCH_ARTIFACTS_DIR:-}" ]]; then
+    local _td="${DISPATCH_ARTIFACTS_DIR}/${DISPATCH_TICK_ID:-tick-unknown}"
+    mkdir -p "${_td}"
+    printf '%s\n' "${args}" >"${_td}/job-request.json"
+    render_workorder "${num}" "${title}" "${route}" "${scope}" "${confidence}" "${body}" \
+      >"${_td}/workorder.txt"
+  fi
+  # Halt BEFORE the engineer (ordinal 3) for the intake / workorder stages.
+  if [[ -n "${DISPATCH_UNTIL_ORD:-}" && "${DISPATCH_UNTIL_ORD}" -lt 3 ]]; then
+    log "#${num} --until ${DISPATCH_UNTIL_STAGE}: halting before the engineer (work order dumped)"
+    return 0
+  fi
   engineer_dispatch "${args}"
 }
 

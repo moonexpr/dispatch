@@ -521,6 +521,30 @@ assert_contains "README references the committed crontab example" "$readme_txt" 
 assert_contains "README documents dry-run as the scheduler default" "$readme_txt" "dry-run is the"
 
 # ---------------------------------------------------------------------------
+section "§7.17 debug: --until <stage> halt-after gating in pipeline.sh (offline, deterministic)"
+# (§7.17 per the #51 section map — debug & harness range, stage-gating slot; the
+# issue #31 body's "§7.15" predates that map. The --from replay half is E2-3.)
+UNTILD="$(mktemp -d 2>/dev/null || mktemp -d -t until)"
+UFXI="${FIX}/queued-issues.json"
+# --until workorder: render + dump the work order, then halt before the engineer.
+ustderr="$(DISPATCH_ARTIFACTS_DIR="${UNTILD}" bash scripts/pipeline.sh --until workorder --fixture "${UFXI}" 2>&1)"; urc=$?
+[[ $urc -eq 0 ]] && pass "--until workorder exits 0" || fail "--until workorder exit" "got $urc"
+utick="$(find "${UNTILD}" -maxdepth 1 -type d -name 'tick-*' 2>/dev/null | head -1)"
+[[ -n "$utick" && -f "$utick/workorder.txt" ]] && pass "workorder.txt dumped (workorder stage ran)" || fail "workorder.txt missing under --until workorder"
+[[ -n "$utick" && ! -f "$utick/invoice.json" ]] && pass "no invoice.json (engineer stage did NOT run — halt fired)" || fail "invoice.json present despite --until workorder"
+assert_contains "stderr logs the halt naming the workorder stage" "$ustderr" "halted after stage: workorder"
+# Negative: an unknown stage exits non-zero and lists the valid stage names.
+bogus="$(bash scripts/pipeline.sh --until bogus-stage --fixture "${UFXI}" 2>&1)"; brc=$?
+[[ $brc -ne 0 ]] && pass "--until bogus-stage exits non-zero" || fail "--until bogus-stage should fail" "got $brc"
+assert_contains "unknown-stage error lists the valid stages" "$bogus" "intake workorder engineer intake-invoice closure"
+# Default (no --until) is unchanged: a plain dry-run tick runs the dispatch body
+# and does NOT emit the halt line.
+plain="$(bash scripts/pipeline.sh --fixture "${UFXI}" 2>&1)"
+assert_contains "default tick still runs the dispatch body" "$plain" "pipeline: dispatch starting"
+assert_not_contains "default tick emits no halt line" "$plain" "halted after stage"
+rm -rf "${UNTILD}"
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar

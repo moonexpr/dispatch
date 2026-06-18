@@ -212,6 +212,20 @@ tick_record_end() {
     >>"${DISPATCH_RUN_RECORD}"
 }
 
+# ----------------------- Debug stage vocabulary (E2/#31) -------------------
+# The canonical five tick stages, in execution order. `--until <stage>` (E2-2)
+# halts the tick after the named stage; `--from <stage>` (E2-3) resumes from it.
+# stage_ord echoes a stage's 1-based ordinal so call sites can compare positions
+# without hard-coding numbers; it fails (non-zero, no output) on an unknown name.
+DISPATCH_STAGES=(intake workorder engineer intake-invoice closure)
+stage_ord() {
+  local s="$1" i
+  for i in "${!DISPATCH_STAGES[@]}"; do
+    [[ "${DISPATCH_STAGES[$i]}" == "${s}" ]] && { echo $((i + 1)); return 0; }
+  done
+  return 1
+}
+
 # ------------------------- Engine call wrappers ----------------------------
 # gh_repo_args: set the global REPO_ARGS array to `--repo owner/repo` (or empty)
 # so call sites can splice it without word-splitting (security: no unquoted

@@ -46,6 +46,11 @@ usage: pipeline.sh [OPTIONS]
   -l, --live              PIPELINE_DRY_RUN=0 (default: dry-run, no mutations)
   -e, --engineer  BIN     Engineer binary (default: scripts/mock-engineer.sh)
   -f, --fixture   FILE    issue list JSON for offline testing
+  -u, --until     STAGE   halt the tick AFTER <stage> completes, exit 0, and
+                          leave the dumped artifacts on disk for inspection.
+                          Valid stages (in order):
+                            intake workorder engineer intake-invoice closure
+                          (closure == the full tick == no flag.)
   -h, --help              show this help
 
 Examples:
@@ -68,6 +73,7 @@ USAGE
 # Parse flags — applied after common.sh has sourced pipeline.env.
 _bootstrap=0
 _engineer="${ENGINEER_BIN:-${SCRIPT_DIR}/mock-engineer.sh}"
+_until=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,10 +82,24 @@ while [[ $# -gt 0 ]]; do
     -l|--live)       export PIPELINE_DRY_RUN=0; shift ;;
     -e|--engineer)   _engineer="$2"; shift 2 ;;
     -f|--fixture)    export PIPELINE_FIXTURE_ISSUES="$2"; shift 2 ;;
+    -u|--until)      _until="$2"; shift 2 ;;
     -h|--help)       _usage ;;
     *) die "unknown flag: $1 (try --help)" ;;
   esac
 done
+
+# Validate --until against the canonical stage vocabulary (stage_ord from
+# common.sh). An unknown stage is a usage error: exit non-zero and list the
+# valid stages on stderr. The decision is exported so dispatch.sh (halt before
+# the engineer) and the bridge (halt before architect-intake) honour it.
+if [[ -n "${_until}" ]]; then
+  if ! _until_ord="$(stage_ord "${_until}")"; then
+    err "unknown --until stage: ${_until}"
+    err "valid stages (in order): ${DISPATCH_STAGES[*]}"
+    exit 2
+  fi
+  export DISPATCH_UNTIL_STAGE="${_until}" DISPATCH_UNTIL_ORD="${_until_ord}"
+fi
 
 # Resolve relative engineer paths to absolute so the bridge script works from
 # any cwd.
@@ -123,6 +143,11 @@ if [[ -n "\${DISPATCH_ARTIFACTS_DIR:-}" ]]; then
   mkdir -p "\${_td}"
   printf '%s\n' "\${invoice}" > "\${_td}/invoice.json"
 fi
+# Stage gate (E2-2/#31): halt AFTER the engineer stage (ordinal 3), before
+# architect-intake (the intake-invoice stage), when --until requested it.
+if [[ -n "\${DISPATCH_UNTIL_ORD:-}" && "\${DISPATCH_UNTIL_ORD}" -le 3 ]]; then
+  exit 0
+fi
 bash "${SCRIPT_DIR}/architect-intake.sh" "\${invoice}"
 BRIDGE
 chmod +x "${_bridge}"
@@ -150,6 +175,11 @@ _pipeline_tick() {
   local _rc=0
   bash "${SCRIPT_DIR}/dispatch.sh" || _rc=$?
   tick_record_end "${_rc}"
+  # Stage gate (E2-2/#31): when --until halted the tick before closure, name the
+  # stage we stopped at and point the operator at the dumped artifacts.
+  if [[ -n "${DISPATCH_UNTIL_STAGE:-}" && "${DISPATCH_UNTIL_STAGE}" != "closure" ]]; then
+    log "pipeline: halted after stage: ${DISPATCH_UNTIL_STAGE} (artifacts: ${DISPATCH_ARTIFACTS_DIR:-<unset>})"
+  fi
   log "pipeline: done."
   return "${_rc}"
 }
