@@ -1,0 +1,16 @@
+{
+  "invoice_id": "dispatch-issue-2",
+  "issue": 2,
+  "repo": "ReclaimByDesign/dispatch",
+  "status": "completed",
+  "route_used": "gen-default",
+  "pr_number": 123,
+  "summary": "Wired the gh-intake data-sourcing layer into the pipeline.",
+  "cost": {
+    "tokens_in": 18432,
+    "tokens_out": 5120,
+    "duration_seconds": 247,
+    "model": "anthropic/claude-sonnet-4-6"
+  },
+  "timestamp": "2026-06-18T00:00:00Z"
+}

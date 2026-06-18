@@ -94,7 +94,7 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 export PIPELINE_DRY_RUN PIPELINE_REPO PIPELINE_CONFIDENCE_THRESHOLD \
        PIPELINE_CONCURRENCY GH_BIN CLAUDE_BIN PYTHON_BIN FLOCK_BIN \
        CLAUDE_ARGS_MODE PIPELINE_WORKTREE_ROOT \
-       DISPATCH_LOCK_FILE DISPATCH_LOCK_WAIT DISPATCH_RUN_RECORD
+       DISPATCH_LOCK_FILE DISPATCH_LOCK_WAIT DISPATCH_RUN_RECORD DISPATCH_LEDGER_FILE
 
 # ------------------------------- Logging -----------------------------------
 _ts() { date -u +%H:%M:%SZ 2>/dev/null || echo "--:--:--Z"; }
@@ -210,6 +210,30 @@ tick_record_end() {
   printf 'event=ended tick_id=%s ts=%s status=%s claimed_count=%s claimed=%s\n' \
     "${DISPATCH_TICK_ID:-tick-unknown}" "$(_iso8601)" "${status}" "${claimed_count}" "${claimed_csv}" \
     >>"${DISPATCH_RUN_RECORD}"
+}
+
+# ------------------------------ Run-ledger (E4 / #36) ----------------------
+# ledger_emit STAGE [ISSUE] [FIELDS_JSON]: append one stage-transition line to
+# the append-only JSONL run-ledger via services/ledger/ledger.py. STAGE is one
+# of the canonical transition stages (claimed | work-order | engineer-dispatch |
+# invoice | closure). FIELDS_JSON is an optional JSON object carrying
+# label_before/label_after, explicit cost values, or an `invoice` path whose
+# cost.* block populates the engineer-stage cost fields.
+#
+# Unlike run()/gh_mutate this is NOT gated by is_dry_run — the ledger is a local
+# file write that always records (a dry-run tick still produced a transition); it
+# stamps dry_run:true|false on each line, never calls `gh`, and never fails the
+# tick (errors are swallowed so observability can't break the pipeline). The
+# ledger path is DISPATCH_LEDGER_FILE (read by ledger.py from the environment),
+# else ${DISPATCH_ARTIFACTS_DIR:-./.artifacts}/run-ledger.jsonl.
+: "${LEDGER_PY:=${PIPELINE_ROOT}/services/ledger/ledger.py}"
+ledger_emit() {
+  local stage="$1" issue="${2:-}" fields="${3:-}" dry=true
+  [[ -n "${fields}" ]] || fields='{}'
+  is_dry_run || dry=false
+  "${PYTHON_BIN}" "${LEDGER_PY}" --stage "${stage}" --issue "${issue}" \
+    --tick-id "${DISPATCH_TICK_ID:-tick-unknown}" --dry-run "${dry}" \
+    --fields "${fields}" --quiet >/dev/null 2>&1 || true
 }
 
 # ----------------------- Debug stage vocabulary (E2/#31) -------------------

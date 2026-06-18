@@ -90,6 +90,9 @@ claim_issue() {
   # pipeline's tick_record_end can report it without re-querying GitHub. No-op
   # when not run under pipeline.sh (DISPATCH_CLAIMED_FILE unset).
   tick_record_claim "${num}"
+  # Run-ledger (E4/#36): record the queued->claimed stage transition. Local-file
+  # only, never gh, never fails the tick (see ledger_emit in common.sh).
+  ledger_emit claimed "${num}" '{"label_before":"queued","label_after":"claimed"}'
   # Durable routing decision (machine-findable marker) as an issue comment.
   gh_mutate issue comment "${num}" \
     --body "<!-- pipeline:route --> Routing decision: ${result_json}"
@@ -109,6 +112,8 @@ claim_issue() {
     '{job_id: ("issue-\($issue)"),
       issue: $issue, repo: $repo, title: $title, body: $body,
       route: $route, scope: $scope, confidence: $conf}')"
+  # Run-ledger (E4/#36): the architect emitted the work order for this issue.
+  ledger_emit work-order "${num}" '{}'
   # Stage gate (E2-2/#31): when --until is active, dump this issue's work order +
   # job request so the operator can inspect the halted stage's artifacts. Pure
   # local-file writes (dry-run-safe — the bridge/engineer never runs in dry-run).

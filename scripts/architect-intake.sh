@@ -42,6 +42,15 @@ fi
 
 log "architect-intake: issue=#${issue} status=${status} pr=${pr_number:-none}"
 
+# Run-ledger (E4/#36): the engineer-dispatch line carries the Invoice's cost.*
+# (tokens/duration/model); the invoice line records the intake handoff. Both are
+# local-file only, never gh, and never fail the tick (see ledger_emit).
+_cost_fields="$(jq -c '{tokens_in:.cost.tokens_in, tokens_out:.cost.tokens_out,
+  duration_seconds:.cost.duration_seconds, model:.cost.model}' \
+  <<<"${invoice_json}" 2>/dev/null || echo '{}')"
+ledger_emit engineer-dispatch "${issue}" "${_cost_fields}"
+ledger_emit invoice "${issue}" "${_cost_fields}"
+
 case "${status}" in
 
   completed)
@@ -55,6 +64,10 @@ case "${status}" in
     fi
     gh_mutate issue edit "${issue}" \
       --remove-label claimed --add-label done-pending-merge
+    # Run-ledger (E4/#36): the claimed -> done-pending-merge closure transition.
+    ledger_emit closure "${issue}" \
+      "$(jq -c '. + {label_before:"claimed", label_after:"done-pending-merge"}' \
+        <<<"${_cost_fields}" 2>/dev/null || echo '{}')"
     ;;
 
   partial|failed)

@@ -598,6 +598,48 @@ assert_not_contains "default tick emits no halt line" "$plain" "halted after sta
 rm -rf "${UNTILD}"
 
 # ---------------------------------------------------------------------------
+section "§7.19 monitoring: append-JSONL run-ledger emit (offline, deterministic)"
+# (§7.19 per the #51 section map — Pillar 4 monitoring range, run-ledger slot;
+# the issue #36 body's "§7.16" predates that map, which reserves §7.16-§7.18 for
+# the debug & harness pillar.) Drives the real wiring fully offline + dry-run:
+# dispatch.sh emits the claim + work-order lines; architect-intake.sh emits the
+# engineer-dispatch / invoice / closure lines (cost copied from the Invoice).
+LEDGERD="$(mktemp -d 2>/dev/null || mktemp -d -t ledger)"
+LFILE="${LEDGERD}/run-ledger.jsonl"
+LINV="${ROOT}/scripts/fixtures/ledger-invoice.json"
+[[ -f "$LINV" ]] && pass "ledger-invoice.json fixture exists" || fail "ledger-invoice.json missing"
+(
+  export DISPATCH_LEDGER_FILE="$LFILE" DISPATCH_TICK_ID="tick-smoke-719" PIPELINE_DRY_RUN=1
+  PIPELINE_FIXTURE_ISSUES="${FIX}/queued-issues.json" bash "${ROOT}/scripts/dispatch.sh" >/dev/null 2>&1 || true
+  bash "${ROOT}/scripts/architect-intake.sh" < "$LINV" >/dev/null 2>&1 || true
+)
+[[ -s "$LFILE" ]] && pass "run-ledger.jsonl exists and is non-empty" || fail "run-ledger not written"
+if jq -c . "$LFILE" >/dev/null 2>&1; then pass "every ledger line is valid JSON (jq -c .)"; else fail "ledger has malformed JSONL"; fi
+nrec="$(jq -s 'length' "$LFILE" 2>/dev/null)"
+[[ "${nrec:-0}" -ge 1 ]] && pass "ledger is jq -s aggregatable (${nrec} records)" || fail "ledger not aggregatable" "got '$nrec'"
+if jq -se 'all(.[]; .tick_id != null and .timestamp != null)' "$LFILE" >/dev/null 2>&1; then
+  pass "every line carries non-null tick_id + timestamp"
+else fail "a ledger line is missing tick_id/timestamp"; fi
+if jq -se 'any(.[]; .stage=="engineer-dispatch" and .cost.tokens_in != null)' "$LFILE" >/dev/null 2>&1; then
+  pass "engineer-dispatch line carries the Invoice cost.tokens_in"
+else fail "engineer-dispatch cost not populated from the Invoice"; fi
+if jq -se 'any(.[]; .stage=="claimed" and .label_before=="queued" and .label_after=="claimed")' "$LFILE" >/dev/null 2>&1; then
+  pass "claim line records the queued -> claimed transition"
+else fail "claim line label transition missing"; fi
+if jq -se 'all(.[]; .stage as $s | ["claimed","work-order","engineer-dispatch","invoice","closure"] | index($s) != null)' "$LFILE" >/dev/null 2>&1; then
+  pass "all stages drawn from the fixed vocabulary"
+else fail "ledger emitted an out-of-vocabulary stage"; fi
+# Optional fields serialize as null keys (never absent) — uniform aggregation.
+if jq -se 'all(.[]; has("cost") and (.cost|has("tokens_in") and has("model")) and has("label_before") and has("dry_run"))' "$LFILE" >/dev/null 2>&1; then
+  pass "missing optional fields serialize as null keys (uniform schema)"
+else fail "a ledger line dropped an optional key instead of nulling it"; fi
+# Offline: dry-run tick mutates no GitHub state; every line stamps dry_run:true.
+if jq -se 'all(.[]; .dry_run==true)' "$LFILE" >/dev/null 2>&1; then
+  pass "every line stamps dry_run:true (no GitHub mutation under dry-run)"
+else fail "a ledger line not marked dry_run under a dry-run tick"; fi
+rm -rf "${LEDGERD}"
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar

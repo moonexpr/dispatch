@@ -6,6 +6,8 @@ tokens.txt
 .worktrees/
 # Default per-tick run-record / heartbeat sink (E1-2); regenerable each tick.
 .dispatch/
+# Default run-ledger sink (E4/#36) when DISPATCH_ARTIFACTS_DIR is unset; regenerable.
+.artifacts/
 # Claude Code session worktrees (transient).
 .claude/worktrees/
 # Generated dispatch artifacts (e.g. the static issue DAG — regenerable via ./dispatch --dag).
