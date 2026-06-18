@@ -769,7 +769,7 @@ gov2="$(BUDGET_ORACLE_FIXTURE="$OVER" "$PYG" "$GUARD" 2>/dev/null)"
 [[ "$gov" == "$gov2" ]] && pass "guard decision is deterministic across runs" || fail "guard nondeterministic"
 
 # ---------------------------------------------------------------------------
-section "§7.18 demo harness: snapshot + scenario mutator (offline, deterministic, drop-in)"
+section "§7.18 demo harness: snapshot + mutator + replay (offline, deterministic, drop-in)"
 # (§7.18 per the #51 section map — Pillar 5 debug & harness range, the shared
 # snapshot/mutate/replay slot. The issue #43 body's "§7.12" predates that map,
 # which reserves §7.12–§7.15 for the cron pillar. The mutator (#44) and replay
@@ -858,6 +858,63 @@ PIPELINE_DRY_RUN=1 ./dispatch --fixture "$mtmp" >/dev/null 2>&1 \
 rm -f "$mtmp"
 # Output is always a top-level JSON array (full-replacement escape hatch shape).
 if printf '%s' "$add" | jq -e 'type=="array"' >/dev/null 2>&1; then pass "mutator emits a JSON array"; else fail "mutator output not an array"; fi
+
+# --- E8-3 (#45) replay driver: EXTENDS §7.18 (shared harness slot). One-command
+# offline replay (resolve via mutate.py -> ./dispatch --fixture -> dump round
+# artifacts). jsonschema is NOT installed here, so the Job Request / Invoice are
+# validated structurally (key-set + types) per §7.7/§7.16, never via jsonschema.
+RP="${ROOT}/scripts/demo/replay.sh"
+RPD="$(mktemp -d 2>/dev/null || mktemp -d -t replay)"
+DEMO_ROUNDS_DIR="$RPD" PIPELINE_DRY_RUN=1 bash "$RP" blank-vague-body >/dev/null 2>&1; rprc=$?
+[[ $rprc -eq 0 ]] && pass "replay exits 0 (offline dry-run)" || fail "replay exit" "got $rprc"
+RPR1="$(ls -d "$RPD"/blank-vague-body/* 2>/dev/null | head -1)"
+if [[ -n "$RPR1" && -f "$RPR1/fixture.json" && -f "$RPR1/work-order.txt" && -f "$RPR1/job-request.json" && -f "$RPR1/invoice.json" ]]; then
+  pass "replay round dir carries fixture + work-order + job-request + invoice"
+else fail "replay round artifacts missing"; fi
+# Job Request structurally valid (reuse §7.16's bespoke validator — NOT jsonschema).
+if [[ -n "$RPR1" ]] && python3 - "$RPR1/job-request.json" <<'PY'
+import json, sys
+REQ = {"job_id", "issue", "repo", "title", "body", "route", "scope", "confidence"}
+ROUTE = {"gen-local", "gen-default", "gen-frontier"}; SCOPE = {"xs", "s", "m", "l"}
+j = json.load(open(sys.argv[1])); errs = []
+if set(j) != REQ: errs.append("keys")
+if not isinstance(j.get("issue"), int): errs.append("issue")
+if j.get("route") not in ROUTE: errs.append("route")
+if j.get("scope") not in SCOPE: errs.append("scope")
+c = j.get("confidence")
+if not isinstance(c, (int, float)) or not 0 <= c <= 1: errs.append("confidence")
+if not isinstance(j.get("repo"), str): errs.append("repo")
+sys.exit(1 if errs else 0)
+PY
+then pass "replay job-request.json is schema-valid (structural, per §7.7/§7.16)"
+else fail "replay job-request.json schema-invalid"; fi
+# Invoice structurally valid (reuse §7.7's bespoke invoice validator — NOT jsonschema).
+if [[ -n "$RPR1" ]] && python3 - "$RPR1/invoice.json" <<'PY'
+import json, sys
+REQUIRED = {"invoice_id", "issue", "repo", "status", "route_used", "cost", "summary", "timestamp"}
+STATUS = {"completed", "failed", "partial", "needs-human"}
+j = json.load(open(sys.argv[1])); errs = []
+if not REQUIRED <= set(j): errs.append("keys")
+if j.get("status") not in STATUS: errs.append("status")
+if not isinstance(j.get("cost"), dict): errs.append("cost")
+sys.exit(1 if errs else 0)
+PY
+then pass "replay invoice.json is schema-valid (structural, per §7.7)"
+else fail "replay invoice.json schema-invalid"; fi
+# No live mutation: the dumped work order is dry-run shaped.
+[[ -n "$RPR1" ]] && assert_contains "replay work order is dry-run shaped" "$(cat "$RPR1/work-order.txt")" "DRY_RUN=1"
+# Repeatable: a second round is byte-identical on work-order + job-request.
+DEMO_ROUNDS_DIR="$RPD" PIPELINE_DRY_RUN=1 bash "$RP" blank-vague-body >/dev/null 2>&1
+RPR2="$(ls -d "$RPD"/blank-vague-body/* 2>/dev/null | tail -1)"
+if [[ -n "$RPR1" && -n "$RPR2" && "$RPR1" != "$RPR2" ]] \
+   && diff -q "$RPR1/work-order.txt" "$RPR2/work-order.txt" >/dev/null 2>&1 \
+   && diff -q "$RPR1/job-request.json" "$RPR2/job-request.json" >/dev/null 2>&1; then
+  pass "two replays produce byte-identical work-order + job-request"
+else fail "replay not repeatable"; fi
+# Resettable: --reset empties the scenario rounds dir.
+DEMO_ROUNDS_DIR="$RPD" bash "$RP" --reset blank-vague-body >/dev/null 2>&1
+[[ -z "$(ls -A "$RPD/blank-vague-body" 2>/dev/null)" ]] && pass "replay --reset empties the scenario rounds dir" || fail "replay --reset left artifacts"
+rm -rf "$RPD"
 
 # ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
