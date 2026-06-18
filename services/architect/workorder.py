@@ -25,6 +25,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from approval import Authorization  # type: ignore  # sibling import (see dispatch.py path setup)
+from verify import gate_ref as _gate_ref, GENERIC as _GENERIC  # type: ignore  # sibling import
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
@@ -50,10 +51,17 @@ def _section(name: str, body: str) -> str:
     return f"# {name}\n{body}"
 
 
-def _checklist(issue: int, verify_cmd: str) -> str:
-    items = [
-        "The acceptance criteria in the issue body (below) are all met",
-        f"`{verify_cmd}` passes (the project's gate is green)",
+def _checklist(issue: int, verify_cmd: str,
+               criteria: Optional[List[str]] = None) -> str:
+    # Surface the issue's own acceptance criteria as concrete checkboxes when the
+    # body provided them; otherwise fall back to the generic pointer.
+    crit = list(criteria or [])
+    head = crit if crit else ["The acceptance criteria in the issue body (below) are all met"]
+    gate_item = (f"`{verify_cmd}` passes (0 FAIL) — the project's gate is green"
+                 if verify_cmd != _GENERIC else
+                 "The project's test/build gate passes (0 FAIL) — establish one if the repo has none")
+    items = head + [
+        gate_item,
         "Changes are limited to this issue's scope; no unrelated edits",
         "A pull request is opened against `main` — not merged",
         "The PR body restates this checklist",
@@ -101,16 +109,19 @@ def _staffing_section(plan: Dict[str, Any]) -> str:
 def _resources_section(resources: Dict[str, Any], auth: Authorization,
                        issue: int, verify_cmd: str) -> str:
     parts: List[str] = []
+    gate_line = (f"- Verify gate: `{verify_cmd}` must be green (0 FAIL) before the PR is ready."
+                 if verify_cmd != _GENERIC else
+                 "- Verify gate: the project's test/build gate must be green (0 FAIL); "
+                 "establish one if the repo has none.")
     parts.append(
         "## Conventions (this repo)\n"
-        f"- Verify gate: `{verify_cmd}` must exit 0 (0 FAIL) before the PR is ready.\n"
-        f"- Branch: `{auth.branch}`. One issue → one branch → one PR.\n"
+        f"{gate_line}\n"
+        f"- Branch: `{auth.branch}`.\n"
         "- Commits are signed per the repo's signing policy (see Worker contract below).\n"
-        "- Dry-run: PIPELINE_DRY_RUN=1 is the default; scripts print intended calls, mutate nothing.\n"
-        f"- The PR restates the done-criteria checklist and contains `Closes #{issue}`. Do not merge."
+        "- Dry-run: PIPELINE_DRY_RUN=1 is the default; scripts print intended calls, mutate nothing."
     )
     if resources.get("contract"):
-        parts.append("## Worker contract (CLAUDE.md — authoritative)\n```\n"
+        parts.append("## Worker contract (CLAUDE.md — authoritative excerpts)\n```\n"
                      + resources["contract"].rstrip() + "\n```")
     if resources.get("invoice_schema"):
         parts.append("## Invoice schema (schemas/invoice.json — your Invoice must conform)\n```json\n"
@@ -179,16 +190,17 @@ def _render_deterministic(
     if plan:
         blocks += [_units_section(plan), _staffing_section(plan)]
 
+    criteria = (plan or {}).get("criteria") or []
     blocks.append(_section(
         "TARGET STATE — DONE CRITERIA  (restate as a checklist in the PR body)",
-        _checklist(issue, verify_cmd),
+        _checklist(issue, verify_cmd, criteria),
     ))
     blocks.append(_section("ALLOWED ACTIONS", "\n".join(
         f"- {a}" for a in (
             "Read any file in the repository to establish context.",
             f"Create the feature branch `{auth.branch}` and commit there.",
             "Edit or create the files required to satisfy the acceptance criteria.",
-            f"Run `{verify_cmd}` locally as many times as needed.",
+            f"Run {_gate_ref(verify_cmd)} locally as many times as needed.",
             "Open exactly one pull request against `main`.",
         ))))
     blocks.append(_section("FORBIDDEN ACTIONS  (ADMIN constraint)", "\n".join(
@@ -219,8 +231,8 @@ def _render_deterministic(
         "and the conventions. Confirm your understanding against it. Do NOT fetch or research "
         "additional files unless a STOP CONDITION applies.",
         f"PHASE 2 — IMPLEMENT ({pb['IMPLEMENT']:,}): {impl_hint}. Commit incrementally on `{auth.branch}`.",
-        f"PHASE 3 — VERIFY ({pb['VERIFY']:,}): run `{verify_cmd}`. It must pass. Fix causes, not "
-        "symptoms. If it cannot pass within budget, open a DRAFT PR explaining which check fails.",
+        f"PHASE 3 — VERIFY ({pb['VERIFY']:,}): run {_gate_ref(verify_cmd)}. It must pass. Fix causes, "
+        "not symptoms. If it cannot pass within budget, open a DRAFT PR explaining which check fails.",
         f"PHASE 4 — COMMIT & PR ({pb['COMMIT & PR']:,}): stage only files you touched. Commit "
         f"(signed). Open one PR against `main` with the done-criteria checklist and `Closes #{issue}`. "
         "Stop. Return the Invoice.",
@@ -232,12 +244,13 @@ def _render_deterministic(
         f"#{issue} — {title}\n\n{body}",
     ))
     blocks.append(_section(
-        "INVOICE FORMAT  (emit this JSON to stdout when the PR is open)",
+        "INVOICE FORMAT  (emit this exact JSON shape to stdout when the PR is open; "
+        "status is one of completed | failed | partial | needs-human)",
         "```json\n{\n"
         f'  "invoice_id": "{auth.session_id}",\n'
         f'  "issue": {issue},\n'
         f'  "repo": "{repo}",\n'
-        '  "status": "completed",            // completed|failed|partial|needs-human\n'
+        '  "status": "completed",\n'
         f'  "route_used": "{auth.route}",\n'
         '  "pr_number": null,\n'
         '  "summary": "<one sentence describing what was done>",\n'

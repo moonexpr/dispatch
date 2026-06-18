@@ -43,7 +43,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tuning  # noqa: E402
 
 # --- Schema (HANDOFF §5.3) -------------------------------------------------
-ACTIONS = ("implement", "needs-human", "wont-do", "duplicate?")
+# "decompose" = an [Epic]/container issue: not an atomic unit of work; selection
+# expands it into its constituent sub-issues rather than dispatching it directly.
+ACTIONS = ("implement", "needs-human", "wont-do", "duplicate?", "decompose")
 SCOPES = ("xs", "s", "m", "l")
 ROUTES = ("gen-local", "gen-default", "gen-frontier")
 
@@ -83,6 +85,16 @@ def _norm(title: str, body: str) -> str:
     return f"{title}\n{body}".lower()
 
 
+def _is_epic(title: str) -> bool:
+    """An ``[Epic]`` container/tracker issue — not a single unit of work.
+
+    Detected structurally from the title prefix (the GitHub convention) rather
+    than by keyword, so a child issue that merely *cites* its parent (e.g.
+    ``**Parent epic:** #1`` in the body) is never misread as an epic itself.
+    """
+    return title.strip().lower().startswith("[epic]")
+
+
 def classify(title: str, body: str) -> TriageResult:
     """Deterministic, network-free classification."""
     text = _norm(title, body)
@@ -100,8 +112,12 @@ def classify(title: str, body: str) -> TriageResult:
     else:
         scope = "m"
 
-    # Action.
-    if has(_DUP_HINTS):
+    # Action. An [Epic] is a container of sub-issues, not an atomic deliverable:
+    # route it to decomposition (selection expands it into its constituents)
+    # before any keyword triage, since the structural signal is authoritative.
+    if _is_epic(title):
+        action = "decompose"
+    elif has(_DUP_HINTS):
         action = "duplicate?"
     elif has(_WONTDO_HINTS):
         action = "wont-do"

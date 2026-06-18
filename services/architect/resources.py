@@ -86,12 +86,45 @@ def functions(text: str) -> List[str]:
     return sorted(set(_FUNC_RE.findall(text)))
 
 
-def _read_capped(path: str, cap: int = _CAP_BYTES):
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        data = fh.read()
+def _cap(data: str, cap: int):
     if len(data) > cap:
         return data[:cap].rstrip() + "\n… (truncated)\n", True
     return data, False
+
+
+def _read_capped(path: str, cap: int = _CAP_BYTES):
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return _cap(fh.read(), cap)
+
+
+# Sections of the worker contract to embed; everything else (intro pointer,
+# solo-dev operator mode, ruflo execution-layer detail) is dropped as N/A to an
+# autonomous worker.
+_CONTRACT_KEEP = ("the contract", "security posture", "working agreement")
+
+
+def _filter_contract(text: str) -> str:
+    """Embed only the worker-relevant sections of CLAUDE.md: the H1 title plus the
+    contract / security-posture / working-agreement sections. If none of those
+    headings are found, return the text unchanged so a differently-structured
+    contract still embeds."""
+    lines = text.splitlines()
+    title = next((ln for ln in lines
+                  if ln.startswith("# ") and not ln.startswith("## ")), "")
+    kept: List[str] = []
+    keep = False
+    for ln in lines:
+        if ln.startswith("## "):
+            keep = any(k in ln[3:].strip().lower() for k in _CONTRACT_KEEP)
+            if keep:
+                kept.append(ln)
+            continue
+        if keep:
+            kept.append(ln)
+    if not kept:
+        return text
+    body = "\n".join(kept).strip()
+    return f"{title}\n\n{body}" if title else body
 
 
 def gather(job: Dict[str, Any], repo_root: str) -> Dict[str, Any]:
@@ -113,7 +146,9 @@ def gather(job: Dict[str, Any], repo_root: str) -> Dict[str, Any]:
     contract = None
     cpath = os.path.join(repo_root, "CLAUDE.md")
     if os.path.isfile(cpath):
-        contract, ctr = _read_capped(cpath, cap=tuning.RES_CAPS["contract_cap"])
+        with open(cpath, encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+        contract, ctr = _cap(_filter_contract(raw), tuning.RES_CAPS["contract_cap"])
         if ctr:
             truncations.append("CLAUDE.md")
 

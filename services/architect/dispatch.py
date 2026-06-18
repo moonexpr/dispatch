@@ -23,10 +23,16 @@ Sources (choose one; fixture is the offline default)
 Ranking is deterministic and offline by default (RANKER_OFFLINE). Pass
 `--rank-llm` to resolve the ordering with a model instead.
 
+An [Epic] is a container, not a unit of work: it is never selected as the
+primary or by `--all`. Pass `--issue <epic>` to decompose one into a work order
+per constituent child (children declare membership via `Parent epic: #N`).
+
 Output
 ------
   default            the primary work order (plain text) to stdout
   --all              every eligible work order, ranked, divider-separated
+  --issue N          the work order for issue N — or, if N is an [Epic], one per
+                     constituent child issue (decomposition)
   --json             machine envelope: {job fields, authorization, work_order}
 
 Exit codes: 0 a work order emitted; 1 runtime error; 2 bad args;
@@ -55,10 +61,13 @@ import approval as _approval      # noqa: E402
 import resources as _resources    # noqa: E402
 import decompose as _decompose    # noqa: E402
 import workorder as _workorder    # noqa: E402
+import verify as _verify          # noqa: E402
 import tuning                     # noqa: E402
 
 _CLASSIFIER = os.path.join(_HERE, "../classifier/classify.py")
 _DIVIDER = "\n\n" + ("─" * 72) + "\n\n"
+# Per-run cache so the verify-gate probe hits each target repo at most once.
+_VERIFY_CACHE: Dict[str, str] = {}
 
 
 def _classify(item: Dict[str, Any], python_bin: str) -> Dict[str, Any]:
@@ -116,12 +125,14 @@ def _build_parser() -> argparse.ArgumentParser:
                         "overridable via DISPATCH_ARTIFACTS_DIR")
     p.add_argument("--issue", type=int, metavar="N",
                    help="emit the work order for issue N chosen from the DAG (operator override: "
-                        "bypasses the eligibility filter; notes unmet dependencies)")
+                        "bypasses the eligibility filter; notes unmet dependencies). If N is an "
+                        "[Epic], emit a work order for each of its constituent child issues.")
     p.add_argument("--json", action="store_true",
                    help="emit a machine envelope instead of plain work-order text")
-    p.add_argument("--verify-cmd", default=os.environ.get("DISPATCH_VERIFY_CMD",
-                   "bash scripts/smoke.sh"), metavar="CMD",
-                   help="the gate the Engineer must make green (default: bash scripts/smoke.sh)")
+    p.add_argument("--verify-cmd", default=None, metavar="CMD",
+                   help="override the gate the Engineer must make green. Default: auto-detect "
+                        "from the TARGET repo (scripts/smoke.sh, then npm/make), else a generic "
+                        "instruction. The DISPATCH_VERIFY_CMD env var also overrides.")
     return p
 
 
@@ -133,16 +144,25 @@ def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
     --issue operator-selection path so both emit byte-identical work orders.
     """
     n = item["number"]
+    repo_slug = item.get("repository", "")
+    # The verify gate is the TARGET repo's, not the dispatch repo's. Live sources
+    # (--repo/--project) are probed via gh; the offline fixture/self path reads
+    # the local tree. An explicit --verify-cmd / DISPATCH_VERIFY_CMD wins.
+    verify_cmd = _verify.resolve_verify_cmd(
+        repo_slug=repo_slug, repo_root=repo_root,
+        override=args.verify_cmd or os.environ.get("DISPATCH_VERIFY_CMD"),
+        live=bool(args.repo or args.project),
+        gh_bin=os.environ.get("GH_BIN", "gh"), cache=_VERIFY_CACHE)
     job = {
-        "job_id": f"dispatch-issue-{n}", "issue": n, "repo": item.get("repository", ""),
+        "job_id": f"dispatch-issue-{n}", "issue": n, "repo": repo_slug,
         "title": item.get("title", ""), "body": item.get("body", ""),
         "route": triage["route"], "scope": triage["scope"], "confidence": triage["confidence"],
     }
     res = _resources.gather(job, repo_root)
-    wplan = _decompose.plan(job, res["discovered"], verify_cmd=args.verify_cmd)
+    wplan = _decompose.plan(job, res["discovered"], verify_cmd=verify_cmd)
     auth = _approval.approve(job, triage, dry_run=dry_run)
     text = _workorder.render(job, triage, auth, resources=res, plan=wplan,
-                             llm=args.llm, verify_cmd=args.verify_cmd)
+                             llm=args.llm, verify_cmd=verify_cmd)
     envelope = {**job, "authorization": auth.to_dict(),
                 "units": wplan["units"], "staffing": wplan["staffing"],
                 "work_order": text}
@@ -174,6 +194,8 @@ def _eligibility_map(ranked: List[Dict[str, Any]], python_bin: str,
         action, conf = triage.get("action"), triage.get("confidence", 0.0)
         if action == "implement" and conf >= confidence:
             out[n] = "eligible"
+        elif action == "decompose":
+            out[n] = "decompose (epic)"
         elif action != "implement":
             out[n] = f"skip ({action})"
         else:
@@ -229,9 +251,62 @@ def _run_dag(args: argparse.Namespace, ranked: List[Dict[str, Any]],
     return 0
 
 
+def _decompose_epic(args: argparse.Namespace, ranked: List[Dict[str, Any]],
+                    epic: Dict[str, Any], python_bin: str) -> int:
+    """Decompose an [Epic] into its constituents: one work order per implementable
+    child. Children declare membership with `Parent epic: #N`, which the dependency
+    graph resolves as deps[epic]; they are emitted in ranked (foundational) order."""
+    target = int(epic["number"])
+    graph = _dag.build(ranked, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+    child_nums = set(graph.deps.get(target, []))
+    children = [it for it in ranked if int(it["number"]) in child_nums]
+    print(f"── ADMIN: decompose epic #{target} → {len(children)} constituent "
+          f"issue(s): {', '.join('#'+str(int(c['number'])) for c in children) or '—'} ──",
+          file=sys.stderr)
+    if not children:
+        print(f"dispatch: epic #{target} has no constituent issues in the queue "
+              f"(a child declares membership with 'Parent epic: #{target}' in its body); "
+              f"nothing to decompose", file=sys.stderr)
+        return 3
+
+    dry_run = os.environ.get("PIPELINE_DRY_RUN", "1") != "0"
+    repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
+    texts, envelopes = [], []
+    for child in children:
+        c = int(child["number"])
+        try:
+            ctri = _classify(child, python_bin)
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+            print(f"   #{c}: classify failed ({exc}) — skipping", file=sys.stderr)
+            continue
+        if ctri.get("action") != "implement":
+            print(f"   #{c}: {ctri.get('action')} — not implementable, skipping",
+                  file=sys.stderr)
+            continue
+        text, envelope = _workorder_for(child, ctri, args, dry_run=dry_run,
+                                        repo_root=repo_root)
+        texts.append(text)
+        envelopes.append(envelope)
+
+    if not texts:
+        print(f"dispatch: epic #{target} has no implementable constituent issues",
+              file=sys.stderr)
+        return 3
+
+    print(f"── ARCHITECT: {len(texts)} work order(s) from epic #{target} ──",
+          file=sys.stderr)
+    if args.json:
+        print(json.dumps(envelopes, ensure_ascii=False, indent=2))
+    else:
+        print(_DIVIDER.join(texts))
+    return 0
+
+
 def _run_issue(args: argparse.Namespace, ranked: List[Dict[str, Any]],
                python_bin: str) -> int:
-    """Emit the work order for an operator-selected issue (eligibility overridden)."""
+    """Emit the work order for an operator-selected issue (eligibility overridden).
+
+    If the selection is an [Epic], decompose it into one work order per child."""
     target = int(args.issue)
     item = next((it for it in ranked if int(it["number"]) == target), None)
     if item is None:
@@ -242,6 +317,9 @@ def _run_issue(args: argparse.Namespace, ranked: List[Dict[str, Any]],
     except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         print(f"dispatch: classify failed for #{target} ({exc})", file=sys.stderr)
         return 1
+
+    if triage.get("action") == "decompose":
+        return _decompose_epic(args, ranked, item, python_bin)
 
     action, conf = triage.get("action"), triage.get("confidence", 0.0)
     note = ("eligible" if action == "implement" and conf >= args.confidence
@@ -280,8 +358,14 @@ def _run_dispatch(args: argparse.Namespace, ranked: List[Dict[str, Any]],
             continue
         action, conf = triage.get("action"), triage.get("confidence", 0.0)
         ok = action == "implement" and conf >= args.confidence
-        reason = "eligible" if ok else (
-            f"skip ({action})" if action != "implement" else f"skip (conf {conf} < {args.confidence})")
+        if ok:
+            reason = "eligible"
+        elif action == "decompose":
+            reason = f"decompose (epic — emit children via --issue {n} or --all)"
+        elif action != "implement":
+            reason = f"skip ({action})"
+        else:
+            reason = f"skip (conf {conf} < {args.confidence})"
         print(f"  {pos}. #{n} [{triage.get('scope')}/{triage.get('route')} "
               f"conf {conf}] {action} — {reason}: {item.get('title','')}", file=sys.stderr)
         if ok:

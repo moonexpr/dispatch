@@ -34,10 +34,24 @@ class Graph:
     cycles: List[int]             # numbers participating in a dependency cycle
 
 
+_MD_EMPHASIS = re.compile(r"[*_`]+")
+
+
+def _strip_md(text: str) -> str:
+    """Drop markdown emphasis/code runs (``*``, ``_``, `````) so cross-reference
+    patterns match real GitHub bodies, e.g. ``**Parent epic:** #1``. Only the
+    formatting characters are removed; ``#<number>`` references are untouched."""
+    return _MD_EMPHASIS.sub("", text)
+
+
 def _refs(text: str, patterns) -> set:
     out: set = set()
+    text = _strip_md(text)
     for pat in patterns:
-        for m in re.finditer(pat, text, re.IGNORECASE):
+        # MULTILINE so line-anchored patterns (e.g. task-list items) match each
+        # body line; IGNORECASE for prose phrasing. Existing patterns use no
+        # ^/$ anchor, so MULTILINE leaves their matches unchanged.
+        for m in re.finditer(pat, text, re.IGNORECASE | re.MULTILINE):
             out.add(int(m.group(1)))
     return out
 
@@ -47,8 +61,8 @@ def build(items: List[Dict[str, Any]], *, fwd, rev) -> Graph:
 
     `fwd` patterns capture "this issue depends on #N"; `rev` patterns capture
     "this issue unblocks/blocks #N" (=> #N depends on this issue). Each pattern
-    has a single `(\\d+)` group. Mirrors the old inline parse in ranker.py so the
-    offline ranking is byte-for-byte unchanged.
+    has a single `(\\d+)` group. Markdown emphasis is stripped before matching
+    (see `_refs`), so references written as `**Parent epic:** #N` are read.
     """
     present = {int(i["number"]) for i in items}
     titles = {int(i["number"]): (i.get("title") or "") for i in items}

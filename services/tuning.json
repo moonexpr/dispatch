@@ -8,7 +8,7 @@
       "hints": {
         "xs": ["typo", "rename", "comment", "one-line", "one line", "wording", "docstring", "lint", "format"],
         "s": ["add a flag", "small", "minor", "tweak", "adjust", "bump version"],
-        "l": ["refactor", "redesign", "architecture", "migration", "epic", "rewrite", "overhaul", "multi-service", "breaking change"],
+        "l": ["refactor", "redesign", "architecture", "migration", "rewrite", "overhaul", "multi-service", "breaking change"],
         "wontdo": ["wontfix", "won't do", "wont do", "by design", "not planned"],
         "dup": ["duplicate", "dupe", "already reported", "same as #"],
         "vague": ["not sure", "maybe", "somehow", "investigate", "unclear", "?", "thoughts", "discuss"]
@@ -37,21 +37,22 @@
       }
     },
     "ranker": {
-      "_doc": "Offline deterministic dependency parse. Regexes (each with one (\\d+) capture group) that find issue cross-references in title+body. fwd = 'this issue depends on #N'. rev = 'this issue unblocks/blocks #N' (=> #N depends on this issue).",
+      "_doc": "Offline deterministic dependency parse. Regexes (each with one (\\d+) capture group) that find issue cross-references in title+body. Markdown emphasis is stripped and matching is MULTILINE before these apply. fwd = 'this issue depends on #N' (incl. an epic body task-listing a constituent '- [ ] #N'). rev = 'this issue unblocks/blocks #N' (=> #N depends on this issue) — incl. a child naming its 'parent epic: #N', which makes the epic depend on (rank after) the child.",
       "fwd_patterns": [
         "blocked\\s+by\\s+#(\\d+)",
         "depends?\\s+on\\s+#(\\d+)",
         "requires?\\s+#(\\d+)",
         "needs\\s+#(\\d+)",
-        "parent\\s+epic:?\\s*#(\\d+)",
         "follow[-\\s]?up\\s+to\\s+#(\\d+)",
         "prerequisite:?\\s*#(\\d+)",
-        "after\\s+#(\\d+)"
+        "after\\s+#(\\d+)",
+        "^\\s*[-*]\\s*\\[[ xX]\\]\\s*#(\\d+)"
       ],
       "rev_patterns": [
         "unblocks?:?\\s*(?:issue\\s*)?#(\\d+)",
         "blocks?\\s+#(\\d+)",
-        "prerequisite\\s+for\\s+#(\\d+)"
+        "prerequisite\\s+for\\s+#(\\d+)",
+        "parent\\s+epic:?\\s*#(\\d+)"
       ]
     }
   },

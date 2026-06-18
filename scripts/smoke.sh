@@ -48,7 +48,7 @@ section "§7.2 classify.py: schema-valid + deterministic on 3 fixtures"
 schema_ok() {
   jq -e '
     . as $r
-    | (["implement","needs-human","wont-do","duplicate?"] | index($r.action)) != null
+    | (["implement","needs-human","wont-do","duplicate?","decompose"] | index($r.action)) != null
     and (["xs","s","m","l"] | index($r.scope)) != null
     and (["gen-local","gen-default","gen-frontier"] | index($r.route)) != null
     and ($r.confidence | type) == "number"
@@ -269,6 +269,59 @@ else
   fail "services/tuning.json is not valid JSON"
 fi
 rm -rf "$DAGDIR"
+
+# ---------------------------------------------------------------------------
+section "§7.11 tighten work prompt: epic decomposition + issue-derived criteria + target-aware gate (offline)"
+EPQ="${ROOT}/services/architect/fixtures/epic-queue.json"
+
+# (a) Epic decomposition: --issue <epic> emits one work order per implementable child.
+ep1="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$EPQ" --issue 1 2>/dev/null)"; epc=$?
+ep1b="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$EPQ" --issue 1 2>/dev/null)"
+[[ $epc -eq 0 ]] && pass "dispatch --issue <epic> exits 0" || fail "epic decompose exit" "got $epc"
+[[ "$ep1" == "$ep1b" ]] && pass "epic decomposition is byte-identical across runs" || fail "epic decomposition nondeterministic"
+nwo="$(printf '%s\n' "$ep1" | grep -c '^# OBJECTIVE')"
+[[ "$nwo" == "2" ]] && pass "epic #1 decomposes into 2 child work orders (#4,#5)" || fail "epic child count" "got $nwo (want 2)"
+assert_contains "epic decomposition emits child #4 (Closes #4)" "$ep1" "Closes #4"
+assert_contains "epic decomposition emits child #5 (Closes #5)" "$ep1" "Closes #5"
+
+# (b) An [Epic] is a container, never dispatched as an atomic unit of work.
+epelig="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$EPQ" 2>&1 >/dev/null)"
+epdef="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$EPQ" 2>/dev/null)"
+assert_contains "classifier routes [Epic] #1 to decomposition" "$epelig" "decompose"
+assert_contains "default selection picks a child as primary (Closes #4)" "$epdef" "Closes #4"
+assert_not_contains "default selection never dispatches the [Epic] itself (no Closes #1)" "$epdef" "Closes #1"
+
+# (c) Issue-derived DONE CRITERIA: the child's own acceptance bullets become the checklist.
+dc4="$(printf '%s\n' "$ep1" | awk '/DONE CRITERIA/{f=1;next} f&&/^# /{exit} f')"
+assert_contains "DONE CRITERIA lifts a real issue bullet, not a generic placeholder" "$dc4" "the dev server starts without errors"
+crit="$(python3 -c "import sys; sys.path.insert(0,'${ROOT}/services/architect'); import decompose; print('|'.join(decompose.extract_criteria('## Acceptance criteria\n- alpha one\n- **beta** two\n')))")"
+[[ "$crit" == "alpha one|beta two" ]] && pass "extract_criteria lifts bullets (markdown stripped) under an acceptance heading" || fail "extract_criteria wrong" "got '$crit'"
+
+# (d) Target-aware verify gate (verify.py): override > detection (smoke.sh / npm / make) > GENERIC.
+vout="$(python3 - "${ROOT}" <<'PY'
+import os, sys, tempfile
+sys.path.insert(0, os.path.join(sys.argv[1], "services", "architect"))
+import verify
+res = {}
+with tempfile.TemporaryDirectory() as d:
+    npmd = os.path.join(d, "npm"); os.mkdir(npmd)
+    with open(os.path.join(npmd, "package.json"), "w") as fh:
+        fh.write('{"scripts": {"test": "jest"}}')
+    bare = os.path.join(d, "bare"); os.mkdir(bare)
+    res["npm"] = verify.resolve_verify_cmd(repo_root=npmd, live=False)
+    res["bare"] = verify.resolve_verify_cmd(repo_root=bare, live=False)
+    res["override"] = verify.resolve_verify_cmd(repo_root=bare, override="make check", live=False)
+res["smoke"] = verify.resolve_verify_cmd(repo_root=sys.argv[1], live=False)
+res["generic"] = verify.GENERIC
+for k, v in res.items():
+    print(f"{k}={v}")
+PY
+)"
+vget() { printf '%s\n' "$vout" | sed -n "s/^$1=//p"; }
+[[ "$(vget npm)" == "npm test" ]] && pass "verify gate resolves 'npm test' from package.json scripts" || fail "verify npm gate" "got '$(vget npm)'"
+[[ "$(vget bare)" == "$(vget generic)" ]] && pass "verify gate falls back to GENERIC for a bare repo" || fail "verify generic gate" "got '$(vget bare)'"
+[[ "$(vget smoke)" == "bash scripts/smoke.sh" ]] && pass "verify gate resolves 'bash scripts/smoke.sh' for the dispatch repo" || fail "verify smoke gate" "got '$(vget smoke)'"
+[[ "$(vget override)" == "make check" ]] && pass "verify gate honors an explicit override verbatim" || fail "verify override" "got '$(vget override)'"
 
 # ---------------------------------------------------------------------------
 section "§8 security guardrails (checkable)"

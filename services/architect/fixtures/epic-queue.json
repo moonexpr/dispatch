@@ -1,0 +1,26 @@
+[
+  {
+    "number": 1,
+    "title": "[Epic] Foundation & Tech Stack Setup",
+    "body": "## Goal\nBootstrap the app from the bare stub: scaffold the project and get a deployable baseline.\n\n## Success criteria\n- the app builds without errors\n- a preview deployment is live from `main`",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/1"
+  },
+  {
+    "number": 4,
+    "title": "Initialize the project scaffold",
+    "body": "**Parent epic:** #1 Foundation & Tech Stack Setup\n\n## What to do\nReplace the existing stub with a real, scaffolded project and wire up the base structure.\n\n## Acceptance criteria\n- package.json present with the framework dependencies\n- the dev server starts without errors\n- the base layout wraps every page",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/4"
+  },
+  {
+    "number": 5,
+    "title": "Build the site shell: header, footer, and global layout",
+    "body": "**Parent epic:** #1 Foundation & Tech Stack Setup\n\n## What to do\nAdd the shared header, footer, and a global layout used across every route.\n\n## Acceptance criteria\n- header and footer render on every route\n- the layout is responsive at a narrow breakpoint",
+    "labels": [{ "name": "queued" }],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/demo-repository/issues/5"
+  }
+]
