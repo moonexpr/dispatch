@@ -682,7 +682,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-section "§7.18 demo harness: snapshot capture (offline, drop-in fidelity)"
+section "§7.18 demo harness: snapshot + scenario mutator (offline, deterministic, drop-in)"
 # (§7.18 per the #51 section map — Pillar 5 debug & harness range, the shared
 # snapshot/mutate/replay slot. The issue #43 body's "§7.12" predates that map,
 # which reserves §7.12–§7.15 for the cron pillar. The mutator (#44) and replay
@@ -733,6 +733,45 @@ else
   pass "snapshot.sh is read-only (no mutating gh subcommand)"
 fi
 
+# --- E8-2 (#44) scenario mutator: EXTENDS §7.18 (the shared harness slot — no
+# new §7.x number; the duplicate-id guard collapses any 7.18.x). mutate.py is a
+# pure-Python, no-network overlay resolver over the committed base snapshot.
+SC="${ROOT}/scripts/demo/scenarios"
+MUT="${ROOT}/scripts/demo/mutate.py"
+PY="${PYTHON_BIN:-python3}"
+# Deterministic / idempotent: two runs on the same base+overlay are byte-identical.
+m1="$("$PY" "$MUT" --scenario "$SC/blank-vague-body.json" --base "$SNAP" 2>/dev/null)"
+m2="$("$PY" "$MUT" --scenario "$SC/blank-vague-body.json" --base "$SNAP" 2>/dev/null)"
+[[ -n "$m1" && "$m1" == "$m2" ]] && pass "mutator output is deterministic across runs" || fail "mutator nondeterministic"
+# Output sorted by issue number.
+if printf '%s' "$m1" | jq -e '[.[].number] == ([.[].number]|sort)' >/dev/null 2>&1; then
+  pass "mutator output sorted by issue number"
+else fail "mutator output not sorted"; fi
+# set-body actually mutates the targeted field (blank-vague-body empties #103).
+if printf '%s' "$m1" | jq -e 'any(.[]; .number==103 and (.body|length)==0)' >/dev/null 2>&1; then
+  pass "set-body mutates only the targeted field (#103 body emptied)"
+else fail "set-body did not empty #103 body"; fi
+# remove-issue drops the number; add-issue introduces a full issue object.
+rm="$("$PY" "$MUT" --scenario "$SC/drop-issue.json" --base "$SNAP" 2>/dev/null)"
+if printf '%s' "$rm" | jq -e 'all(.[]; .number != 105)' >/dev/null 2>&1; then pass "drop-issue removes #105"; else fail "drop-issue did not remove"; fi
+add="$("$PY" "$MUT" --scenario "$SC/add-bug.json" --base "$SNAP" 2>/dev/null)"
+if printf '%s' "$add" | jq -e 'any(.[]; .number==901)' >/dev/null 2>&1; then pass "add-issue introduces #901"; else fail "add-issue did not add"; fi
+# add-issue keeps labels object-shaped (drop-in fidelity for intake.py).
+if printf '%s' "$add" | jq -e '(.[] | select(.number==901) | .labels[0] | has("name"))' >/dev/null 2>&1; then
+  pass "add-issue preserves {name} label objects"
+else fail "add-issue labels not object-shaped"; fi
+# Base snapshot on disk is unchanged after a run (reset is free).
+cp "$SNAP" "${_smoke_rrdir}/snap-before.json"
+"$PY" "$MUT" --scenario "$SC/drop-issue.json" --base "$SNAP" >/dev/null 2>&1
+if cmp -s "$SNAP" "${_smoke_rrdir}/snap-before.json"; then pass "base snapshot untouched on disk (reset is free)"; else fail "mutator mutated the base snapshot"; fi
+# Resolved fixture is a valid drop-in for ./dispatch --fixture.
+mtmp="$(mktemp)"; printf '%s' "$m1" > "$mtmp"
+PIPELINE_DRY_RUN=1 ./dispatch --fixture "$mtmp" >/dev/null 2>&1 \
+  && pass "resolved fixture is a drop-in (dispatch exit 0)" || fail "resolved fixture rejected by dispatch"
+rm -f "$mtmp"
+# Output is always a top-level JSON array (full-replacement escape hatch shape).
+if printf '%s' "$add" | jq -e 'type=="array"' >/dev/null 2>&1; then pass "mutator emits a JSON array"; else fail "mutator output not an array"; fi
+
 # ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
@@ -762,7 +801,7 @@ dflt="$(env -u PIPELINE_DRY_RUN bash -c 'source "'"${ROOT}"'/scripts/lib/common.
 [[ "$dflt" == "1" ]] && pass "PIPELINE_DRY_RUN defaults ON (=1)" || fail "dry-run not default-on" "got '$dflt'"
 # Classifier (quarantine reader) has no exec capability. AST-based so the
 # docstring that *names* the forbidden APIs does not trip the check.
-if python3 - "${CLS}/classify.py" "${CLS}/classify_local_stub.py" <<'PY'
+if python3 - "${CLS}/classify.py" "${CLS}/classify_local_stub.py" "${ROOT}/scripts/demo/mutate.py" <<'PY'
 import ast, sys
 BAD_IMPORTS = {"subprocess", "pty", "ctypes", "multiprocessing"}
 BAD_NAMES = {"eval", "exec", "__import__", "compile"}
@@ -791,9 +830,9 @@ for path in sys.argv[1:]:
 sys.exit(1 if bad else 0)
 PY
 then
-  pass "classifier has zero exec/tool capability (quarantine reader)"
+  pass "classifier + scenario mutator have zero exec/tool capability (quarantine readers)"
 else
-  fail "classifier exposes exec capability"
+  fail "classifier or mutator exposes exec capability"
 fi
 # No real secret values committed: required-secret lines in example are empty/placeholder.
 leaked=""

@@ -1,0 +1,6 @@
+{
+  "base": "snapshots/demo-current.json",
+  "ops": [
+    {"op": "remove-issue", "number": 105}
+  ]
+}

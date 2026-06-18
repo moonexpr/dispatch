@@ -1,0 +1,6 @@
+{
+  "base": "snapshots/demo-current.json",
+  "ops": [
+    {"op": "set-body", "number": 103, "body": ""}
+  ]
+}

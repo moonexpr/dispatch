@@ -1,0 +1,14 @@
+{
+  "base": "snapshots/demo-current.json",
+  "ops": [
+    {"op": "add-issue", "issue": {
+      "number": 901,
+      "title": "Checkout returns 500 when the promo code field is left empty",
+      "body": "Submitting the checkout form with an empty promo code returns a 500 instead of treating it as no discount.\n\nSteps to reproduce:\n1. Add any item to the cart\n2. Go to checkout and leave the promo code field blank\n3. Click 'Place order'\n4. See a 500 error\n\nExpected: an empty promo code is treated as no discount and the order completes. Actual: 500 Internal Server Error.",
+      "labels": [{"name": "queued"}],
+      "assignees": [],
+      "url": "https://github.com/ReclaimByDesign/demo-repository/issues/901",
+      "state": "OPEN"
+    }}
+  ]
+}
