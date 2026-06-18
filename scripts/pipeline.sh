@@ -89,6 +89,11 @@ fi
 
 log "pipeline: repo=${PIPELINE_REPO:-<gh default>}  dry_run=${PIPELINE_DRY_RUN}  engineer=${_engineer##*/}"
 
+# One stable tick id per tick, shared by every stage's artifact dump (E2-1) so
+# all of a tick's artifacts (workorder.txt / job-request.json / invoice.json)
+# land under the same ${DISPATCH_ARTIFACTS_DIR}/<tick-id>/ directory.
+export DISPATCH_TICK_ID="${DISPATCH_TICK_ID:-tick-$(date -u +%Y%m%dT%H%M%SZ)}"
+
 # ---------------------------------------------------------------------------
 # Stage 0 — bootstrap labels (optional, idempotent).
 if [[ "${_bootstrap}" -eq 1 ]]; then
@@ -111,6 +116,13 @@ cat > "${_bridge}" <<BRIDGE
 #!/usr/bin/env bash
 set -euo pipefail
 invoice="\$("${_engineer}" "\$1")"
+# Per-stage artifact dump (E2-1): tap the Invoice into the tick dir, read-only.
+# Pure observability — the Invoice still flows engineer -> architect-intake below.
+if [[ -n "\${DISPATCH_ARTIFACTS_DIR:-}" ]]; then
+  _td="\${DISPATCH_ARTIFACTS_DIR}/\${DISPATCH_TICK_ID:-tick-unknown}"
+  mkdir -p "\${_td}"
+  printf '%s\n' "\${invoice}" > "\${_td}/invoice.json"
+fi
 bash "${SCRIPT_DIR}/architect-intake.sh" "\${invoice}"
 BRIDGE
 chmod +x "${_bridge}"

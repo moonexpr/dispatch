@@ -146,6 +146,34 @@ bash scripts/smoke.sh
 Offline + dry-run acceptance runner; exit 0 = all assertions pass. No network,
 no GitHub, no model calls. This is also what CI runs.
 
+## Inspecting a tick (`DISPATCH_ARTIFACTS_DIR`)
+
+Set `DISPATCH_ARTIFACTS_DIR` to capture a tick's intermediate state for
+inspection (the substrate the `--until` / replay debug tooling reads). Each
+tick writes its artifacts under a tick-scoped subdirectory:
+
+```
+$DISPATCH_ARTIFACTS_DIR/
+├── issue-dag.json          # static dependency view (also from ./dispatch --dag)
+├── issue-dag.md            # Mermaid + table, human-browsable
+└── <tick-id>/              # one dir per tick (tick-<UTC>, or a threaded id)
+    ├── workorder.txt       # the rendered work order (WORK PLAN …)
+    ├── job-request.json    # the Job Request handed to the Engineer (schemas/job-request.json)
+    └── invoice.json        # the Invoice the Engineer returned (live ticks)
+```
+
+```bash
+# Dump one tick's work order + job request from the offline fixture queue:
+DISPATCH_ARTIFACTS_DIR=./artifacts ./dispatch --fixture services/architect/fixtures/play-queue.json
+ls ./artifacts/tick-*/
+```
+
+Dumping is a pure side-effect: gated on `DISPATCH_ARTIFACTS_DIR` being set, it
+never changes stdout or GitHub state and runs under `PIPELINE_DRY_RUN=1` too
+(observability, not a mutation). When unset, behaviour is unchanged.
+`pipeline.sh` threads one `DISPATCH_TICK_ID` across a tick so every stage's
+artifacts share the same `<tick-id>/` directory.
+
 ## Layout
 
 ```

@@ -69,6 +69,52 @@ _DIVIDER = "\n\n" + ("─" * 72) + "\n\n"
 # Per-run cache so the verify-gate probe hits each target repo at most once.
 _VERIFY_CACHE: Dict[str, str] = {}
 
+# --- Per-stage artifact dump (E2-1) ----------------------------------------
+# When DISPATCH_ARTIFACTS_DIR is set, a tick writes its intermediate state
+# (rendered work order, Job Request) under <DISPATCH_ARTIFACTS_DIR>/<tick-id>/
+# so the operator has a complete, inspectable record and the stage-gating
+# (E2-2) / replay (E2-3) work has a substrate to read. Dumping is a pure
+# side-effect: gated on DISPATCH_ARTIFACTS_DIR, it never changes stdout or
+# GitHub state, and runs under PIPELINE_DRY_RUN=1 too (observability, not a
+# mutation). The DAG dump (--dag) keeps writing at the artifacts-dir top level.
+_JOB_FIELDS = ("job_id", "issue", "repo", "title", "body", "route", "scope", "confidence")
+
+
+def _tick_id() -> str:
+    """Stable id for this tick: a pipeline-threaded DISPATCH_TICK_ID if present,
+    else a fresh tick-<UTC> stamp."""
+    tid = os.environ.get("DISPATCH_TICK_ID")
+    if tid:
+        return tid
+    import datetime
+    return "tick-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _tick_artifacts_dir() -> "str | None":
+    """The per-tick artifact directory (created on demand). None when dumping is off."""
+    base = os.environ.get("DISPATCH_ARTIFACTS_DIR")
+    if not base:
+        return None
+    d = os.path.join(base, _tick_id())
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _dump_stage_artifacts(text: str, envelope: Dict[str, Any]) -> None:
+    """Write workorder.txt + job-request.json for the primary job (no-op if off).
+
+    job-request.json carries exactly the schemas/job-request.json fields — the
+    same Job Request shape the Architect hands the Engineer."""
+    d = _tick_artifacts_dir()
+    if d is None:
+        return
+    with open(os.path.join(d, "workorder.txt"), "w", encoding="utf-8") as fh:
+        fh.write(text if text.endswith("\n") else text + "\n")
+    job = {k: envelope[k] for k in _JOB_FIELDS}
+    with open(os.path.join(d, "job-request.json"), "w", encoding="utf-8") as fh:
+        json.dump(job, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+
 
 def _classify(item: Dict[str, Any], python_bin: str) -> Dict[str, Any]:
     """Run the deterministic classifier as a subprocess (quarantine reader)."""
@@ -293,6 +339,7 @@ def _decompose_epic(args: argparse.Namespace, ranked: List[Dict[str, Any]],
               file=sys.stderr)
         return 3
 
+    _dump_stage_artifacts(texts[0], envelopes[0])
     print(f"── ARCHITECT: {len(texts)} work order(s) from epic #{target} ──",
           file=sys.stderr)
     if args.json:
@@ -336,6 +383,7 @@ def _run_issue(args: argparse.Namespace, ranked: List[Dict[str, Any]],
     dry_run = os.environ.get("PIPELINE_DRY_RUN", "1") != "0"
     repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
     text, envelope = _workorder_for(item, triage, args, dry_run=dry_run, repo_root=repo_root)
+    _dump_stage_artifacts(text, envelope)
     if args.json:
         print(json.dumps(envelope, ensure_ascii=False, indent=2))
     else:
@@ -387,6 +435,7 @@ def _run_dispatch(args: argparse.Namespace, ranked: List[Dict[str, Any]],
         texts.append(text)
         envelopes.append(envelope)
 
+    _dump_stage_artifacts(texts[0], envelopes[0])
     primary = chosen[0]["item"]["number"]
     print(f"── ARCHITECT: primary #{primary} "
           f"(scope {chosen[0]['triage']['scope']}, route {chosen[0]['triage']['route']}, "

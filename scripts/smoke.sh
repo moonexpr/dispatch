@@ -348,6 +348,49 @@ vget() { printf '%s\n' "$vout" | sed -n "s/^$1=//p"; }
 [[ "$(vget override)" == "make check" ]] && pass "verify gate honors an explicit override verbatim" || fail "verify override" "got '$(vget override)'"
 
 # ---------------------------------------------------------------------------
+section "§7.16 debug: DISPATCH_ARTIFACTS_DIR per-stage artifact dump (offline, deterministic)"
+# (§7.16 per the #51 section map — debug & harness range. The issue body's
+# "§7.14" predates that map.) Reuse §7.9's work-order fixture (FXQ); the dump
+# is gated on DISPATCH_ARTIFACTS_DIR, so §7.9 itself is unaffected.
+ADIR="$(mktemp -d 2>/dev/null || mktemp -d -t adir)"
+DISPATCH_ARTIFACTS_DIR="$ADIR" ./dispatch --fixture "$FXQ" >/dev/null 2>&1
+tickdir="$(find "$ADIR" -maxdepth 1 -type d -name 'tick-*' 2>/dev/null | head -1)"
+[[ -n "$tickdir" ]] && pass "a tick-<id> subdir is created under DISPATCH_ARTIFACTS_DIR" || fail "no tick-* subdir created"
+if [[ -n "$tickdir" && -f "$tickdir/workorder.txt" ]]; then
+  pass "workorder.txt dumped"
+  assert_contains "workorder.txt is the real rendered order (WORK PLAN header)" "$(cat "$tickdir/workorder.txt")" "WORK PLAN"
+else
+  fail "workorder.txt missing in tick dir"
+fi
+if [[ -n "$tickdir" && -f "$tickdir/job-request.json" ]]; then
+  pass "job-request.json dumped"
+  if python3 - "$tickdir/job-request.json" <<'PY'
+import json, sys
+REQ = {"job_id", "issue", "repo", "title", "body", "route", "scope", "confidence"}
+ROUTE = {"gen-local", "gen-default", "gen-frontier"}; SCOPE = {"xs", "s", "m", "l"}
+j = json.load(open(sys.argv[1]))
+errs = []
+if set(j) != REQ: errs.append(f"keys differ: {sorted(set(j) ^ REQ)}")
+if not isinstance(j.get("issue"), int): errs.append("issue not int")
+if j.get("route") not in ROUTE: errs.append("route invalid")
+if j.get("scope") not in SCOPE: errs.append("scope invalid")
+c = j.get("confidence")
+if not isinstance(c, (int, float)) or not 0 <= c <= 1: errs.append("confidence invalid")
+if not isinstance(j.get("repo"), str): errs.append("repo not string")
+sys.exit(1 if errs else 0)
+PY
+  then pass "job-request.json validates against schemas/job-request.json (structural, per §7.7)"
+  else fail "job-request.json failed schema validation"
+  fi
+else
+  fail "job-request.json missing in tick dir"
+fi
+# No regression: the --dag artifact still lands at the artifacts-dir top level (§7.10).
+DISPATCH_ARTIFACTS_DIR="$ADIR/dag" ./dispatch --dag --fixture "$FXQ" >/dev/null 2>&1
+[[ -f "$ADIR/dag/issue-dag.json" ]] && pass "issue-dag.json still produced (no §7.10 regression)" || fail "issue-dag.json regressed"
+rm -rf "$ADIR"
+
+# ---------------------------------------------------------------------------
 section "§7.12 cron: flock tick mutex serializes overlapping ticks (offline, deterministic)"
 LOCKD="$(mktemp -d 2>/dev/null || mktemp -d -t dlock)"
 LF="${LOCKD}/tick.lock"
