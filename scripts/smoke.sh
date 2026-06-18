@@ -32,6 +32,30 @@ assert_not_contains() { case "$2" in *"$3"*) fail "$1" "unexpected: $3";; *) pas
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# ===========================================================================
+# §7 SECTION-NUMBER MAP — single source of truth (smoke-sections-v1, issue #51)
+# ---------------------------------------------------------------------------
+# Every pillar draws its NEW §7.x sections from its reserved range below. The
+# duplicate-id guard near the end of the §7 region (the "section-numbering
+# authority" section) fails the suite if two sections ever share a number.
+#
+# This map is the AUTHORITY: where an individual issue body names a §7.x
+# number, this map wins (several issue bodies were filed in parallel and
+# collide — that is the bug this section closes). Pick the next free number
+# inside your pillar's range; never reuse a number already declared above.
+# Gaps are allowed (§7.8 is intentionally vacant — a retired early draft);
+# only DUPLICATES are forbidden.
+#
+#   §7.1–§7.10   Foundational pipeline ......... FROZEN (existing; §7.8 vacant)
+#   §7.11        Architect work-prompt ......... FROZEN (existing)
+#   §7.12–§7.15  Pillar 1 · Cron / unattended .. flock · reaper · heartbeat · scheduler
+#   §7.16–§7.18  Pillar 5 · Debug & harness .... artifact-dump · stage-gating · snapshot/mutate/replay
+#   §7.19–§7.20  Pillar 4 · Monitoring ......... run-ledger · digest renderer
+#   §7.21–§7.23  Pillar 3 · Budget ............. claude-monitor · invoice reconcile · soft-cap
+#   §7.24–§7.25  Day 3 · Research-mode ......... gap-detection · research order · DAG embed
+#   §7.26–§7.27  Day 3 · Integration & runbook . full-tick smoke · operator runbook
+# ===========================================================================
+
 # ---------------------------------------------------------------------------
 section "§7.1 bootstrap-labels.sh idempotent (dry-run, no-op, exit 0)"
 r1="$(scripts/bootstrap-labels.sh 2>/dev/null)"; c1=$?
@@ -322,6 +346,28 @@ vget() { printf '%s\n' "$vout" | sed -n "s/^$1=//p"; }
 [[ "$(vget bare)" == "$(vget generic)" ]] && pass "verify gate falls back to GENERIC for a bare repo" || fail "verify generic gate" "got '$(vget bare)'"
 [[ "$(vget smoke)" == "bash scripts/smoke.sh" ]] && pass "verify gate resolves 'bash scripts/smoke.sh' for the dispatch repo" || fail "verify smoke gate" "got '$(vget smoke)'"
 [[ "$(vget override)" == "make check" ]] && pass "verify gate honors an explicit override verbatim" || fail "verify override" "got '$(vget override)'"
+
+# ---------------------------------------------------------------------------
+# §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
+# MAP at the top of the §7 region: no two §7.x sections may share a number.
+# Gaps are allowed; only duplicates fail. This guard lets parallel pillar
+# issues add §7.x sections without silently colliding.
+section "§7 section-numbering authority — duplicate §7.x id guard (smoke-sections-v1)"
+# Duplicated values from a newline-delimited list on stdin (prints nothing if none).
+dup_ids() { sort | uniq -d; }
+# §7.x numbers actually declared via section "§7.N ..." in a script file.
+declared_7x() { grep -oE 'section "§?7\.[0-9]+' "$1" | grep -oE '7\.[0-9]+'; }
+real_ids="$(declared_7x "${BASH_SOURCE[0]}")"
+real_dups="$(printf '%s\n' "$real_ids" | dup_ids)"
+if [[ -z "$real_dups" ]]; then
+  pass "no duplicate §7.x section ids in smoke.sh ($(printf '%s\n' "$real_ids" | grep -c .) sections)"
+else
+  fail "duplicate §7.x section ids present" "$(printf '%s' "$real_dups" | tr '\n' ' ')"
+fi
+# Negative self-test: the guard must FLAG a duplicate when one is injected.
+inj_dups="$(printf '7.3\n7.9\n7.3\n' | dup_ids)"
+[[ "$inj_dups" == "7.3" ]] && pass "guard flags an injected duplicate (§7.3)" \
+  || fail "guard failed to detect an injected duplicate" "got '$inj_dups'"
 
 # ---------------------------------------------------------------------------
 section "§8 security guardrails (checkable)"
