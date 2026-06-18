@@ -48,7 +48,7 @@ case "${status}" in
     log "#${issue}: completed — arming auto-merge"
     if [[ -n "${pr_number}" ]]; then
       gh_mutate pr comment "${pr_number}" \
-        --body "**Engineer invoice:** ${summary}"
+        --body "**Engineer invoice** (route: \`${route_used}\`): ${summary}"
       # Arm auto-merge; branch protection still requires the human approval tap.
       gh_mutate pr merge "${pr_number}" --auto --squash \
         --subject "Closes #${issue}"
