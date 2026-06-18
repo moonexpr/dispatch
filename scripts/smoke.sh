@@ -280,6 +280,35 @@ PY
 )"
 [[ "$crender7_9" == "OK" ]] && pass "issue acceptance items reach DONE CRITERIA (gate + Closes kept; no-section -> generic fallback)" || fail "DONE CRITERIA render path" "got '$crender7_9'"
 
+# #34: per-unit TEST PROCEDURE matrix (setup/exercise/verify) — one block per unit,
+# rendered from each unit's deliverable/files/acceptance, placed after STAFFING and
+# before DONE CRITERIA, gated on plan (absent when plan is None). Reuses $wo1 (#2).
+assert_contains "emits a TEST PROCEDURE section" "$wo1" "TEST PROCEDURE"
+# Isolate the TEST PROCEDURE region (from its header to the next '# ' section header).
+tp7_9="$(printf '%s\n' "$wo1" | awk '/^# TEST PROCEDURE/{f=1;next} /^# /{f=0} f')"
+assert_contains "TEST PROCEDURE carries a Setup label" "$tp7_9" "Setup:"
+assert_contains "TEST PROCEDURE carries an Exercise label" "$tp7_9" "Exercise:"
+assert_contains "TEST PROCEDURE carries a Verify label" "$tp7_9" "Verify:"
+assert_contains "verify step dogfoods offline smoke" "$tp7_9" "scripts/smoke.sh"
+assert_contains "verify step is offline/dry-run" "$tp7_9" "PIPELINE_DRY_RUN=1"
+tpcount7_9="$(printf '%s\n' "$tp7_9" | grep -c 'Verify:')"
+[[ "$tpcount7_9" == "3" ]] && pass "one TEST PROCEDURE block per unit (#2 -> 3 units -> 3 blocks)" || fail "TEST PROCEDURE block count" "got $tpcount7_9"
+# The section is gated on plan: a no-plan render omits it entirely.
+noplan7_9="$(python3 - "${ACP}" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import workorder
+from approval import approve
+job = {"issue": 7, "repo": "acme/x", "title": "t", "body": "b",
+       "route": "gen-local", "scope": "s", "confidence": 0.9}
+triage = {"confidence": 0.9, "scope": "s", "route": "gen-local"}
+auth = approve(job, triage)
+wo = workorder.render(job, triage, auth, plan=None)
+print("ABSENT" if "TEST PROCEDURE" not in wo else "PRESENT")
+PY
+)"
+[[ "$noplan7_9" == "ABSENT" ]] && pass "TEST PROCEDURE omitted when plan is None (parity with UNITS/STAFFING gating)" || fail "TEST PROCEDURE no-plan gating" "got '$noplan7_9'"
+
 # ---------------------------------------------------------------------------
 section "§7.10 static issue DAG + operator issue selection (offline, deterministic)"
 DAGDIR="$(mktemp -d 2>/dev/null || mktemp -d -t dag)"

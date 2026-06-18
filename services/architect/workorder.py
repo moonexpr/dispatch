@@ -91,6 +91,30 @@ def _units_section(plan: Dict[str, Any]) -> str:
     )
 
 
+def _test_procedure_section(plan: Dict[str, Any], verify_cmd: str) -> str:
+    # One Setup/Exercise/Verify block per unit, derived deterministically from the
+    # unit fields decompose.plan already produced (deliverable/files/acceptance).
+    # No new model call, no web (D3); identical plan -> identical text.
+    lines = []
+    for u in plan["units"]:
+        files = ", ".join(f"`{f}`" for f in u["files"]) if u["files"] else ""
+        setup = (f"Artifacts under test: {files}." if files
+                 else "No new fixture required.")
+        exercise = f"Produce the deliverable — {u['deliverable']}"
+        verify = (f"Add an assertion to scripts/smoke.sh that proves: {u['acceptance']}; "
+                  "it must pass offline under PIPELINE_DRY_RUN=1.")
+        lines.append(
+            f"Unit {u['id']} — {u['specialization']['label']}\n"
+            f"  Setup:     {setup}\n"
+            f"  Exercise:  {exercise}\n"
+            f"  Verify:    {verify}"
+        )
+    return _section(
+        "TEST PROCEDURE  (prove each unit: setup → exercise → verify)",
+        "\n\n".join(lines),
+    )
+
+
 def _staffing_section(plan: Dict[str, Any]) -> str:
     s = plan["staffing"]
     head = f"Employ {s['agent_count']} agent(s) (swarm max {s['swarm_max']})."
@@ -188,7 +212,8 @@ def _render_deterministic(
 
     blocks = [header, objective, starting]
     if plan:
-        blocks += [_units_section(plan), _staffing_section(plan)]
+        blocks += [_units_section(plan), _staffing_section(plan),
+                   _test_procedure_section(plan, verify_cmd)]
 
     criteria = (plan or {}).get("criteria") or []
     blocks.append(_section(
@@ -272,7 +297,7 @@ _PROMPT_MASTER_SYSTEM = (
     "You are ARCHITECT drafting a self-contained work order for an autonomous coding ENGINEER "
     "that will open this document cold and act on it without follow-up. Apply ReAct + Stop "
     "Conditions. Make every word load-bearing — sharpen, never pad. You MUST preserve every "
-    "section (especially EMBEDDED RESOURCES, UNITS OF WORK, STAFFING, FORBIDDEN, STOP CONDITIONS, "
+    "section (especially EMBEDDED RESOURCES, UNITS OF WORK, STAFFING, TEST PROCEDURE, FORBIDDEN, STOP CONDITIONS, "
     "ISSUE, INVOICE) and MUST NOT invent scope or remove embedded resources. Output ONLY the work order."
 )
 
