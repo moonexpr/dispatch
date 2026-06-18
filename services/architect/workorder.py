@@ -91,6 +91,24 @@ def _units_section(plan: Dict[str, Any]) -> str:
     )
 
 
+def _dependencies_section(dag: Dict[str, Any]) -> str:
+    # Surface this issue's place in the queue graph: what it is blocked by
+    # (depends on) and what it blocks (its dependents). Edges come from the DAG
+    # built offline by dag.build (D3 — no web); URLs are rendered verbatim as
+    # text references, never fetched. Empty lists render the em-dash marker.
+    def _fmt(edges) -> str:
+        if not edges:
+            return "  —"
+        return "\n".join(f"  #{n} — {url}" if url else f"  #{n}" for n, url in edges)
+    blocked_by = dag.get("blocked_by") or []
+    blocks = dag.get("blocks") or []
+    return _section(
+        "DEPENDENCIES  (this issue's place in the queue DAG)",
+        "Blocked by (these must land first):\n" + _fmt(blocked_by)
+        + "\nBlocks (these wait on this issue):\n" + _fmt(blocks),
+    )
+
+
 def _test_procedure_section(plan: Dict[str, Any], verify_cmd: str) -> str:
     # One Setup/Exercise/Verify block per unit, derived deterministically from the
     # unit fields decompose.plan already produced (deliverable/files/acceptance).
@@ -181,6 +199,8 @@ def _render_deterministic(
     plan: Optional[Dict[str, Any]],
     repo_state: str,
     verify_cmd: str,
+    dag: Optional[Dict[str, Any]] = None,
+    issue_url: str = "",
 ) -> str:
     issue = int(job["issue"])
     repo = job.get("repo", "")
@@ -189,11 +209,15 @@ def _render_deterministic(
     conf = triage.get("confidence", job.get("confidence", 0.0))
     pb = auth.phase_budgets
 
+    header_rows = [
+        ("Authorized:", "ADMIN"),
+        ("Issue:", f"#{issue} — {repo}"),
+    ]
+    if issue_url:
+        header_rows.append(("Issue URL:", issue_url))
     header = _box(
         f"WORK PLAN — {auth.session_id}",
-        [
-            ("Authorized:", "ADMIN"),
-            ("Issue:", f"#{issue} — {repo}"),
+        header_rows + [
             ("Branch:", auth.branch),
             ("Route:", f"{auth.route}  (scope {auth.scope}, conf {conf})"),
             ("Agents:", f"{plan['staffing']['agent_count'] if plan else 1}"),
@@ -211,6 +235,8 @@ def _render_deterministic(
     )
 
     blocks = [header, objective, starting]
+    if dag is not None:
+        blocks.append(_dependencies_section(dag))
     if plan:
         blocks += [_units_section(plan), _staffing_section(plan),
                    _test_procedure_section(plan, verify_cmd)]
@@ -297,7 +323,7 @@ _PROMPT_MASTER_SYSTEM = (
     "You are ARCHITECT drafting a self-contained work order for an autonomous coding ENGINEER "
     "that will open this document cold and act on it without follow-up. Apply ReAct + Stop "
     "Conditions. Make every word load-bearing — sharpen, never pad. You MUST preserve every "
-    "section (especially EMBEDDED RESOURCES, UNITS OF WORK, STAFFING, TEST PROCEDURE, FORBIDDEN, STOP CONDITIONS, "
+    "section (especially EMBEDDED RESOURCES, DEPENDENCIES, UNITS OF WORK, STAFFING, TEST PROCEDURE, FORBIDDEN, STOP CONDITIONS, "
     "ISSUE, INVOICE) and MUST NOT invent scope or remove embedded resources. Output ONLY the work order."
 )
 
@@ -329,11 +355,13 @@ def render(
     llm: bool = False,
     repo_state: str = "",
     verify_cmd: str = "bash scripts/smoke.sh",
+    dag: Optional[Dict[str, Any]] = None,
+    issue_url: str = "",
 ) -> str:
     """Return the finished, self-contained work-order text for one authorized job."""
     draft = _render_deterministic(
         job, triage, auth, resources=resources, plan=plan,
-        repo_state=repo_state, verify_cmd=verify_cmd,
+        repo_state=repo_state, verify_cmd=verify_cmd, dag=dag, issue_url=issue_url,
     )
     if llm:
         sharpened = _render_llm(draft, auth)

@@ -309,6 +309,30 @@ PY
 )"
 [[ "$noplan7_9" == "ABSENT" ]] && pass "TEST PROCEDURE omitted when plan is None (parity with UNITS/STAFFING gating)" || fail "TEST PROCEDURE no-plan gating" "got '$noplan7_9'"
 
+# #35: surface the DAG blocks/blocked-by edges + issue URLs in the work order.
+# Fixture #2 is a root (blocked-by nothing) and blocks #5 and #7 (see §7.10 edges).
+assert_contains "emits a DEPENDENCIES section" "$wo1" "DEPENDENCIES"
+dep7_9="$(printf '%s\n' "$wo1" | awk '/^# DEPENDENCIES/{f=1;next} /^# /{f=0} f')"
+assert_contains "DEPENDENCIES has a Blocked by list" "$dep7_9" "Blocked by"
+assert_contains "DEPENDENCIES has a Blocks list" "$dep7_9" "Blocks"
+assert_contains "#2 blocks #5 (dependent surfaced)" "$dep7_9" "#5"
+assert_contains "#2 blocks #7 (dependent surfaced)" "$dep7_9" "#7"
+url5_9="$(jq -r '.[] | select(.number==5) | .url' "$FXQ")"
+assert_contains "Blocks entries carry the dependent's issue URL" "$dep7_9" "$url5_9"
+# #2 is a root: its Blocked by list renders the empty em-dash marker.
+blockedby7_9="$(printf '%s\n' "$dep7_9" | awk '/Blocked by/{f=1;next} /Blocks/{f=0} f')"
+assert_contains "#2 (a root) renders the empty Blocked-by marker" "$blockedby7_9" "—"
+# Header surfaces the dispatched issue's own URL.
+url2_9="$(jq -r '.[] | select(.number==2) | .url' "$FXQ")"
+assert_contains "header surfaces the issue URL" "$wo1" "$url2_9"
+# --json envelope carries the dependency edges as machine data.
+if PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" --json 2>/dev/null \
+   | jq -e '(.blocks | length > 0) and (.blocked_by | length == 0) and (.issue_url != "")' >/dev/null; then
+  pass "--json envelope carries blocks/blocked_by/issue_url for #2"
+else
+  fail "--json dependency envelope missing/empty"
+fi
+
 # ---------------------------------------------------------------------------
 section "§7.10 static issue DAG + operator issue selection (offline, deterministic)"
 DAGDIR="$(mktemp -d 2>/dev/null || mktemp -d -t dag)"

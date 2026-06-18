@@ -46,7 +46,7 @@ import os
 import subprocess
 import sys
 from dataclasses import asdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)                              # approval, workorder
@@ -182,12 +182,34 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _graph_and_urls(ranked: List[Dict[str, Any]]):
+    """Build the queue DAG once and the number->url map. Shared by every caller
+    so the graph is built once per invocation, not once per issue (#35). The DAG
+    is built offline/deterministically — same call as --dag (D3, no web)."""
+    graph = _dag.build(ranked, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+    url_by_num = {int(it["number"]): (it.get("source_url") or "") for it in ranked}
+    return graph, url_by_num
+
+
+def _dep_info(graph, n: int, url_by_num: Dict[int, str]) -> Dict[str, Any]:
+    """This issue's dependency edges as (number, url) pairs (sorted, deterministic):
+    `blocked_by` = issues it depends on (graph.deps[n]); `blocks` = the reverse
+    edges (issues that depend on it)."""
+    blocked_by = [(d, url_by_num.get(d, "")) for d in graph.deps.get(n, [])]
+    blocks = [(m, url_by_num.get(m, "")) for m in graph.numbers if n in graph.deps.get(m, [])]
+    return {"blocked_by": blocked_by, "blocks": blocks}
+
+
 def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
-                   args: argparse.Namespace, *, dry_run: bool, repo_root: str):
+                   args: argparse.Namespace, *, dry_run: bool, repo_root: str,
+                   graph=None, url_by_num: Optional[Dict[int, str]] = None):
     """Approve + gather resources + decompose + render one job's work order.
 
     Returns (text, envelope). Shared by the default/--all dispatch path and the
     --issue operator-selection path so both emit byte-identical work orders.
+
+    When `graph`/`url_by_num` are provided, a DEPENDENCIES section + the issue URL
+    are surfaced (#35); with `graph=None` the work order renders exactly as before.
     """
     n = item["number"]
     repo_slug = item.get("repository", "")
@@ -207,11 +229,19 @@ def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
     res = _resources.gather(job, repo_root)
     wplan = _decompose.plan(job, res["discovered"], verify_cmd=verify_cmd)
     auth = _approval.approve(job, triage, dry_run=dry_run)
+    issue_url = item.get("source_url") or ""
+    dag = (_dep_info(graph, int(n), url_by_num or {})
+           if graph is not None else None)
     text = _workorder.render(job, triage, auth, resources=res, plan=wplan,
-                             llm=args.llm, verify_cmd=verify_cmd)
-    envelope = {**job, "authorization": auth.to_dict(),
+                             llm=args.llm, verify_cmd=verify_cmd,
+                             dag=dag, issue_url=issue_url)
+    envelope = {**job, "issue_url": issue_url, "authorization": auth.to_dict(),
                 "units": wplan["units"], "staffing": wplan["staffing"],
                 "work_order": text}
+    if dag is not None:
+        # Machine view of the same edges: [{number, url}, ...], sorted.
+        envelope["blocked_by"] = [{"number": d, "url": u} for d, u in dag["blocked_by"]]
+        envelope["blocks"] = [{"number": d, "url": u} for d, u in dag["blocks"]]
     return text, envelope
 
 
@@ -303,7 +333,7 @@ def _decompose_epic(args: argparse.Namespace, ranked: List[Dict[str, Any]],
     child. Children declare membership with `Parent epic: #N`, which the dependency
     graph resolves as deps[epic]; they are emitted in ranked (foundational) order."""
     target = int(epic["number"])
-    graph = _dag.build(ranked, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+    graph, url_by_num = _graph_and_urls(ranked)
     child_nums = set(graph.deps.get(target, []))
     children = [it for it in ranked if int(it["number"]) in child_nums]
     print(f"── ADMIN: decompose epic #{target} → {len(children)} constituent "
@@ -330,7 +360,8 @@ def _decompose_epic(args: argparse.Namespace, ranked: List[Dict[str, Any]],
                   file=sys.stderr)
             continue
         text, envelope = _workorder_for(child, ctri, args, dry_run=dry_run,
-                                        repo_root=repo_root)
+                                        repo_root=repo_root,
+                                        graph=graph, url_by_num=url_by_num)
         texts.append(text)
         envelopes.append(envelope)
 
@@ -374,7 +405,7 @@ def _run_issue(args: argparse.Namespace, ranked: List[Dict[str, Any]],
     print(f"── ADMIN: dispatching #{target} by operator selection "
           f"[{triage.get('scope')}/{triage.get('route')} conf {conf}] {action} — {note} ──",
           file=sys.stderr)
-    graph = _dag.build(ranked, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+    graph, url_by_num = _graph_and_urls(ranked)
     deps = graph.deps.get(target, [])
     if deps:
         print(f"   note: #{target} depends on " + ", ".join(f"#{d}" for d in deps)
@@ -382,7 +413,8 @@ def _run_issue(args: argparse.Namespace, ranked: List[Dict[str, Any]],
 
     dry_run = os.environ.get("PIPELINE_DRY_RUN", "1") != "0"
     repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
-    text, envelope = _workorder_for(item, triage, args, dry_run=dry_run, repo_root=repo_root)
+    text, envelope = _workorder_for(item, triage, args, dry_run=dry_run, repo_root=repo_root,
+                                    graph=graph, url_by_num=url_by_num)
     _dump_stage_artifacts(text, envelope)
     if args.json:
         print(json.dumps(envelope, ensure_ascii=False, indent=2))
@@ -428,10 +460,12 @@ def _run_dispatch(args: argparse.Namespace, ranked: List[Dict[str, Any]],
 
     # APPROVE + ISSUE (with embedded resources + decomposition/staffing)
     repo_root = os.environ.get("PIPELINE_ROOT") or os.getcwd()
+    graph, url_by_num = _graph_and_urls(ranked)
     envelopes, texts = [], []
     for e in chosen:
         text, envelope = _workorder_for(e["item"], e["triage"], args,
-                                        dry_run=dry_run, repo_root=repo_root)
+                                        dry_run=dry_run, repo_root=repo_root,
+                                        graph=graph, url_by_num=url_by_num)
         texts.append(text)
         envelopes.append(envelope)
 
