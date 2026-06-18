@@ -107,5 +107,22 @@
       },
       "box_width": 70
     }
+  },
+
+  "budget": {
+    "_doc": "Operator-committed budget reconciliation for the soft-cap guard (E5-3). Resolves brainstorm Q3-residual (issue #48).",
+    "window": {
+      "_doc": "Claude Code usage-window the guard reconciles against. plan_tier ∈ pro|max5|max20|custom. window_token_limit is the resolved 5h-window token cap (the integer for a fixed tier, or the 'p90' marker for custom — resolved from the P90 of the last 192h of actual usage). soft_cap_fraction is the fraction of the limit at which a tick auto-flips to dry-run.",
+      "plan_tier": "max20",
+      "window_token_limit": 220000,
+      "soft_cap_fraction": 0.80
+    }
+  },
+
+  "recovery": {
+    "_doc": "Operator-committed crash-recovery policy for the cron reaper (E1-3). Resolves brainstorm Q6 (issue #49).",
+    "reaper_timeout_hours": 4,
+    "engineer_failure_policy": "architect-rescaffold",
+    "_engineer_failure_policy_doc": "On engineer non-zero exit / 'failed' status mid-tick: re-submit the issue to the ARCHITECT for re-scaffolding and decomposition (a fresh, possibly finer-grained work order) rather than retrying the identical work order or escalating immediately. Escalate to needs-human only if re-scaffolding does not yield a workable plan. Distinct from the CI fix-ladder (which retries CI failures) and from the reaper timeout above (which recovers silently crashed/stuck 'claimed' issues)."
   }
 }
