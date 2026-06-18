@@ -682,6 +682,46 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "§7.22 budget: per-job Invoice reconciliation (actual vs authorized, offline)"
+# (§7.22 per the #51 section map — Pillar 3 budget range, invoice-reconcile slot;
+# the issue #39 body's "§7.18" predates that map, which reserves §7.18 for the
+# debug & harness pillar. claude-monitor oracle = §7.21, soft-cap = §7.23.)
+RECON="${ROOT}/services/budget/reconcile.py"
+LMIX="${ROOT}/services/budget/fixtures/ledger.mixed.jsonl"
+PYB="${PYTHON_BIN:-python3}"
+recon="$("$PYB" "$RECON" --ledger "$LMIX" 2>/dev/null)"
+# Per-job verdict: the under-budget job is not overspent; the over-budget job is.
+if printf '%s' "$recon" | jq -e '(.jobs|length)==2' >/dev/null 2>&1; then
+  pass "reconcile counts one verdict per cost-bearing job (zero-cost claimed line skipped)"
+else fail "reconcile job count wrong (claimed line not skipped?)"; fi
+if printf '%s' "$recon" | jq -e '.jobs[]|select(.issue==101)|.overspent==false' >/dev/null 2>&1; then
+  pass "under-budget job #101 (60k/80k) -> overspent: false"
+else fail "under-budget job not flagged correctly"; fi
+if printf '%s' "$recon" | jq -e '.jobs[]|select(.issue==102)|.overspent==true and .overspend_pct>0' >/dev/null 2>&1; then
+  pass "over-budget job #102 (52k/40k) -> overspent: true, positive overspend_pct"
+else fail "over-budget job not flagged correctly"; fi
+# authorized re-derived via approval.approve() when the line carries scope, not budget.
+if printf '%s' "$recon" | jq -e '.jobs[]|select(.issue==102)|.authorized_tokens==40000' >/dev/null 2>&1; then
+  pass "authorized re-derived from scope s via approval.approve() (-> 40000)"
+else fail "re-derivation of authorized budget from scope failed"; fi
+# Daily aggregate: one overspent of two jobs; sums equal the fixture's totals.
+aggd="$("$PYB" "$RECON" --ledger "$LMIX" --by day 2>/dev/null)"
+if printf '%s' "$aggd" | jq -e '.aggregate[0]|.overspent_count==1 and .job_count==2 and .sum_actual_tokens==112000 and .sum_authorized_tokens==120000' >/dev/null 2>&1; then
+  pass "day aggregate: job_count=2, overspent_count=1, sum_actual=112000, sum_authorized=120000"
+else fail "day aggregate wrong" "$(printf '%s' "$aggd" | jq -c '.aggregate')"; fi
+# Weekly aggregate buckets by ISO-week.
+if printf '%s' "$("$PYB" "$RECON" --ledger "$LMIX" --by week 2>/dev/null)" | jq -e '.aggregate[0]|(.period|test("W[0-9][0-9]")) and .job_count==2' >/dev/null 2>&1; then
+  pass "week aggregate buckets by ISO-week (period like YYYY-Www)"
+else fail "week aggregate wrong"; fi
+# Determinism: same ledger -> byte-identical reconciliation JSON.
+r2="$("$PYB" "$RECON" --ledger "$LMIX" --by day 2>/dev/null)"
+[[ "$aggd" == "$r2" ]] && pass "reconciliation is byte-identical across runs" || fail "reconciliation nondeterministic"
+# Offline: reconcile.py makes no network/model/subprocess call (no gh/claude/import subprocess).
+if grep -nE 'subprocess|import os.*system|claude_invoke|gh_mutate| gh ' "$RECON" >/dev/null 2>&1; then
+  fail "reconcile.py references a network/exec seam"
+else pass "reconcile.py is pure/offline (no gh/claude/subprocess)"; fi
+
+# ---------------------------------------------------------------------------
 section "§7.18 demo harness: snapshot + scenario mutator (offline, deterministic, drop-in)"
 # (§7.18 per the #51 section map — Pillar 5 debug & harness range, the shared
 # snapshot/mutate/replay slot. The issue #43 body's "§7.12" predates that map,
