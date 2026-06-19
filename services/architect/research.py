@@ -26,6 +26,7 @@ import tuning  # noqa: E402
 REASON_LABEL = "label"
 REASON_NO_FILES = "no-matching-files"
 REASON_LOW_CONF = "low-confidence"
+REASON_FILLED = "research-present"
 REASON_NONE = "none"
 
 # "Grounding tokens": text that *looks like* it points at concrete code — a file
@@ -69,7 +70,8 @@ def topic_for(job: Dict[str, Any]) -> str:
 
 
 def detect_gap(job: Dict[str, Any], discovered: List[str], *,
-               tuning_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+               tuning_cfg: Optional[Dict[str, Any]] = None,
+               research_present: bool = False) -> Dict[str, Any]:
     """Return {"needs_research": bool, "reason": str, "topic": str}.
 
     `job`        : the triage/job dict (number, title, body, labels, confidence).
@@ -77,6 +79,12 @@ def detect_gap(job: Dict[str, Any], discovered: List[str], *,
                    references that actually exist (the caller computes it so this
                    stays pure/testable).
     `tuning_cfg` : the generation.research config; defaults to tuning.RESEARCH.
+    `research_present` : True when the committed `docs/research/<topic>.md` for
+                   this job already exists (the caller does the filesystem check,
+                   keeping this function pure). E6-3 (#56): a present research
+                   artifact means the research has been done and embedded, so the
+                   gap is FILLED — the issue dispatches as implementation, not as
+                   another research order. Takes precedence over every signal below.
 
     needs_research is True when ANY signal fires, in this precedence:
       1. label            — the issue carries the configured needs-research label
@@ -89,6 +97,11 @@ def detect_gap(job: Dict[str, Any], discovered: List[str], *,
 
     if not cfg.get("enabled", True):
         return {"needs_research": False, "reason": REASON_NONE, "topic": topic}
+
+    # (0) committed research already fills the gap (E6-3 / #56): the in-unit
+    # research has been done and embedded, so plan as implementation.
+    if research_present:
+        return {"needs_research": False, "reason": REASON_FILLED, "topic": topic}
 
     # (1) explicit operator/architect label.
     label = cfg.get("needs_research_label", "needs-research")

@@ -227,7 +227,13 @@ def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
         "title": item.get("title", ""), "body": item.get("body", ""),
         "route": triage["route"], "scope": triage["scope"], "confidence": triage["confidence"],
     }
-    res = _resources.gather(job, repo_root)
+    # E6-3 (#56): the committed research artifact for this job's topic, if any.
+    # When present it is embedded as the leading resource AND fills the research
+    # gap (the issue dispatches as implementation, not another research order).
+    research_rel = "docs/research/%s.md" % _research.topic_for({**job, "number": n})
+    research_present = _resources.has_file(repo_root, research_rel)
+    res = _resources.gather(job, repo_root,
+                            research_rel=research_rel if research_present else None)
     wplan = _decompose.plan(job, res["discovered"], verify_cmd=verify_cmd)
     # Research-mode (E6-1 verdict → E6-2 order). detect_gap needs the issue labels
     # (the job dict carries none) and the classifier confidence (already in triage).
@@ -236,7 +242,8 @@ def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
     # never leaks into the existing dispatch path. When on, a gapped issue renders a
     # research order on the cheap research route.
     gap = _research.detect_gap(
-        {**job, "number": n, "labels": item.get("labels", [])}, res["discovered"])
+        {**job, "number": n, "labels": item.get("labels", [])}, res["discovered"],
+        research_present=research_present)
     mode = ("research" if (tuning.RESEARCH.get("dispatch_enabled", False)
                            and gap["needs_research"]) else "implementation")
     if mode == "research":

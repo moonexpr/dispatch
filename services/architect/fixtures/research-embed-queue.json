@@ -1,0 +1,10 @@
+[
+  {
+    "number": 9001,
+    "title": "Research embed fixture probe",
+    "body": "Implement the probe described in services/probe/nonexistent_module.py per its design. That module is referenced but does not exist in this repo, so absent grounding the gap heuristic routes this to research (a code-ish token with zero real matches). Once the architect's committed research for this topic exists, the gap is filled and this dispatches as implementation with that research embedded.",
+    "labels": [{"name": "queued"}],
+    "assignees": [],
+    "url": "https://github.com/ReclaimByDesign/dispatch/issues/9001"
+  }
+]

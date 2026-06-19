@@ -41,6 +41,14 @@ def _safe_isfile(repo_root: str, rel: str):
     return p if os.path.isfile(p) else None
 
 
+def has_file(repo_root: str, rel: str) -> bool:
+    """True iff repo-relative `rel` is a regular file inside `repo_root` (the same
+    traversal guard `discover`/`gather` use). Callers use this to decide whether a
+    committed `docs/research/<topic>.md` exists without re-implementing the guard.
+    `repo_root` is absolutized first so the guard works with a relative root too."""
+    return _safe_isfile(os.path.abspath(repo_root), rel) is not None
+
+
 def _resolve_basename(repo_root: str, name: str):
     """Find a bare filename under common dirs. Deterministic (sorted walk)."""
     for base in ("scripts", "services", "schemas", ".github", "."):
@@ -127,21 +135,39 @@ def _filter_contract(text: str) -> str:
     return f"{title}\n\n{body}" if title else body
 
 
-def gather(job: Dict[str, Any], repo_root: str) -> Dict[str, Any]:
-    """Collect everything the work order should embed for `job`."""
+def gather(job: Dict[str, Any], repo_root: str,
+           research_rel: str = None) -> Dict[str, Any]:
+    """Collect everything the work order should embed for `job`.
+
+    `research_rel` (E6-3 / #56): the repo-relative `docs/research/<topic>.md`
+    artifact for this job's topic. When it names a committed file, it is embedded
+    as the LEADING resource (a research-backed order leads with its grounding) even
+    though the issue body may not reference it by path. It counts against the same
+    `max_files` / `cap_bytes` budget + traversal guard as any other embedded file,
+    and is reported in `research_file` for callers/renderers. `discovered` (which
+    feeds decomposition and gap-detection) is left untouched — body-referenced
+    files only — so embedding the research artifact never perturbs those signals.
+    """
     repo_root = os.path.abspath(repo_root)
     text = f"{job.get('title', '')}\n{job.get('body', '')}"
 
     discovered = discover(text, repo_root)
     truncations: List[str] = []
 
+    # E6-3 (#56): committed research artifact leads the embed set when present.
+    research_file = None
+    embed_paths = list(discovered)
+    if research_rel and _safe_isfile(repo_root, research_rel) and research_rel not in embed_paths:
+        embed_paths = [research_rel] + embed_paths
+        research_file = research_rel
+
     files = []
-    for rel in discovered[:_MAX_FILES]:
+    for rel in embed_paths[:_MAX_FILES]:
         content, trunc = _read_capped(os.path.join(repo_root, rel))
         if trunc:
             truncations.append(rel)
         files.append({"path": rel, "content": content, "truncated": trunc})
-    dropped = discovered[_MAX_FILES:]
+    dropped = embed_paths[_MAX_FILES:]
 
     contract = None
     cpath = os.path.join(repo_root, "CLAUDE.md")
@@ -165,4 +191,5 @@ def gather(job: Dict[str, Any], repo_root: str) -> Dict[str, Any]:
         "functions": functions(text),
         "contract": contract,
         "invoice_schema": schema,
+        "research_file": research_file,   # E6-3 (#56): embedded research path or None
     }

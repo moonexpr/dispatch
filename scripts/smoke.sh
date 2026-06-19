@@ -1172,6 +1172,88 @@ else fail "a play-queue order leaked into research mode"; fi
 rm -rf "${RORD}"
 
 # ---------------------------------------------------------------------------
+section "§7.25 research-mode: deterministic research embed + research/impl DAG model (offline, #56)"
+# (§7.25 per the #51 section map — Day-3 research-mode range, the E6-3 embed/DAG
+# slot; the #56 body's "§7.21" predates that map, which reserves §7.21 for budget.)
+# Operator decision (#56, 2026-06-19) re-framed the DAG half to a hierarchical
+# state model: in-unit research is a STATE TRANSITION (no DAG node, no edge); only
+# an admin-spawned deep-research ticket is a real node with a normal blocked-by
+# edge. So criteria 1-2 are asserted as DAG INVARIANTS (no code change to dag.py,
+# which only ever builds edges from real #<number> cross-refs), and criteria 3-6
+# (deterministic embed + gap-fill) are the implemented core.
+REQ="${ROOT}/services/architect/fixtures/research-embed-queue.json"
+RFILE="${ROOT}/docs/research/issue-9001-research-embed-fixture-probe.md"
+[[ -f "$REQ" && -f "$RFILE" ]] && pass "research embed fixtures present (queue + committed artifact)" || fail "research embed fixtures missing"
+# Embed half (C3/C4): dispatch #9001 with research actuation ON — the committed
+# docs/research/<topic>.md fills the gap, so the order is IMPLEMENTATION (not a
+# research order) and carries the research file's sentinel verbatim.
+RES25="$(mktemp -d 2>/dev/null || mktemp -d -t res25)"
+printf '%s\n' '{"generation":{"research":{"dispatch_enabled":true}}}' > "${RES25}/tuning.json"
+emb="$(DISPATCH_TUNING_FILE="${RES25}/tuning.json" PIPELINE_DRY_RUN=1 ./dispatch --fixture "$REQ" --json 2>/dev/null)"
+if printf '%s' "$emb" | jq -e '.mode=="implementation"' >/dev/null 2>&1; then
+  pass "committed research fills the gap -> Mode: implementation (not another research order)"
+else fail "research-backed issue did not dispatch as implementation" "$(printf '%s' "$emb" | jq -r '.mode // "?"')"; fi
+assert_contains "EMBEDDED RESOURCES carries the research file verbatim" "$emb" "RESEARCH_EMBED_SENTINEL_9001"
+# Determinism (C5): a second identical dispatch is byte-identical.
+emb2="$(DISPATCH_TUNING_FILE="${RES25}/tuning.json" PIPELINE_DRY_RUN=1 ./dispatch --fixture "$REQ" --json 2>/dev/null)"
+[[ "$emb" == "$emb2" ]] && pass "research embed is byte-identical across two runs (deterministic)" || fail "research embed nondeterministic"
+rm -rf "${RES25}"
+# Gap-fill semantics (C4) + embed (C3) at the unit level — pure, offline.
+embq="$(python3 - <<'PY'
+import sys, json
+sys.path.insert(0, "services"); sys.path.insert(0, "services/architect")
+import resources, research
+job = json.load(open("services/architect/fixtures/research-embed-queue.json"))[0]
+rel = "docs/research/%s.md" % research.topic_for(job)
+present = resources.has_file(".", rel)
+g = resources.gather(job, ".", research_rel=rel if present else None)
+embedded = any(f["path"] == rel and "RESEARCH_EMBED_SENTINEL_9001" in f["content"] for f in g["files"])
+# discovered must stay body-only (the artifact must not perturb decomposition/gap inputs)
+gap_filled = research.detect_gap({**job, "labels": []}, g["discovered"], research_present=True)
+gap_open   = research.detect_gap({**job, "labels": []}, g["discovered"], research_present=False)
+print("present", present)
+print("embedded", embedded)
+print("research_file", g["research_file"])
+print("discovered_has_artifact", rel in g["discovered"])
+print("filled", gap_filled["needs_research"], gap_filled["reason"])
+print("open",   gap_open["needs_research"],   gap_open["reason"])
+PY
+)"
+assert_contains "gather embeds docs/research/<topic>.md for the job"            "$embq" "embedded True"
+assert_contains "research artifact is reported in res.research_file"            "$embq" "research_file docs/research/issue-9001-research-embed-fixture-probe.md"
+assert_contains "embedding does NOT perturb discovered (body-referenced only)"  "$embq" "discovered_has_artifact False"
+assert_contains "research present -> gap FILLED (reason research-present)"       "$embq" "filled False research-present"
+assert_contains "research absent  -> gap OPEN (the file is what fills it)"       "$embq" "open True no-matching-files"
+# DAG invariant (C1/C2 re-framed): in-unit research adds NO node/edge; an
+# admin-spawned deep-research ticket is an ordinary node with a normal blocked-by
+# edge. Both are properties of dag.build over real #<number> cross-refs only.
+dagm="$(python3 - <<'PY'
+import sys
+sys.path.insert(0, "services"); sys.path.insert(0, "services/intake")
+import dag
+FWD = [r"depends?\s+on\s+#(\d+)", r"blocked\s+by\s+#(\d+)"]
+# (a) in-unit research = a state transition: a lone issue in research mode adds no
+#     second node and no edge (there is no second issue number to reference).
+g1 = dag.build([{"number": 9001, "title": "probe", "body": "in-unit research mode; no cross-refs"}], fwd=FWD, rev=[])
+print("inunit_nodes", len(g1.numbers), "edges", sum(len(v) for v in g1.deps.values()))
+# (b) admin-spawned deep research = a real new issue #9101; the requesting issue
+#     #9102 carries `depends on #9101` => ordinary edge [9102, 9101], no synth node.
+items = [
+  {"number": 9101, "title": "deep research ticket", "body": "spawned by the admin state"},
+  {"number": 9102, "title": "impl needing deep research", "body": "Depends on #9101"},
+]
+g2 = dag.build(items, fwd=FWD, rev=[])
+print("deep_nodes", sorted(g2.numbers))
+print("deep_edge_9102", sorted(g2.deps[9102]))
+print("deep_roots", sorted(g2.roots))
+PY
+)"
+assert_contains "in-unit research adds no node/edge (state transition, not an edge)" "$dagm" "inunit_nodes 1 edges 0"
+assert_contains "deep-research DAG has only the two real issues (no synthesized node)" "$dagm" "deep_nodes [9101, 9102]"
+assert_contains "deep-research ticket -> requesting issue is a normal blocked-by edge" "$dagm" "deep_edge_9102 [9101]"
+assert_contains "the deep-research ticket is the root; its requester depends on it"    "$dagm" "deep_roots [9101]"
+
+# ---------------------------------------------------------------------------
 section "§7.28 demo-repo bootstrap seed manifest + label provisioning (offline proxy, #47)"
 # Offline proxy for E0-1 (#47). The LIVE gh label/issue creation against
 # ReclaimByDesign/demo-repository is an OPERATOR step (run bootstrap-labels.sh
