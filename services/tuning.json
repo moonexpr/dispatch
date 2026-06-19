@@ -108,10 +108,12 @@
       "box_width": 70
     },
     "research": {
-      "_doc": "Research-mode gap-detection (Pillar 2, E6-1). detect_gap() in services/architect/research.py reads these; enabled=false is a clean kill-switch (always needs_research=false).",
+      "_doc": "Research-mode gap-detection + order emission (Pillar 2, E6-1/E6-2). detect_gap() reads enabled/low_confidence_threshold/needs_research_label; the architect renders a research work order on the cheap `route` when a gap is found. enabled=false is a clean kill-switch (always needs_research=false).",
       "enabled": true,
       "low_confidence_threshold": 0.55,
-      "needs_research_label": "needs-research"
+      "needs_research_label": "needs-research",
+      "route": "gen-local",
+      "dispatch_enabled": false
     }
   },
 

@@ -1081,6 +1081,40 @@ assert_contains "kill-switch (research.enabled=false) forces all verdicts False"
 assert_not_contains "kill-switch leaves no True verdict" "$ks" "True"
 rm -rf "${GAPTMP}"
 
+# --- E6-2 (#55): research ORDER emission (extends §7.24). Dispatch a gapped issue
+# with research actuation ON (generation.research.dispatch_enabled, default off) and
+# assert the rendered order is research-shaped; a grounded issue stays implementation;
+# the existing dispatch path is unaffected (regression guard).
+RORD="$(mktemp -d 2>/dev/null || mktemp -d -t rord)"
+printf '%s\n' '{"generation":{"research":{"dispatch_enabled":true}}}' > "${RORD}/tuning.json"
+RDT="${RORD}/tuning.json"
+RG_TOPIC="docs/research/issue-302-integrate-the-quux-analytics-client.md"
+# (a) Gapped issue (#302, no-matching-files) renders a RESEARCH order.
+wo302="$(DISPATCH_TUNING_FILE="${RDT}" PIPELINE_DRY_RUN=1 ./dispatch --fixture "$RGQ" --issue 302 2>/dev/null)"
+assert_contains "research order carries the Mode header marker" "$wo302" "Mode:"
+assert_contains "research order's deliverable is the docs/research/<topic>.md path" "$wo302" "$RG_TOPIC"
+assert_contains "research order FORBIDS implementing the feature" "$wo302" "Do NOT implement"
+assert_not_contains "research order drops implementation-objective language" "$wo302" "Deliver the work described in issue"
+# (b) --json envelope: mode=research on the cheap research route for the gapped issue.
+if DISPATCH_TUNING_FILE="${RDT}" PIPELINE_DRY_RUN=1 ./dispatch --fixture "$RGQ" --issue 302 --json 2>/dev/null \
+   | jq -e '.mode=="research" and .route=="gen-local"' >/dev/null; then
+  pass "--json envelope: gapped issue is mode=research on the cheap research route"
+else fail "--json research envelope wrong"; fi
+# (c) Well-grounded issue (#303) stays implementation even with actuation on.
+DISPATCH_TUNING_FILE="${RDT}" PIPELINE_DRY_RUN=1 ./dispatch --fixture "$RGQ" --issue 303 --json 2>/dev/null \
+  | jq -e '.mode=="implementation"' >/dev/null && pass "grounded issue stays mode=implementation" || fail "grounded issue mis-flagged research"
+# (d) Default (dispatch_enabled off): the same gapped issue renders implementation —
+#     the heuristic never leaks into the default dispatch path.
+./dispatch --fixture "$RGQ" --issue 302 --json 2>/dev/null \
+  | jq -e '.mode=="implementation"' >/dev/null && pass "research actuation is gated off by default (no leak)" || fail "research leaked with gate off"
+# (e) Regression: §7.9's play-queue emits only implementation orders even with
+#     actuation ON (its eligible issues are genuinely grounded / high-confidence).
+if DISPATCH_TUNING_FILE="${RDT}" PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" --all --json 2>/dev/null \
+   | jq -e 'length>=1 and all(.[]; .mode=="implementation")' >/dev/null; then
+  pass "play-queue regression: every emitted order is mode=implementation"
+else fail "a play-queue order leaked into research mode"; fi
+rm -rf "${RORD}"
+
 # ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.

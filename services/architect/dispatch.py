@@ -61,6 +61,7 @@ import approval as _approval      # noqa: E402
 import resources as _resources    # noqa: E402
 import decompose as _decompose    # noqa: E402
 import workorder as _workorder    # noqa: E402
+import research as _research      # noqa: E402
 import verify as _verify          # noqa: E402
 import tuning                     # noqa: E402
 
@@ -228,16 +229,31 @@ def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
     }
     res = _resources.gather(job, repo_root)
     wplan = _decompose.plan(job, res["discovered"], verify_cmd=verify_cmd)
+    # Research-mode (E6-1 verdict → E6-2 order). detect_gap needs the issue labels
+    # (the job dict carries none) and the classifier confidence (already in triage).
+    # Actuation is gated by generation.research.dispatch_enabled (default off): when
+    # off, every order is implementation — byte-identical to today — so the heuristic
+    # never leaks into the existing dispatch path. When on, a gapped issue renders a
+    # research order on the cheap research route.
+    gap = _research.detect_gap(
+        {**job, "number": n, "labels": item.get("labels", [])}, res["discovered"])
+    mode = ("research" if (tuning.RESEARCH.get("dispatch_enabled", False)
+                           and gap["needs_research"]) else "implementation")
+    if mode == "research":
+        research_route = tuning.RESEARCH.get("route", "gen-default")
+        triage = {**triage, "route": research_route}
+        job = {**job, "route": research_route}
     auth = _approval.approve(job, triage, dry_run=dry_run)
     issue_url = item.get("source_url") or ""
     dag = (_dep_info(graph, int(n), url_by_num or {})
            if graph is not None else None)
     text = _workorder.render(job, triage, auth, resources=res, plan=wplan,
                              llm=args.llm, verify_cmd=verify_cmd,
-                             dag=dag, issue_url=issue_url)
+                             dag=dag, issue_url=issue_url,
+                             mode=mode, topic=gap["topic"])
     envelope = {**job, "issue_url": issue_url, "authorization": auth.to_dict(),
                 "units": wplan["units"], "staffing": wplan["staffing"],
-                "work_order": text}
+                "mode": mode, "work_order": text}
     if dag is not None:
         # Machine view of the same edges: [{number, url}, ...], sorted.
         envelope["blocked_by"] = [{"number": d, "url": u} for d, u in dag["blocked_by"]]

@@ -125,6 +125,14 @@ DEFAULTS: Dict[str, Any] = {
             "enabled": True,
             "low_confidence_threshold": 0.55,
             "needs_research_label": "needs-research",
+            "route": "gen-local",
+            # Dispatch-path actuation (E6-2). When true, the architect renders a
+            # research work order on a detected gap; default false because offline /
+            # cross-repo discovery cannot yet distinguish a genuine gap from a
+            # target-repo file simply absent in the dispatch tree (would spuriously
+            # flip legitimate implementation issues). The heuristic (`enabled`) and
+            # rendering ship now; flip this on once discovery is target-repo aware.
+            "dispatch_enabled": False,
         },
     },
     # Budget oracle / soft-cap config (Pillar 3). The committed tuning.json holds
