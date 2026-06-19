@@ -106,6 +106,12 @@
         "gen-frontier": "opus"
       },
       "box_width": 70
+    },
+    "research": {
+      "_doc": "Research-mode gap-detection (Pillar 2, E6-1). detect_gap() in services/architect/research.py reads these; enabled=false is a clean kill-switch (always needs_research=false).",
+      "enabled": true,
+      "low_confidence_threshold": 0.55,
+      "needs_research_label": "needs-research"
     }
   },
 

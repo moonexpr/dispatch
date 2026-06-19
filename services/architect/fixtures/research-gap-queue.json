@@ -1,0 +1,30 @@
+[
+  {
+    "number": 301,
+    "title": "Investigate intermittent checkout failures before scoping a fix",
+    "body": "Customers occasionally report checkout failing, but we have no reliable repro and no root cause yet. We need to dig in and gather facts before we can write a real plan.",
+    "labels": [{ "name": "queued" }, { "name": "needs-research" }],
+    "confidence": 0.72
+  },
+  {
+    "number": 302,
+    "title": "Integrate the quux analytics client",
+    "body": "Wire up the new analytics vendor: add quux_client.py and call quux_connect() during app boot, configured from quux.yaml. None of these exist in the repo yet.",
+    "labels": [{ "name": "queued" }],
+    "confidence": 0.78
+  },
+  {
+    "number": 303,
+    "title": "Harden the tick-mutex warning message",
+    "body": "Improve the warning emitted by the lock fallback in scripts/lib/common.sh when flock is missing, so operators clearly see the missing tool name.",
+    "labels": [{ "name": "queued" }],
+    "confidence": 0.81
+  },
+  {
+    "number": 304,
+    "title": "Maybe rethink the whole onboarding thing?",
+    "body": "Not sure exactly what we want here. The onboarding feels off somehow. Could use some thinking about the overall direction.",
+    "labels": [{ "name": "queued" }],
+    "confidence": 0.30
+  }
+]

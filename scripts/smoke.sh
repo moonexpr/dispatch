@@ -1038,6 +1038,50 @@ if [[ -f "$RMEC" ]] && grep -q 'bug-fix.json' "$RMEC" && grep -q 'out-of-scope-w
 else fail "demo README catalog table missing"; fi
 
 # ---------------------------------------------------------------------------
+section "§7.24 research-mode: architect gap-detection heuristic (offline, deterministic)"
+# (§7.24 per the #51 section map — Day-3 research-mode range; the #54 body's "§7.20"
+# predates that map, which reserves §7.19-§7.20 for monitoring. gap-detection is the
+# first research-mode slot.) detect_gap is pure/offline and returns needs_research
+# plus an enumerated reason (label / no-matching-files / low-confidence) per job.
+RGQ="${ROOT}/services/architect/fixtures/research-gap-queue.json"
+[[ -f "$RGQ" ]] && pass "research-gap-queue.json fixture exists" || fail "research gap fixture missing"
+# Drive detect_gap directly (mirrors how §7.2 exercises classify.py); prints one
+# "<num> <needs_research> <reason>" line per fixture issue. discover() supplies the
+# repo-match signal so detect_gap stays pure.
+gap_run() {
+  python3 - "$RGQ" <<'PY'
+import sys, json
+sys.path.insert(0, "services"); sys.path.insert(0, "services/architect")
+import resources, research
+for job in json.load(open(sys.argv[1])):
+    v = research.detect_gap(job, resources.discover(job.get("body", ""), "."))
+    print(job["number"], v["needs_research"], v["reason"])
+PY
+}
+gap="$(gap_run)"
+assert_contains "needs-research label -> needs_research (reason=label)" "$gap" "301 True label"
+assert_contains "unknown file/API tokens + zero repo matches -> needs_research (no-matching-files)" "$gap" "302 True no-matching-files"
+assert_contains "well-grounded issue (real repo file) -> no research" "$gap" "303 False none"
+assert_contains "below-threshold confidence -> needs_research (low-confidence)" "$gap" "304 True low-confidence"
+# Deterministic: identical (job, repo state, tuning) -> identical verdicts.
+gap2="$(gap_run)"
+[[ "$gap" == "$gap2" ]] && pass "gap verdicts are byte-identical across runs" || fail "gap-detection nondeterministic"
+# Kill-switch: generation.research.enabled=false -> always needs_research=False.
+GAPTMP="$(mktemp -d 2>/dev/null || mktemp -d -t gap)"
+printf '%s\n' '{"generation":{"research":{"enabled":false}}}' > "${GAPTMP}/tuning.json"
+ks="$(DISPATCH_TUNING_FILE="${GAPTMP}/tuning.json" python3 - "$RGQ" <<'PY'
+import sys, json
+sys.path.insert(0, "services"); sys.path.insert(0, "services/architect")
+import resources, research
+q = json.load(open(sys.argv[1]))
+print("killswitch:", " ".join(str(research.detect_gap(job, resources.discover(job.get("body", ""), "."))["needs_research"]) for job in q))
+PY
+)"
+assert_contains "kill-switch (research.enabled=false) forces all verdicts False" "$ks" "killswitch: False False False False"
+assert_not_contains "kill-switch leaves no True verdict" "$ks" "True"
+rm -rf "${GAPTMP}"
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar

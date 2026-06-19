@@ -118,6 +118,14 @@ DEFAULTS: Dict[str, Any] = {
                             "gen-frontier": "opus"},
             "box_width": 70,
         },
+        # Research-mode gap-detection (Pillar 2, E6-1). The deterministic architect
+        # gap heuristic (services/architect/research.py) reads these. `enabled` is a
+        # clean kill-switch (false => the heuristic always returns needs_research=False).
+        "research": {
+            "enabled": True,
+            "low_confidence_threshold": 0.55,
+            "needs_research_label": "needs-research",
+        },
     },
     # Budget oracle / soft-cap config (Pillar 3). The committed tuning.json holds
     # the operator-decided values (#48 via #68); these are the safe fallbacks so a
@@ -199,6 +207,10 @@ SPEC_RULES: List[Dict[str, Any]] = list(_GEN["decompose"]["specialization_rules"
 RES_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["resources"].items()}
 ROUTE_ALIAS: Dict[str, str] = dict(_GEN["workorder"]["route_alias"])
 BOX_W: int = int(_GEN["workorder"]["box_width"])
+
+# research-mode gap-detection (Pillar 2, E6-1) — the new generation.research block,
+# consumed by services/architect/research.py::detect_gap.
+RESEARCH: Dict[str, Any] = dict(_GEN.get("research", {}))
 
 # budget (Pillar 3 oracle / soft-cap) — exposed the same way as the above.
 # NOTE: deliberately NOT named *_TOKEN(S) — these are token-count limits, not
