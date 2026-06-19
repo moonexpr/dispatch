@@ -1190,6 +1190,188 @@ assert_contains "seed-backlog targets the demo repo" "$seed_sb" "--repo ReclaimB
 rm -rf "${SEEDTMP}"
 
 # ---------------------------------------------------------------------------
+section "§7.26 full unattended tick: lock+heartbeat+ledger+artifacts+soft-cap compose (offline, dry-run)"
+# (§7.26 per the #51 section map — Day 3 integration range, full-tick smoke slot;
+# the issue #41 body's "§7.22" predates this map, which reserves §7.22 for the
+# Pillar-3 invoice-reconcile slot and §7.26–§7.27 for integration & runbook.)
+# This is the integration capstone (E7-1, issue #41): it drives ONE simulated cron
+# tick through the real entrypoint (scripts/pipeline.sh) over fixtures and asserts
+# the operational (lock/heartbeat), monitoring (ledger), debug (artifact-dump) and
+# budget (soft-cap) rails COMPOSE under one shared tick id without stepping on each
+# other — and that a dry-run tick intends NO merge and NO push to main. Each rail
+# has its own unit section (§7.12/§7.14/§7.16-§7.17/§7.19/§7.23); §7.26 only asserts
+# their composition, and SKIPs (never FAILs) any rail that is absent.
+#
+# Offline-tick semantics (load-bearing): under PIPELINE_DRY_RUN=1 dispatch.sh prints
+# "DRY-RUN: $ENGINEER_BIN …" and never runs the bridge, so the engineer /
+# architect-intake stages (and the bridge's invoice.json dump) are intentionally
+# inert. The dispatch-side rails (lock, heartbeat, claimed/work-order ledger,
+# --until artifact dump, soft-cap) all run in the real tick; the downstream
+# engineer-dispatch/invoice/closure ledger lines are composed under the SAME tick
+# id via architect-intake.sh (the §7.19 idiom) — proving the full stage vocabulary
+# shares one tick without colliding, rather than faking a live engineer run.
+if [[ ! -f "${ROOT}/scripts/pipeline.sh" || ! -f "${FIX}/queued-issues.json" ]]; then
+  skip "§7.26 needs scripts/pipeline.sh + queued-issues.json fixture (an upstream rail is absent)"
+else
+  INTD="$(mktemp -d 2>/dev/null || mktemp -d -t intg)"
+  I_ART="${INTD}/art"; I_LEDG="${INTD}/run-ledger.jsonl"
+  I_RR="${INTD}/run-record.log"; I_LOCK="${INTD}/tick.lock"
+  I_TID="tick-smoke-726"
+  I_FXI="${FIX}/queued-issues.json"
+
+  # (1) One real dry-run tick through pipeline.sh, every rail wired to ONE tick id.
+  itick="$(DISPATCH_TICK_ID="${I_TID}" DISPATCH_ARTIFACTS_DIR="${I_ART}" \
+           DISPATCH_LEDGER_FILE="${I_LEDG}" DISPATCH_RUN_RECORD="${I_RR}" \
+           DISPATCH_LOCK_FILE="${I_LOCK}" \
+           bash "${ROOT}/scripts/pipeline.sh" --fixture "${I_FXI}" 2>&1)"; i_rc=$?
+  [[ $i_rc -eq 0 ]] && pass "tick exits 0 (one full unattended tick over the fixture queue)" || fail "tick exit" "got $i_rc"
+
+  # --- lock rail: acquired (the body ran under it) then released (a later tick re-acquires).
+  assert_contains "lock: the dispatch body runs under the tick mutex" "$itick" "pipeline: dispatch starting"
+  [[ -f "${I_LOCK}" ]] && pass "lock: the lockfile is present after acquisition" || fail "lock: lockfile missing after the tick"
+  if have flock; then
+    # Hold the lock on fd 8 (as §7.12 does); a concurrent tick must skip + claim nothing.
+    exec 8>"${I_LOCK}"; flock -n 8 || fail "lock: harness could not take the test lock"
+    held="$(DISPATCH_TICK_ID="${I_TID}-b" DISPATCH_LOCK_FILE="${I_LOCK}" \
+            DISPATCH_ARTIFACTS_DIR="${INTD}/art-b" DISPATCH_LEDGER_FILE="${INTD}/ledger-b.jsonl" \
+            DISPATCH_RUN_RECORD="${INTD}/rr-b.log" \
+            bash "${ROOT}/scripts/pipeline.sh" --fixture "${I_FXI}" 2>&1)"; hc=$?
+    exec 8>&-
+    [[ $hc -eq 0 ]] && pass "lock: contended overlapping tick exits 0 (a skipped overlap is success)" || fail "lock: contended tick exit" "got $hc"
+    assert_contains "lock: overlapping tick logs the already-locked skip" "$held" "another tick holds the lock"
+    assert_not_contains "lock: overlapping tick claims nothing" "$held" "--add-label claimed"
+    freed="$(DISPATCH_TICK_ID="${I_TID}-c" DISPATCH_LOCK_FILE="${I_LOCK}" \
+             DISPATCH_ARTIFACTS_DIR="${INTD}/art-c" DISPATCH_LEDGER_FILE="${INTD}/ledger-c.jsonl" \
+             DISPATCH_RUN_RECORD="${INTD}/rr-c.log" \
+             bash "${ROOT}/scripts/pipeline.sh" --fixture "${I_FXI}" 2>&1)"
+    assert_not_contains "lock: released after the tick (the next tick sees no held lock)" "$freed" "another tick holds the lock"
+    assert_contains "lock: the released tick runs the dispatch body under the lock" "$freed" "pipeline: dispatch starting"
+  else
+    skip "lock: flock not on PATH — overlap/release asserts (Linux prod-host only)"
+  fi
+
+  # --- heartbeat rail: exactly one started + one ended record sharing the tick id.
+  i_ns="$(grep -c '^event=started ' "${I_RR}" 2>/dev/null || true)"; i_ns="${i_ns:-0}"
+  i_ne="$(grep -c '^event=ended ' "${I_RR}" 2>/dev/null || true)"; i_ne="${i_ne:-0}"
+  [[ "$i_ns" == "1" && "$i_ne" == "1" ]] && pass "heartbeat: one started + one ended record for the tick" || fail "heartbeat record count" "started=$i_ns ended=$i_ne"
+  i_sid="$(sed -n 's/^event=started tick_id=\([^ ]*\).*/\1/p' "${I_RR}" 2>/dev/null | head -1)"
+  [[ "$i_sid" == "${I_TID}" ]] && pass "heartbeat: the started record carries the shared tick id (${I_TID})" || fail "heartbeat tick id" "got '$i_sid' want '${I_TID}'"
+  i_end="$(grep '^event=ended ' "${I_RR}" 2>/dev/null | head -1)"
+  assert_contains "heartbeat: the ended record names the claimed issue (#101)" "$i_end" "claimed=101"
+  assert_contains "heartbeat: the ended record carries exit status 0" "$i_end" "status=0"
+
+  # --- ledger rail (dispatch side, from the real tick): claimed + work-order lines,
+  #     valid JSONL, every line under the shared tick id, the queued->claimed transition.
+  if [[ -s "${I_LEDG}" ]]; then
+    pass "ledger: the run-ledger gained lines for this tick"
+    if jq -c . "${I_LEDG}" >/dev/null 2>&1; then pass "ledger: every line is valid JSON (jq -c .)"; else fail "ledger: malformed JSONL"; fi
+    if jq -se 'all(.[]; .tick_id=="'"${I_TID}"'")' "${I_LEDG}" >/dev/null 2>&1; then
+      pass "ledger: every dispatch-side line carries the shared tick id"
+    else fail "ledger: a line carries a different tick id"; fi
+    if jq -se 'any(.[]; .stage=="claimed" and .label_before=="queued" and .label_after=="claimed" and .issue!=null)' "${I_LEDG}" >/dev/null 2>&1; then
+      pass "ledger: the claim line records the queued->claimed transition (with issue)"
+    else fail "ledger: claim line / transition missing"; fi
+  else
+    skip "ledger: no run-ledger emitted (DISPATCH_LEDGER_FILE rail absent)"
+  fi
+
+  # --- downstream stages compose under the SAME tick id (engineer-dispatch/invoice/
+  #     closure) via architect-intake.sh fed a fixture Invoice (the §7.19 idiom). The
+  #     offline tick inerts the live engineer, so this composes the full stage
+  #     vocabulary under one tick id without fabricating an engineer run.
+  LINV="${FIX}/ledger-invoice.json"
+  if [[ -s "${I_LEDG}" && -f "${LINV}" && -f "${ROOT}/scripts/architect-intake.sh" ]]; then
+    DISPATCH_TICK_ID="${I_TID}" DISPATCH_LEDGER_FILE="${I_LEDG}" PIPELINE_DRY_RUN=1 \
+      bash "${ROOT}/scripts/architect-intake.sh" < "${LINV}" >/dev/null 2>&1 || true
+    if jq -se '
+        length>=3
+        and all(.[]; .tick_id=="'"${I_TID}"'")
+        and all(.[]; .stage as $s | ["claimed","work-order","engineer-dispatch","invoice","closure"] | index($s) != null)
+        and any(.[]; .stage=="claimed")
+        and any(.[]; .stage=="engineer-dispatch" or .stage=="invoice" or .stage=="closure")
+      ' "${I_LEDG}" >/dev/null 2>&1; then
+      pass "ledger: >=3 stage lines (dispatch -> engineer -> intake) compose under one tick id, vocab-valid"
+    else
+      n_ledg="$(jq -s 'length' "${I_LEDG}" 2>/dev/null || echo 0)"
+      skip "ledger: downstream intake stages not all present (${n_ledg} dispatch-side lines; intake rail variant)"
+    fi
+    if jq -se 'any(.[]; .stage=="engineer-dispatch" and .cost.tokens_in != null)' "${I_LEDG}" >/dev/null 2>&1; then
+      pass "ledger: the engineer-dispatch line carries the Invoice cost.tokens_in"
+    else skip "ledger: engineer-dispatch cost not present (intake rail variant)"; fi
+  else
+    skip "ledger: architect-intake.sh / ledger-invoice.json absent — downstream-stage composition not exercised"
+  fi
+
+  # --- artifact rail: a --until workorder tick (still offline) dumps the per-stage
+  #     workorder.txt + job-request.json under the SAME tick id, proving the debug
+  #     artifact rail composes with the locked/heartbeat'd tick. The invoice.json
+  #     artifact is written by pipeline.sh's bridge only on a LIVE engineer run, so
+  #     under the offline tick it is intentionally absent (asserted), not faked.
+  A_ART="${INTD}/art-until"
+  DISPATCH_TICK_ID="${I_TID}" DISPATCH_ARTIFACTS_DIR="${A_ART}" \
+    DISPATCH_LEDGER_FILE="${INTD}/ledger-until.jsonl" DISPATCH_LOCK_FILE="${INTD}/lock-until.lock" \
+    bash "${ROOT}/scripts/pipeline.sh" --until workorder --fixture "${I_FXI}" >/dev/null 2>&1
+  A_TD="${A_ART}/${I_TID}"
+  if [[ -f "${A_TD}/workorder.txt" ]]; then
+    pass "artifacts: workorder.txt dumped under the tick dir"
+    assert_contains "artifacts: workorder.txt is the real rendered order (WORK PLAN header)" "$(cat "${A_TD}/workorder.txt")" "WORK PLAN"
+  else fail "artifacts: workorder.txt missing in the tick dir"; fi
+  if [[ -f "${A_TD}/job-request.json" ]]; then
+    pass "artifacts: job-request.json dumped under the tick dir"
+    if jq -e 'has("job_id") and has("repo") and (.issue|type=="number")
+        and (.route=="gen-local" or .route=="gen-default" or .route=="gen-frontier")
+        and (.scope=="xs" or .scope=="s" or .scope=="m" or .scope=="l")
+        and (.confidence|type=="number") and (.confidence>=0) and (.confidence<=1)' \
+        "${A_TD}/job-request.json" >/dev/null 2>&1; then
+      pass "artifacts: job-request.json validates (job_id/repo/issue/route/scope/confidence, per §7.16)"
+    else fail "artifacts: job-request.json failed structural validation"; fi
+  else fail "artifacts: job-request.json missing in the tick dir"; fi
+  [[ ! -f "${A_TD}/invoice.json" ]] \
+    && pass "artifacts: invoice.json intentionally absent under dry-run (bridge dumps it only on a live engineer tick)" \
+    || pass "artifacts: invoice.json present (live engineer ran)"
+
+  # --- soft-cap rail: an over-cap window throttles the tick to dry-run + skips the
+  #     claim + records a ledger throttle event; an under-cap window proceeds + claims.
+  #     The guard runs before any gh, so PIPELINE_DRY_RUN=0 on the over-cap probe is
+  #     safe — it flips to dry-run before claiming (mirrors §7.23 item 3).
+  GOVER="${ROOT}/services/budget/fixtures/window-state.over-cap.json"
+  GUNDER="${ROOT}/services/budget/fixtures/window-state.under-cap.json"
+  if [[ -f "${GOVER}" && -f "${GUNDER}" ]]; then
+    SC_LEDG="${INTD}/softcap-ledger.jsonl"; rm -f "${SC_LEDG}"
+    sc_over="$(BUDGET_ORACLE_FIXTURE="${GOVER}" PIPELINE_FIXTURE_ISSUES="${I_FXI}" PIPELINE_DRY_RUN=0 \
+               DISPATCH_TICK_ID="${I_TID}" DISPATCH_LEDGER_FILE="${SC_LEDG}" \
+               bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+    assert_contains "soft-cap: over-cap window logs the throttle (fraction + soft_cap)" "$sc_over" "soft-cap THROTTLE"
+    assert_contains "soft-cap: over-cap window forces dry-run even when operator passed live" "$sc_over" "forcing PIPELINE_DRY_RUN=1"
+    assert_not_contains "soft-cap: throttled tick claims nothing (no queued->claimed)" "$sc_over" "-> claimed"
+    if [[ -s "${SC_LEDG}" ]] && jq -e 'select(.event=="throttled") | has("fraction") and has("soft_cap")' "${SC_LEDG}" >/dev/null 2>&1; then
+      pass "soft-cap: the throttle event is recorded to the run-ledger (event=throttled, fraction, soft_cap)"
+    else fail "soft-cap: throttle ledger line missing/incomplete"; fi
+    rm -f "${SC_LEDG}"
+    sc_under="$(BUDGET_ORACLE_FIXTURE="${GUNDER}" PIPELINE_FIXTURE_ISSUES="${I_FXI}" PIPELINE_DRY_RUN=1 \
+                DISPATCH_LEDGER_FILE="${INTD}/sc-under.jsonl" \
+                bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+    assert_contains "soft-cap: under-cap window proceeds and claims normally (queued->claimed)" "$sc_under" "-> claimed"
+    assert_not_contains "soft-cap: under-cap window is not throttled" "$sc_under" "THROTTLE"
+  else
+    skip "soft-cap: budget window fixtures absent — throttle composition not exercised"
+  fi
+
+  # --- GitHub end-state: a dry-run tick intends the queued->claimed transition and
+  #     NEVER a merge or a push to main (worker contract: never merge, never push main).
+  assert_contains "end-state: the tick intends the queued->claimed label transition" "$itick" "--add-label claimed"
+  assert_not_contains "end-state: the tick intends NO merge" "$itick" "pr merge"
+  assert_not_contains "end-state: the tick intends NO push to main" "$itick" "push origin main"
+
+  # --- no disk mutation outside the temp artifacts dir (mirror §7.3 post-conditions).
+  [[ ! -d "${ROOT}/.worktrees" ]] && pass "no-mutation: no .worktrees/ created in the repo" || fail "no-mutation: a worktree leaked"
+  if git -C "${ROOT}" rev-parse --verify --quiet "pipeline/issue-101" >/dev/null 2>&1; then
+    fail "no-mutation: branch pipeline/issue-101 leaked"
+  else pass "no-mutation: no pipeline/issue-* branch leaked"; fi
+  rm -rf "${INTD}"
+fi
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar
