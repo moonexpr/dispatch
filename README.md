@@ -14,7 +14,8 @@ Three responsibilities, nothing more:
    auto-merge (awaiting human approval); on failure advance the fix-attempt
    ladder; on ambiguity escalate to the operator via a GitHub comment.
 
-> Full design: [`HANDOFF-pipeline-v0.md`](./HANDOFF-pipeline-v0.md) ·
+> Operate it unattended: [`RUNBOOK.md`](./RUNBOOK.md) ·
+> Design & roadmap: [`doc/specs/v1-unattended-repo-monitoring/`](./doc/specs/v1-unattended-repo-monitoring/) ·
 > Build decisions: [`OPEN-QUESTIONS.md`](./OPEN-QUESTIONS.md) ·
 > Worker contract: [`CLAUDE.md`](./CLAUDE.md) ·
 > Invoice schema: [`schemas/invoice.json`](./schemas/invoice.json) ·
@@ -64,19 +65,27 @@ source of truth across runs.
 ## Usage
 
 ```bash
-bash entrypoint.sh [OPTIONS]
+bash entrypoint.sh [OPTIONS]          # run one tick (intake → engineer → approval)
 
   -b, --bootstrap         provision pipeline labels on PIPELINE_REPO first
   -r, --repo  owner/repo  target repo
   -l, --live              PIPELINE_DRY_RUN=0 — mutate GitHub (default: dry-run)
   -e, --engineer  BIN     Engineer binary (required in live mode)
   -f, --fixture   FILE    offline issue list JSON
+  -u, --until     STAGE   halt AFTER <stage> (intake|workorder|engineer|intake-invoice|closure)
+      --from      STAGE   resume AT <stage>, replaying --artifact as its input
+  -a, --artifact  FILE    captured Job Request / Invoice fed to --from
   -h, --help
+
+bash entrypoint.sh report [OPTIONS]   # render the operator digest from the run-ledger
 ```
 
 `entrypoint.sh` wires the full cycle — intake → engineer → approval — in one
 command. (`scripts/pipeline.sh` is the same thing; each component script
-remains independently runnable.)
+remains independently runnable.) `entrypoint.sh report` is the read-only,
+offline digest renderer. The `DISPATCH_ARTIFACTS_DIR` / `--until` / `--from`
+debug rails and the cron/budget/reaper operations are documented end-to-end in
+[`RUNBOOK.md`](./RUNBOOK.md).
 
 ### Quickstart for a new repo
 
@@ -102,6 +111,31 @@ vocabulary (idempotent).
 # Fully offline with the mock engineer and fixture issues:
 bash entrypoint.sh --fixture scripts/fixtures/queued-issues.json
 ```
+
+### Reusable demo testing (snapshot → mutate → replay)
+
+`scripts/demo/` exercises the pipeline against a representative web-dev backlog
+entirely offline — no GitHub, no model, no mutations — via a **snapshot → mutate
+→ replay** loop against `ReclaimByDesign/demo-repository`:
+
+1. **`snapshot.sh`** captures the live demo queue (read-only) into the committed
+   `scripts/demo/snapshots/demo-current.json` (a hand-built sample ships, so the
+   loop works before the live repo is seeded).
+2. **`mutate.py`** resolves that base snapshot **+ an overlay scenario** into a
+   fully-resolved fixture (deterministic, never mutates the base).
+3. **`replay.sh`** runs one offline dry-run tick through `./dispatch --fixture`
+   and dumps the round's artifacts under the gitignored `rounds/` tree.
+
+```bash
+# Replay a committed scenario (writes scripts/demo/rounds/<scenario>/<n>/):
+scripts/demo/replay.sh feature-with-acceptance
+# Reset a scenario's transient rounds (committed files untouched):
+scripts/demo/replay.sh --reset feature-with-acceptance
+```
+
+The committed scenario catalog (clear bug, well-specified feature, oversized
+refactor, vague defer, decline-shaped ask) and its mechanics are documented in
+[`scripts/demo/README.md`](scripts/demo/README.md).
 
 ---
 
@@ -210,18 +244,49 @@ Both examples:
 - **(c) `billy.maic` VPS** — an always-on remote host for the schedule; see
   existing issue #15 (remote deployment) rather than duplicating it here.
 
+## Digest, budget & recovery
+
+Three rails make an unattended run observable and self-protecting. Each is
+local-file / offline and configured in `pipeline.env` or `services/tuning.json`;
+[`RUNBOOK.md`](./RUNBOOK.md) is the operator walkthrough for all three.
+
+- **Run-ledger + digest.** Every stage transition appends one JSONL line to the
+  run-ledger (`DISPATCH_LEDGER_FILE`: `tick_id`, `issue`, `stage`, `cost.*`,
+  `label_before/after`, …). Render the operator digest with `entrypoint.sh
+  report` (read-only; never claims or calls a model).
+- **Budget soft-cap.** The guard reconciles each tick against the Claude Code
+  usage window and **auto-flips it to dry-run** past the soft-cap. Plan tier,
+  the 5h window limit, and the soft-cap fraction are committed in
+  `services/tuning.json` (`budget.window`); `claude-monitor` is the usage oracle
+  (decision D2), and the ledger is per-job attribution.
+- **Crash reaper.** At the top of every tick the reaper re-queues issues stranded
+  in `claimed` past the timeout with no open PR (`recovery.reaper_timeout_hours`,
+  default 4h; `recovery.engineer_failure_policy = architect-rescaffold`).
+
+Research-mode work orders (the architect emits a `docs/research/<topic>.md`
+deliverable when an issue is under-specified) round out the five 1.0 capabilities.
+
 ## Layout
 
 ```
-entrypoint.sh            ← start here (ruflo swarm bootstrap)
+entrypoint.sh            ← start here: a tick, or `entrypoint.sh report`
+dispatch                 ← architect work-order emitter (./dispatch --fixture …)
+RUNBOOK.md               operator guide: schedule · inspect · digest · budget · reaper
 schemas/                 invoice.json · job-request.json
-services/intake/         intake.py · pipeline.py · ranker.py
+services/intake/         intake.py · pipeline.py · ranker.py · dag.py
+services/architect/      dispatch.py · resources.py (work-order generation)
+services/classifier/     classify.py (deterministic keyword triage)
+services/budget/         oracle.py · guard.py (soft-cap, claude-monitor)
+services/reports/        report.py (operator digest renderer)
 services/models/         models.py (LiteLLM / Anthropic / HF / CLI)
+services/tuning.json     selection · generation · budget.window · recovery.*
 scripts/                 gh-intake.sh · intake-to-ruflo.sh (bridge)
                          pipeline.sh · dispatch.sh · fix-dispatch.sh · closure.sh
                          architect-intake.sh · mock-engineer.sh
                          bootstrap-labels.sh · deploy-remote.sh
                          smoke.sh · lib/common.sh · fixtures/
+scripts/demo/            snapshot.sh · mutate.py · replay.sh · scenarios/ (demo harness)
+examples/                dispatch.crontab · dispatch.launchd.plist (schedulers)
 .claude/                 settings.json (hooks) · agents/ · skills/ · helpers/
 .claude-flow/            config.yaml · data/ · logs/ · sessions/
 .mcp.json                claude-flow MCP config
