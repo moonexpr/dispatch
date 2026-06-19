@@ -1423,6 +1423,50 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "§7.27 runbook: RUNBOOK.md exists, sections present, rails match code (offline, #42)"
+# (§7.27 per the #51 section map — Day-3 Integration & runbook range, operator-
+# runbook slot; the #42 body's "§7.23" predates that map, which reserves §7.23
+# for the budget soft-cap guard.) Docs-only proof: the runbook cannot drift from
+# the real flag/stage surface — every env var and stage name it documents is
+# grepped back against pipeline.env.example and the pipeline's own stage list.
+RB="${ROOT}/RUNBOOK.md"
+ENVX="${ROOT}/pipeline.env.example"
+[[ -f "$RB" ]] && pass "RUNBOOK.md exists at repo root" || fail "RUNBOOK.md missing at repo root"
+# Required section headings, in the acceptance-criteria order.
+while IFS= read -r _h; do
+  grep -qF "$_h" "$RB" && pass "RUNBOOK section present: ${_h}" || fail "RUNBOOK section missing: ${_h}"
+done <<'HEADINGS'
+## Schedule
+## Inspect mid-flight
+## Digest & ledger
+## Budget (plan tier + soft-cap)
+## Recover a stuck issue (reaper)
+HEADINGS
+# Stage names the runbook uses for --until/--from MUST match the pipeline's
+# canonical DISPATCH_STAGES (sourced from common.sh, already loaded above).
+for _s in "${DISPATCH_STAGES[@]}"; do
+  grep -qF "$_s" "$RB" && pass "RUNBOOK names pipeline stage: ${_s}" || fail "RUNBOOK omits pipeline stage: ${_s}"
+done
+# Env vars the runbook documents must ALSO appear in pipeline.env.example, so the
+# doc can never name a flag the canonical env surface doesn't carry (no drift).
+for _v in DISPATCH_ARTIFACTS_DIR DISPATCH_LEDGER_FILE DISPATCH_REAPER_ENABLED DISPATCH_CLAIM_TIMEOUT_HOURS BUDGET_ORACLE_FIXTURE; do
+  if grep -qF "$_v" "$RB" && grep -qF "$_v" "$ENVX"; then
+    pass "rail env var in BOTH RUNBOOK + pipeline.env.example: ${_v}"
+  else
+    fail "env var drift (RUNBOOK vs pipeline.env.example): ${_v}"
+  fi
+done
+# Plan-tier + soft-cap live in services/tuning.json (not env); the runbook must
+# point at that surface and name the keys that set them.
+grep -qF "services/tuning.json" "$RB" && pass "RUNBOOK references services/tuning.json (tier/soft-cap surface)" || fail "RUNBOOK omits services/tuning.json"
+for _k in plan_tier soft_cap_fraction; do
+  grep -qF "$_k" "$RB" && pass "RUNBOOK names budget key: ${_k}" || fail "RUNBOOK omits budget key: ${_k}"
+done
+# Cross-links the machine companion (§7.26 compose proof) + the env surface (AC).
+grep -qF "§7.26" "$RB" && pass "RUNBOOK cross-links the §7.26 compose proof" || fail "RUNBOOK omits the §7.26 cross-link"
+grep -qF "pipeline.env.example" "$RB" && pass "RUNBOOK references pipeline.env.example" || fail "RUNBOOK omits pipeline.env.example"
+
+# ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar
