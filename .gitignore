@@ -29,3 +29,10 @@ test_results.txt
 # Editor / OS
 .DS_Store
 *.swp
+
+
+# claude framework (personal methods)
+PROJECT.md
+WORKPLAN.md
+.claude/agents/
+CLAUDE.local.md
