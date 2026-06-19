@@ -645,6 +645,57 @@ assert_contains "default tick still runs the dispatch body" "$plain" "pipeline: 
 assert_not_contains "default tick emits no halt line" "$plain" "halted after stage"
 rm -rf "${UNTILD}"
 
+# --- E2-3 (#32) replay: --from <stage> --artifact <file> resumes one stage from
+# a captured artifact, skipping intake/classification. EXTENDS §7.17 (shared
+# debug stage-gating slot per the #51 map; the #32 body's "§7.15" predates it).
+RPLD="$(mktemp -d 2>/dev/null || mktemp -d -t replay)"
+RJR="${FIX}/replay-job-request.json"
+# Canonical replay: --from engineer --artifact <job-request> --until engineer
+# runs EXACTLY the engineer stage on the captured Job Request (issue 101 maps to
+# the completed-invoice fixture), proving the artifact was the stage's input.
+rstderr="$(DISPATCH_ARTIFACTS_DIR="${RPLD}" bash scripts/pipeline.sh \
+  --from engineer --artifact "${RJR}" --until engineer 2>&1)"; rrc=$?
+[[ $rrc -eq 0 ]] && pass "--from engineer --until engineer exits 0" || fail "--from engineer exit" "got $rrc"
+rtick="$(find "${RPLD}" -maxdepth 1 -type d -name 'tick-*' 2>/dev/null | head -1)"
+if [[ -n "$rtick" && -f "$rtick/invoice.json" ]]; then
+  riss="$(jq -r '.issue' "$rtick/invoice.json" 2>/dev/null)"
+  [[ "$riss" == "101" ]] && pass "engineer ran on the captured Job Request (replayed invoice.issue=101)" \
+    || fail "replayed invoice issue mismatch" "got $riss"
+else
+  fail "invoice.json not dumped by --from engineer replay"
+fi
+assert_contains "stderr logs the resume naming the engineer stage" "$rstderr" "resume from stage: engineer"
+assert_contains "stderr logs the --until halt after engineer" "$rstderr" "halted after stage: engineer"
+# Earlier stages did NOT run: no work order dumped, and no dispatch/intake body.
+[[ -n "$rtick" && ! -f "$rtick/workorder.txt" ]] && pass "no workorder.txt (intake/classification skipped on resume)" || fail "workorder.txt present — earlier stages ran despite --from engineer"
+assert_not_contains "resume skips the dispatch/intake body" "$rstderr" "dispatch starting"
+# Determinism: a second identical replay yields a byte-identical invoice dump.
+RPLD2="$(mktemp -d 2>/dev/null || mktemp -d -t replay2)"
+DISPATCH_ARTIFACTS_DIR="${RPLD2}" bash scripts/pipeline.sh --from engineer --artifact "${RJR}" --until engineer >/dev/null 2>&1
+rtick2="$(find "${RPLD2}" -maxdepth 1 -type d -name 'tick-*' 2>/dev/null | head -1)"
+if [[ -n "$rtick" && -n "$rtick2" && -f "$rtick/invoice.json" && -f "$rtick2/invoice.json" ]] \
+   && diff -q "$rtick/invoice.json" "$rtick2/invoice.json" >/dev/null 2>&1; then
+  pass "replay is deterministic (two runs -> byte-identical invoice dump)"
+else
+  fail "replay not deterministic across two runs"
+fi
+rm -rf "${RPLD2}"
+# Negative: --from without --artifact exits non-zero and names the requirement.
+n1="$(bash scripts/pipeline.sh --from engineer 2>&1)"; n1rc=$?
+[[ $n1rc -ne 0 ]] && pass "--from without --artifact exits non-zero" || fail "--from should require --artifact" "got $n1rc"
+assert_contains "missing-artifact error names the requirement" "$n1" "requires --artifact"
+# Negative: --artifact pointing at schema-invalid JSON exits non-zero.
+BADART="${RPLD}/bad.json"
+printf '%s\n' '{"not":"a job request"}' >"${BADART}"
+n2="$(bash scripts/pipeline.sh --from engineer --artifact "${BADART}" 2>&1)"; n2rc=$?
+[[ $n2rc -ne 0 ]] && pass "--from engineer with schema-invalid artifact exits non-zero" || fail "schema-invalid artifact should fail" "got $n2rc"
+assert_contains "schema-invalid error names the missing field(s)" "$n2" "missing required field"
+# Negative: unknown --from stage exits non-zero and lists the valid stages.
+n3="$(bash scripts/pipeline.sh --from bogus-stage --artifact "${RJR}" 2>&1)"; n3rc=$?
+[[ $n3rc -ne 0 ]] && pass "--from bogus-stage exits non-zero" || fail "--from bogus-stage should fail" "got $n3rc"
+assert_contains "unknown --from lists the valid stages" "$n3" "engineer intake-invoice closure"
+rm -rf "${RPLD}"
+
 # ---------------------------------------------------------------------------
 section "§7.19 monitoring: append-JSONL run-ledger emit (offline, deterministic)"
 # (§7.19 per the #51 section map — Pillar 4 monitoring range, run-ledger slot;

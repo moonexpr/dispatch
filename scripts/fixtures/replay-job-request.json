@@ -1,0 +1,10 @@
+{
+  "job_id": "issue-101",
+  "issue": 101,
+  "repo": "ReclaimByDesign/dispatch",
+  "title": "Replay fixture — captured Job Request for the --from engineer replay path",
+  "body": "Captured Job Request used by smoke §7.17 to exercise `pipeline.sh --from engineer --artifact`. Issue 101 maps to mock-engineer's invoice-completed fixture, so replaying the engineer on this artifact yields a deterministic completed Invoice.",
+  "route": "gen-local",
+  "scope": "xs",
+  "confidence": 0.9
+}

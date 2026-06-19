@@ -51,6 +51,16 @@ usage: pipeline.sh [OPTIONS]
                           Valid stages (in order):
                             intake workorder engineer intake-invoice closure
                           (closure == the full tick == no flag.)
+      --from      STAGE   resume the tick AT <stage>, injecting --artifact as
+                          that stage's input and SKIPPING every earlier stage
+                          (no intake, no re-classification). Requires --artifact.
+                          Valid stages: engineer | intake-invoice | closure.
+                          Composes with --until (which caps the forward run).
+  -a, --artifact  FILE    captured artifact fed to the --from stage: a Job
+                          Request (schemas/job-request.json) for `engineer`; an
+                          Invoice (schemas/invoice.json) for `intake-invoice` /
+                          `closure`. Validated against its schema as DATA before
+                          the stage runs; never executed or eval'd.
   -h, --help              show this help
 
 Examples:
@@ -65,8 +75,37 @@ Examples:
 
   # Fully offline smoke test:
   bash scripts/pipeline.sh --fixture scripts/fixtures/queued-issues.json
+
+  # Replay exactly the engineer stage on a captured Job Request:
+  bash scripts/pipeline.sh --from engineer \
+       --artifact .dispatch/artifacts/tick-XXXX/job-request.json --until engineer
 USAGE
   exit 0
+}
+
+# ---------------------------------------------------------------------------
+# _validate_artifact FILE SCHEMA — guard a replay --artifact (E2-3/#32).
+# The artifact is UNTRUSTED DATA: it is parsed and field-checked with jq, never
+# executed or eval'd (worker-contract security posture). This is not a full
+# JSON-Schema validator — it enforces (a) the file exists, (b) it parses as a
+# JSON object, and (c) every key listed in the schema's "required" array is
+# present, which is the invariant the resumed stage depends on. Returns 0 when
+# valid; on any failure it prints a clear error to stderr and returns non-zero.
+_validate_artifact() {
+  local file="$1" schema="$2"
+  local label="${schema##*/}"
+  [[ -f "${schema}" ]] || { err "internal: schema not found: ${schema}"; return 1; }
+  [[ -f "${file}" ]]   || { err "--artifact file not found: ${file}"; return 1; }
+  jq -e 'type == "object"' "${file}" >/dev/null 2>&1 \
+    || { err "--artifact is not valid JSON (object expected): ${file}"; return 1; }
+  local missing
+  missing="$(jq -r --slurpfile s "${schema}" \
+    '(($s[0].required // []) - keys) | join(" ")' "${file}" 2>/dev/null)" || missing=""
+  if [[ -n "${missing}" ]]; then
+    err "--artifact ${file} is not schema-valid (${label}): missing required field(s): ${missing}"
+    return 1
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -74,6 +113,8 @@ USAGE
 _bootstrap=0
 _engineer="${ENGINEER_BIN:-${SCRIPT_DIR}/mock-engineer.sh}"
 _until=""
+_from=""
+_artifact=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -83,6 +124,8 @@ while [[ $# -gt 0 ]]; do
     -e|--engineer)   _engineer="$2"; shift 2 ;;
     -f|--fixture)    export PIPELINE_FIXTURE_ISSUES="$2"; shift 2 ;;
     -u|--until)      _until="$2"; shift 2 ;;
+    --from)          _from="$2"; shift 2 ;;
+    -a|--artifact)   _artifact="$2"; shift 2 ;;
     -h|--help)       _usage ;;
     *) die "unknown flag: $1 (try --help)" ;;
   esac
@@ -99,6 +142,32 @@ if [[ -n "${_until}" ]]; then
     exit 2
   fi
   export DISPATCH_UNTIL_STAGE="${_until}" DISPATCH_UNTIL_ORD="${_until_ord}"
+fi
+
+# Validate --from/--artifact (E2-3/#32). --from resumes the tick AT a captured
+# stage, injecting --artifact as that stage's input and skipping every earlier
+# stage. --from REQUIRES --artifact, and the artifact is schema-validated as data
+# BEFORE any stage runs. The stage selects which schema the artifact must match.
+if [[ -n "${_from}" ]]; then
+  case "${_from}" in
+    engineer)               _from_schema="${SCRIPT_DIR}/../schemas/job-request.json" ;;
+    intake-invoice|closure) _from_schema="${SCRIPT_DIR}/../schemas/invoice.json" ;;
+    *) err "unknown --from stage: ${_from}"
+       err "valid --from stages: engineer intake-invoice closure"
+       exit 2 ;;
+  esac
+  [[ -n "${_artifact}" ]] || { err "--from ${_from} requires --artifact <file>"; exit 2; }
+  _validate_artifact "${_artifact}" "${_from_schema}" || exit 2
+  # --from and --until are mutually composable, but a --until stage that precedes
+  # --from is contradictory (nothing would run). Reject it loudly.
+  _from_ord="$(stage_ord "${_from}")"
+  if [[ -n "${_until}" && "${_until_ord}" -lt "${_from_ord}" ]]; then
+    err "--until ${_until} (stage ${_until_ord}) precedes --from ${_from} (stage ${_from_ord}); nothing to run"
+    exit 2
+  fi
+elif [[ -n "${_artifact}" ]]; then
+  err "--artifact given without --from <stage>"
+  exit 2
 fi
 
 # Resolve relative engineer paths to absolute so the bridge script works from
@@ -119,6 +188,55 @@ export DISPATCH_TICK_ID="${DISPATCH_TICK_ID:-tick-$(date -u +%Y%m%dT%H%M%SZ)}"
 if [[ "${_bootstrap}" -eq 1 ]]; then
   log "pipeline: provisioning labels on ${PIPELINE_REPO:-<gh default>}"
   bash "${SCRIPT_DIR}/bootstrap-labels.sh"
+fi
+
+# ---------------------------------------------------------------------------
+# E2-3 (#32) — resume/replay a single stage from a captured artifact.
+#
+# Bypasses intake → ranking → claim entirely (no GitHub reads, no
+# re-classification): the validated <artifact> is injected AT <stage> and the
+# tick runs forward to closure (or to the --until cap). Replay deliberately
+# EXECUTES the resumed stage — that is its purpose — while downstream GitHub
+# mutations still honour PIPELINE_DRY_RUN. The source artifact is read-only DATA;
+# the replay writes its own artifacts under a FRESH tick dir (E2-1) and never
+# mutates or re-dumps the source.
+_pipeline_resume() {
+  local stage="$1" artifact="$2"
+  local artifact_json; artifact_json="$(cat "${artifact}")"
+  local _td=""
+  if [[ -n "${DISPATCH_ARTIFACTS_DIR:-}" ]]; then
+    _td="${DISPATCH_ARTIFACTS_DIR}/${DISPATCH_TICK_ID}"
+    mkdir -p "${_td}"
+  fi
+  log "pipeline: resume from stage: ${stage} (artifact: ${artifact})"
+
+  case "${stage}" in
+    engineer)
+      # Feed the captured Job Request to the Engineer → Invoice (mirrors the
+      # bridge), tapping the Invoice into the fresh tick dir.
+      local invoice; invoice="$("${_engineer}" "${artifact_json}")"
+      if [[ -n "${_td}" ]]; then
+        printf '%s\n' "${invoice}" >"${_td}/invoice.json"
+      fi
+      # Compose with --until: halt AFTER the engineer stage (ordinal 3).
+      if [[ -n "${DISPATCH_UNTIL_ORD:-}" && "${DISPATCH_UNTIL_ORD}" -le 3 ]]; then
+        log "pipeline: halted after stage: ${DISPATCH_UNTIL_STAGE}"
+        return 0
+      fi
+      bash "${SCRIPT_DIR}/architect-intake.sh" "${invoice}"
+      ;;
+    intake-invoice|closure)
+      # Feed the captured Invoice straight to architect-intake — the stage that
+      # handles intake AND performs the closure label/ledger transition.
+      bash "${SCRIPT_DIR}/architect-intake.sh" "${artifact_json}"
+      ;;
+  esac
+  log "pipeline: done."
+}
+
+if [[ -n "${_from}" ]]; then
+  _pipeline_resume "${_from}" "${_artifact}"
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
