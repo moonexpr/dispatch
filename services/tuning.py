@@ -131,6 +131,13 @@ DEFAULTS: Dict[str, Any] = {
         "plan_limits": {"pro": 44000, "max5": 88000, "max20": 220000},
         "custom_limit_tokens": 0,
     },
+    # Crash-recovery policy for the cron reaper (Pillar 1, E1-3). The committed
+    # tuning.json holds the operator-decided values (issue #49, committed via #68);
+    # these fallbacks keep a missing recovery block deep-merging to a usable shape.
+    "recovery": {
+        "reaper_timeout_hours": 4,
+        "engineer_failure_policy": "architect-rescaffold",
+    },
 }
 
 
@@ -203,6 +210,14 @@ BUDGET_WINDOW_LIMIT: int = int(_BUD_WINDOW.get("window_token_limit") or 0)
 BUDGET_SOFT_CAP_FRACTION: float = float(_BUD_WINDOW.get("soft_cap_fraction", 0.80))
 BUDGET_PLAN_LIMITS: Dict[str, int] = {k: int(v) for k, v in (_BUD.get("plan_limits") or {}).items()}
 BUDGET_CUSTOM_LIMIT: int = int(_BUD.get("custom_limit_tokens") or 0)
+
+# recovery (Pillar 1 reaper / engineer-failure policy) — exposed the same way as
+# the above. The reaper timeout is read by the bash reaper (scripts/dispatch.sh)
+# as the fallback when DISPATCH_CLAIM_TIMEOUT_HOURS is unset.
+_REC = _CFG.get("recovery", {})
+RECOVERY_REAPER_TIMEOUT_HOURS: float = float(_REC.get("reaper_timeout_hours", 4))
+RECOVERY_ENGINEER_FAILURE_POLICY: str = str(
+    _REC.get("engineer_failure_policy", "architect-rescaffold"))
 
 
 # --------------------------------------------------------------------------

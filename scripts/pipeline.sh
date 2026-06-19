@@ -172,6 +172,11 @@ _pipeline_tick() {
   [[ -n "${DISPATCH_CRASH_AFTER_START_TEST:-}" ]] && \
     die "injected post-start crash (DISPATCH_CRASH_AFTER_START_TEST test seam)"
   log "pipeline: dispatch starting"
+  # Crash reaper (E1-3) runs at the TOP of dispatch.sh's main() — i.e. here,
+  # inside this E1-1 lock and before any claim — re-queuing issues stranded in
+  # `claimed` by a crashed engineer. Its re-queue actions are appended to the
+  # tick-scoped reaped sink (exported by tick_record_start) so tick_record_end
+  # records them (reaped_count/reaped) in the heartbeat below.
   local _rc=0
   bash "${SCRIPT_DIR}/dispatch.sh" || _rc=$?
   tick_record_end "${_rc}"

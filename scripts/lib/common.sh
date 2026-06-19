@@ -74,6 +74,22 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 # never calls `gh`. Default sink lives under DISPATCH_ARTIFACTS_DIR (or .dispatch).
 : "${DISPATCH_RUN_RECORD:=${DISPATCH_ARTIFACTS_DIR:-.dispatch}/run-record.log}"
 
+# --------------------------- Crash reaper (E1-3) ---------------------------
+# At the top of each tick (inside the E1-1 lock, before claiming) the reaper
+# re-queues issues stuck in `claimed` past a timeout with NO open PR — recovery
+# from an engineer/dispatch crash that left an issue `claimed` with no Invoice and
+# no PR. Strictly recovery (D1): it only moves stuck issues claimed -> queued,
+# never opens, escalates, or re-dispatches. DISPATCH_REAPER_ENABLED toggles it
+# (default on); DISPATCH_CLAIM_TIMEOUT_HOURS is the stuck threshold (empty here =>
+# fall back to recovery.reaper_timeout_hours in services/tuning.json — the
+# operator decision for #49 — then to 4h). DISPATCH_NOW_OVERRIDE (clock) and
+# DISPATCH_REAPER_FIXTURE (claimed-issue source) are deterministic test seams,
+# never set in production.
+: "${DISPATCH_REAPER_ENABLED:=1}"
+: "${DISPATCH_CLAIM_TIMEOUT_HOURS:=}"
+: "${DISPATCH_NOW_OVERRIDE:=}"
+: "${DISPATCH_REAPER_FIXTURE:=}"
+
 # How `claude` workflow args are passed. The CURRENT CLI has no `--args` flag
 # (verified against code.claude.com/docs); the documented headless form embeds
 # the args in the prompt and the workflow reads the `args` global. We default
@@ -94,7 +110,9 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 export PIPELINE_DRY_RUN PIPELINE_REPO PIPELINE_CONFIDENCE_THRESHOLD \
        PIPELINE_CONCURRENCY GH_BIN CLAUDE_BIN PYTHON_BIN FLOCK_BIN \
        CLAUDE_ARGS_MODE PIPELINE_WORKTREE_ROOT \
-       DISPATCH_LOCK_FILE DISPATCH_LOCK_WAIT DISPATCH_RUN_RECORD DISPATCH_LEDGER_FILE
+       DISPATCH_LOCK_FILE DISPATCH_LOCK_WAIT DISPATCH_RUN_RECORD DISPATCH_LEDGER_FILE \
+       DISPATCH_REAPER_ENABLED DISPATCH_CLAIM_TIMEOUT_HOURS DISPATCH_NOW_OVERRIDE \
+       DISPATCH_REAPER_FIXTURE
 
 # ------------------------------- Logging -----------------------------------
 _ts() { date -u +%H:%M:%SZ 2>/dev/null || echo "--:--:--Z"; }
@@ -176,14 +194,24 @@ _tick_claimed_file() {
   echo "${DISPATCH_CLAIMED_FILE:-${DISPATCH_ARTIFACTS_DIR:-.dispatch}/${DISPATCH_TICK_ID:-tick-unknown}.claimed}"
 }
 
+# _tick_reaped_file: the tick-scoped sink the E1-3 crash reaper appends re-queued
+# issue numbers to, so tick_record_end can list recovery actions in the ended
+# record without re-querying GitHub. Mirrors the claimed sink, keyed by tick id.
+_tick_reaped_file() {
+  echo "${DISPATCH_REAPED_FILE:-${DISPATCH_ARTIFACTS_DIR:-.dispatch}/${DISPATCH_TICK_ID:-tick-unknown}.reaped}"
+}
+
 # tick_record_start: write the `started` record (tick-id, UTC start, repo,
 # dry-run flag) and (re)initialise this tick's claimed sink. Exports
 # DISPATCH_CLAIMED_FILE so child scripts append to the very same path.
 tick_record_start() {
   : "${DISPATCH_TICK_ID:=tick-$(date -u +%Y%m%dT%H%M%SZ)}"; export DISPATCH_TICK_ID
   DISPATCH_CLAIMED_FILE="$(_tick_claimed_file)"; export DISPATCH_CLAIMED_FILE
-  mkdir -p "$(dirname "${DISPATCH_RUN_RECORD}")" "$(dirname "${DISPATCH_CLAIMED_FILE}")" 2>/dev/null || true
-  : >"${DISPATCH_CLAIMED_FILE}" 2>/dev/null || true   # fresh sink per tick
+  DISPATCH_REAPED_FILE="$(_tick_reaped_file)"; export DISPATCH_REAPED_FILE
+  mkdir -p "$(dirname "${DISPATCH_RUN_RECORD}")" "$(dirname "${DISPATCH_CLAIMED_FILE}")" \
+           "$(dirname "${DISPATCH_REAPED_FILE}")" 2>/dev/null || true
+  : >"${DISPATCH_CLAIMED_FILE}" 2>/dev/null || true   # fresh sinks per tick
+  : >"${DISPATCH_REAPED_FILE}"  2>/dev/null || true
   printf 'event=started tick_id=%s ts=%s repo=%s dry_run=%s\n' \
     "${DISPATCH_TICK_ID}" "$(_iso8601)" "${PIPELINE_REPO:-}" "${PIPELINE_DRY_RUN}" \
     >>"${DISPATCH_RUN_RECORD}"
@@ -196,20 +224,69 @@ tick_record_claim() {
   printf '%s\n' "$1" >>"${f}" 2>/dev/null || true
 }
 
+# tick_record_reap NUM: append a reaped (re-queued by the crash reaper, E1-3)
+# issue number to this tick's reaped sink. Local-file only, never gh, never fails
+# the tick — same contract as tick_record_claim.
+tick_record_reap() {
+  local f="${DISPATCH_REAPED_FILE:-$(_tick_reaped_file)}"
+  [[ -n "${f}" ]] || return 0
+  printf '%s\n' "$1" >>"${f}" 2>/dev/null || true
+}
+
 # tick_record_end STATUS: write the `ended` record (UTC end, exit status, and
 # the count + numbers of issues claimed this tick). A non-zero status — or, when
 # the tick is hard-killed, a missing `ended` entirely — marks a stuck tick.
 tick_record_end() {
-  local status="${1:-0}" f claimed_csv="" claimed_count=0
+  local status="${1:-0}" f claimed_csv="" claimed_count=0 rf reaped_csv="" reaped_count=0
   f="${DISPATCH_CLAIMED_FILE:-$(_tick_claimed_file)}"
   if [[ -n "${f}" && -s "${f}" ]]; then
     claimed_count="$(grep -c . "${f}" 2>/dev/null)"; claimed_count="${claimed_count:-0}"
     claimed_csv="$(tr '\n' ',' <"${f}" 2>/dev/null | sed 's/,$//')"
   fi
+  # Crash reaper (E1-3): surface recovery actions in the same ended record.
+  rf="${DISPATCH_REAPED_FILE:-$(_tick_reaped_file)}"
+  if [[ -n "${rf}" && -s "${rf}" ]]; then
+    reaped_count="$(grep -c . "${rf}" 2>/dev/null)"; reaped_count="${reaped_count:-0}"
+    reaped_csv="$(tr '\n' ',' <"${rf}" 2>/dev/null | sed 's/,$//')"
+  fi
   mkdir -p "$(dirname "${DISPATCH_RUN_RECORD}")" 2>/dev/null || true
-  printf 'event=ended tick_id=%s ts=%s status=%s claimed_count=%s claimed=%s\n' \
+  printf 'event=ended tick_id=%s ts=%s status=%s claimed_count=%s claimed=%s reaped_count=%s reaped=%s\n' \
     "${DISPATCH_TICK_ID:-tick-unknown}" "$(_iso8601)" "${status}" "${claimed_count}" "${claimed_csv}" \
+    "${reaped_count}" "${reaped_csv}" \
     >>"${DISPATCH_RUN_RECORD}"
+}
+
+# --------------------------- Crash-reaper helpers (E1-3) -------------------
+# Pure, side-effect-free helpers shared by the reaper (scripts/dispatch.sh). All
+# clock math is UTC and uses GNU `date` (Linux prod/CI). reaper_now_epoch honours
+# the DISPATCH_NOW_OVERRIDE test seam (epoch or ISO-8601); reaper_epoch_of parses
+# a claim timestamp (epoch or ISO-8601) to epoch seconds; reaper_timeout_hours
+# resolves the stuck threshold (env override -> tuning.json recovery -> 4h).
+reaper_now_epoch() {
+  local o="${DISPATCH_NOW_OVERRIDE:-}"
+  if [[ -z "${o}" ]]; then date -u +%s; return; fi
+  if [[ "${o}" =~ ^[0-9]+$ ]]; then printf '%s' "${o}"
+  else date -u -d "${o}" +%s 2>/dev/null || date -u +%s; fi
+}
+
+# reaper_epoch_of <epoch|ISO-8601> -> epoch seconds (empty stdout on parse failure).
+reaper_epoch_of() {
+  local v="${1:-}"
+  [[ -n "${v}" ]] || return 0
+  if [[ "${v}" =~ ^[0-9]+$ ]]; then printf '%s' "${v}"; return 0; fi
+  date -u -d "${v}" +%s 2>/dev/null
+}
+
+# reaper_timeout_hours: env override -> tuning.json recovery.reaper_timeout_hours -> 4.
+reaper_timeout_hours() {
+  if [[ -n "${DISPATCH_CLAIM_TIMEOUT_HOURS:-}" ]]; then
+    printf '%s' "${DISPATCH_CLAIM_TIMEOUT_HOURS}"; return 0
+  fi
+  local v
+  v="$(PYTHONPATH="${PIPELINE_ROOT}/services" "${PYTHON_BIN}" -c \
+      'import tuning; v=tuning.RECOVERY_REAPER_TIMEOUT_HOURS; print(int(v) if float(v).is_integer() else v)' \
+      2>/dev/null)" || v=""
+  [[ -n "${v}" ]] && printf '%s' "${v}" || printf '4'
 }
 
 # ------------------------------ Run-ledger (E4 / #36) ----------------------

@@ -510,6 +510,49 @@ fi
 rm -rf "${LOCKD}"
 
 # ---------------------------------------------------------------------------
+section "§7.13 cron: crash reaper re-queues stuck 'claimed' issues past timeout (offline, deterministic)"
+# (§7.13 per the #51 section map — Pillar 1 cron range, reaper slot; the #28 body's
+# "§7.12" predates that map, which reserves §7.12 for flock and §7.13 for the
+# reaper.) The reaper runs at the TOP of the tick, inside the E1-1 lock, BEFORE
+# claiming: it re-queues issues stuck in `claimed` past DISPATCH_CLAIM_TIMEOUT_HOURS
+# with no open PR, touching only the claimed/queued pair it owns — D1 recovery only
+# (never opens, escalates, or re-dispatches in the same tick). Timeout falls back to
+# recovery.reaper_timeout_hours in services/tuning.json (operator decision #49).
+RPD="$(mktemp -d 2>/dev/null || mktemp -d -t reap)"
+STUCK="${FIX}/claimed-stuck-issues.json"
+EMPTYQ="${RPD}/empty-queued.json"; printf '[]\n' > "${EMPTYQ}"
+RPRR="${RPD}/run-record.log"
+RPLOCK="${RPD}/tick.lock"
+# Deterministic clock + timeout: "now" is pinned and the timeout fixed at 4h, so the
+# decision never depends on the wall clock or tuning.json. The reaper reads its
+# claimed candidates (claim timestamp + whether each has an open PR — the offline
+# "PR set") from DISPATCH_REAPER_FIXTURE; the queued source is empty so the only
+# tick action is recovery.
+reap_out="$(DISPATCH_REAPER_FIXTURE="${STUCK}" DISPATCH_NOW_OVERRIDE='2026-06-18T12:00:00Z' \
+  DISPATCH_CLAIM_TIMEOUT_HOURS=4 DISPATCH_RUN_RECORD="${RPRR}" DISPATCH_ARTIFACTS_DIR="${RPD}/art" \
+  DISPATCH_LOCK_FILE="${RPLOCK}" \
+  bash scripts/pipeline.sh --fixture "${EMPTYQ}" 2>&1)"; reap_rc=$?
+[[ $reap_rc -eq 0 ]] && pass "reaper tick exits 0" || fail "reaper tick exit" "got $reap_rc"
+# (1) Over-timeout, no-PR issue (#201): re-queued claimed -> queued + a provenance comment.
+assert_contains "over-timeout no-PR issue #201 is re-queued (claimed -> queued)" "$reap_out" "issue edit 201 --remove-label claimed --add-label queued"
+assert_contains "reaper posts a crash-reaper provenance comment on #201" "$reap_out" "Re-queued by crash reaper"
+assert_contains "reaper comment names the tick id for operator provenance" "$reap_out" "tick="
+# (2) Within-timeout issue (#202): a normal in-flight claim, never reaped.
+assert_not_contains "within-timeout issue #202 is left claimed (no re-queue)" "$reap_out" "issue edit 202 --remove-label claimed"
+# (3) Old issue WITH an open PR (#203): in-flight progress, never reaped.
+assert_not_contains "old issue #203 with an open PR is never reaped" "$reap_out" "issue edit 203 --remove-label claimed"
+# (4) Dry-run: the reap is PRINTED via run(), never executed (mutates nothing).
+assert_contains "reaper re-queue is dry-run only (printed, not executed)" "$reap_out" "DRY-RUN: gh issue edit 201"
+# (5) The reaped issue is recorded in the E1-2 tick run-record (operator history).
+endrec="$(grep '^event=ended ' "${RPRR}" 2>/dev/null | head -1)"
+assert_contains "ended run-record lists the reaped issue (#201)" "$endrec" "reaped=201"
+assert_contains "ended run-record carries reaped_count=1" "$endrec" "reaped_count=1"
+# (6) D1: the reaper owns ONLY the claimed/queued edge — it never escalates/declines.
+assert_not_contains "reaper never escalates to needs-human" "$reap_out" "add-label needs-human"
+assert_not_contains "reaper never applies wont-do" "$reap_out" "add-label wont-do"
+rm -rf "${RPD}"
+
+# ---------------------------------------------------------------------------
 section "§7.14 cron: per-tick heartbeat / run-record seam (offline, deterministic)"
 # (§7.14 per the #51 section map — Pillar 1 cron range, heartbeat slot; the
 # issue #27 body's "§7.13" predates that map, which reserves §7.13 for the

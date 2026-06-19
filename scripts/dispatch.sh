@@ -48,6 +48,112 @@ count_claimed() {
   fi
 }
 
+# --- crash reaper (E1-3) ---------------------------------------------------
+# At the top of the tick (inside pipeline.sh's E1-1 lock, before claiming) re-queue
+# issues stuck in `claimed` past the timeout with NO open PR — recovery from an
+# engineer/dispatch crash that stranded an issue in `claimed` with no Invoice and
+# no PR. Recovery only (D1): claimed -> queued + a provenance comment; never opens,
+# escalates, or re-dispatches. Reaped issues are excluded from THIS tick's claim
+# loop (REAPED_THIS_TICK) so recovery never doubles as same-tick re-dispatch.
+
+# reaper_claimed_candidates: emit a JSON array of {number, claimed_at, has_open_pr}
+# for the issues currently in `claimed`. Source precedence: DISPATCH_REAPER_FIXTURE
+# (test seam) -> PIPELINE_FIXTURE_ISSUES (offline; filtered to claimed) -> live gh.
+reaper_claimed_candidates() {
+  local src="${DISPATCH_REAPER_FIXTURE:-${PIPELINE_FIXTURE_ISSUES}}"
+  if [[ -n "${src}" ]]; then
+    jq -c '[.[]
+            | select((.labels // []) | index("claimed"))
+            | {number, claimed_at: (.claimed_at // null), has_open_pr: (.has_open_pr // false)}]' \
+       "${src}"
+    return 0
+  fi
+  # Live: the reaper is best-effort recovery — if gh is unavailable, skip quietly
+  # rather than failing the tick.
+  have_tool "${GH_BIN}" || { echo '[]'; return 0; }
+  local REPO_ARGS=(); gh_repo_args
+  local nums
+  nums="$("${GH_BIN}" issue list --label claimed --state open --json number \
+      --limit 50 "${REPO_ARGS[@]}" 2>/dev/null | jq -r '.[].number' 2>/dev/null)" || nums=""
+  local out='[]' num at haspr
+  while IFS= read -r num; do
+    [[ -n "${num}" ]] || continue
+    at="$(reaper_live_claimed_at "${num}")"
+    haspr="$(reaper_live_has_pr "${num}")"
+    out="$(jq -c --argjson n "${num}" --arg at "${at}" --argjson hp "${haspr}" \
+          '. + [{number:$n, claimed_at: (if $at=="" then null else $at end), has_open_pr:$hp}]' \
+          <<<"${out}")"
+  done <<<"${nums}"
+  printf '%s' "${out}"
+}
+
+# reaper_live_claimed_at NUM: the claim timestamp, read from the durable route
+# marker dispatch posts at claim time (`<!-- pipeline:route -->`). Uses the
+# confirmed `comments` JSON field (gh issue view exposes no timelineItems field).
+reaper_live_claimed_at() {
+  local num="$1" REPO_ARGS=(); gh_repo_args
+  "${GH_BIN}" issue view "${num}" --json comments "${REPO_ARGS[@]}" 2>/dev/null \
+    | jq -r '[.comments[]? | select(.body | test("<!-- pipeline:route -->")) | .createdAt] | last // empty' \
+        2>/dev/null
+}
+
+# reaper_live_has_pr NUM: "true" if an open PR exists on the worker branch
+# pipeline/issue-<n>, else "false".
+reaper_live_has_pr() {
+  local num="$1" REPO_ARGS=(); gh_repo_args
+  local c
+  c="$("${GH_BIN}" pr list --state open --head "pipeline/issue-${num}" --json number \
+      --limit 1 "${REPO_ARGS[@]}" 2>/dev/null | jq 'length' 2>/dev/null)" || c=0
+  [[ "${c:-0}" -gt 0 ]] && printf 'true' || printf 'false'
+}
+
+# reap_stuck_claims: the recovery step. Idempotent — an issue already back in
+# `queued` is never in the claimed set, so re-running a tick re-queues it at most
+# once. Honours PIPELINE_DRY_RUN via gh_mutate (prints, never mutates, in dry-run).
+reap_stuck_claims() {
+  [[ "${DISPATCH_REAPER_ENABLED:-1}" != "0" ]] || { log "reaper: disabled (DISPATCH_REAPER_ENABLED=0)"; return 0; }
+  local claimed
+  claimed="$(reaper_claimed_candidates)" || return 0
+  local n
+  n="$(jq 'length' <<<"${claimed}" 2>/dev/null || echo 0)"
+  [[ "${n}" -gt 0 ]] || return 0   # nothing claimed -> nothing to recover (silent)
+  local timeout_h now cutoff_s
+  timeout_h="$(reaper_timeout_hours)"
+  now="$(reaper_now_epoch)"
+  cutoff_s="$(awk -v h="${timeout_h}" 'BEGIN { printf "%d", (h * 3600) }')"
+  log "reaper: inspecting ${n} claimed issue(s) (timeout ${timeout_h}h)"
+  local i num claimed_at has_pr at_epoch age_s age_h
+  for ((i = 0; i < n; i++)); do
+    num="$(jq -r ".[$i].number" <<<"${claimed}")"
+    claimed_at="$(jq -r ".[$i].claimed_at // empty" <<<"${claimed}")"
+    has_pr="$(jq -r ".[$i].has_open_pr // false" <<<"${claimed}")"
+    if [[ "${has_pr}" == "true" ]]; then
+      log "reaper: #${num} has an open PR — not reaping (in-flight work)"
+      continue
+    fi
+    if [[ -z "${claimed_at}" ]]; then
+      log "reaper: #${num} has no resolvable claim timestamp — not reaping (conservative)"
+      continue
+    fi
+    at_epoch="$(reaper_epoch_of "${claimed_at}")"
+    if [[ -z "${at_epoch}" ]]; then
+      log "reaper: #${num} unparseable claim timestamp '${claimed_at}' — not reaping"
+      continue
+    fi
+    age_s=$(( now - at_epoch ))
+    age_h="$(awk -v s="${age_s}" 'BEGIN { printf "%.1f", (s / 3600.0) }')"
+    if (( age_s >= cutoff_s )); then
+      log "reaper: #${num} stuck in claimed ~${age_h}h (> ${timeout_h}h) with no open PR — re-queuing (claimed -> queued)"
+      gh_mutate issue edit "${num}" --remove-label claimed --add-label queued
+      gh_mutate issue comment "${num}" --body "<!-- pipeline:reaper --> Re-queued by crash reaper: this issue was stuck in \`claimed\` for ~${age_h}h (timeout ${timeout_h}h) with no open PR. tick=${DISPATCH_TICK_ID:-tick-unknown}. Recovery only (claimed -> queued, D1) — a later tick will re-drain it."
+      tick_record_reap "${num}"
+      REAPED_THIS_TICK="${REAPED_THIS_TICK:-} ${num} "
+    else
+      log "reaper: #${num} claimed ~${age_h}h ago (<= ${timeout_h}h) — within timeout, leaving claimed"
+    fi
+  done
+}
+
 # --- work-order render (debug-dump for --until, E2-2/#31) -------------------
 # Render a human-readable work order from the claimed issue's classified fields.
 # Used only for the gated --until artifact dump; the engineer receives the
@@ -156,6 +262,14 @@ budget_preflight_throttles() {
 }
 
 main() {
+  # Crash reaper (E1-3): recover issues stranded in `claimed` by an engineer/
+  # dispatch crash FIRST this tick — inside pipeline.sh's E1-1 lock, before any
+  # claim. Recovery is cheap (a label flip + comment) and independent of the
+  # soft-cap throttle below, so stuck work returns to the pool even on a
+  # throttled tick.
+  REAPED_THIS_TICK=""
+  reap_stuck_claims
+
   # Pre-flight soft-cap guard (E5-3/#40): throttle to dry-run + skip the claim
   # when the usage window is at/over the operator's soft cap. Sits before any
   # claim; never aborts a job already past claim.
@@ -176,6 +290,14 @@ main() {
   for ((i = 0; i < n; i++)); do
     issue="$(jq -c ".[$i]" <<<"${issues}")"
     num="$(jq -r '.number' <<<"${issue}")"
+    # Crash reaper (E1-3, D1): an issue this tick's reaper just re-queued must not
+    # be re-claimed in the same tick — recovery returns it to `queued` for a LATER
+    # tick to re-drain, it never doubles as same-tick re-dispatch.
+    case " ${REAPED_THIS_TICK:-} " in
+      *" ${num} "*)
+        log "#${num} was re-queued by the reaper this tick — leaving queued for a later tick (D1)"
+        continue ;;
+    esac
     title="$(jq -r '.title // ""' <<<"${issue}")"
     body="$(jq -r '.body // ""' <<<"${issue}")"
 

@@ -1,0 +1,26 @@
+[
+  {
+    "number": 201,
+    "title": "Engineer crashed mid-implementation (stuck in claimed, no PR)",
+    "body": "Represents an issue dispatch claimed but whose engineer crashed before opening a PR — left in `claimed` with no Invoice and no PR. Its claim age exceeds the timeout, so the crash reaper must re-queue it (claimed -> queued) for a later tick to re-drain.",
+    "labels": ["claimed"],
+    "claimed_at": "2026-06-18T04:00:00Z",
+    "has_open_pr": false
+  },
+  {
+    "number": 202,
+    "title": "Recently claimed, engineer still working (within timeout)",
+    "body": "Claimed well within the timeout window — a normal in-flight claim, not a crash. The reaper must leave it in `claimed`.",
+    "labels": ["claimed"],
+    "claimed_at": "2026-06-18T11:00:00Z",
+    "has_open_pr": false
+  },
+  {
+    "number": 203,
+    "title": "Long-running claim that already has an open PR",
+    "body": "Old claim, but the worker already opened pipeline/issue-203. An in-flight PR is real progress — the reaper must never re-queue it even though it is past the timeout.",
+    "labels": ["claimed"],
+    "claimed_at": "2026-06-18T02:00:00Z",
+    "has_open_pr": true
+  }
+]
