@@ -60,6 +60,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 #   §7.21–§7.23  Pillar 3 · Budget ............. claude-monitor · invoice reconcile · soft-cap
 #   §7.24–§7.25  Day 3 · Research-mode ......... gap-detection · research order · DAG embed
 #   §7.26–§7.27  Day 3 · Integration & runbook . full-tick smoke · operator runbook
+#   §7.28        Pillar 5 · Demo bootstrap ..... demo-repo seed manifest + label provisioning (offline proxy)
+#                (#47, Part of #25: the harness range §7.16–§7.18 was already full
+#                 when this straggler landed, so it draws a fresh id per the
+#                 "gaps allowed, no duplicates" rule above. The #47 body's "§7.11"
+#                 predates this map, which reserves §7.11 for the architect prompt.)
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
@@ -1114,6 +1119,75 @@ if DISPATCH_TUNING_FILE="${RDT}" PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" 
   pass "play-queue regression: every emitted order is mode=implementation"
 else fail "a play-queue order leaked into research mode"; fi
 rm -rf "${RORD}"
+
+# ---------------------------------------------------------------------------
+section "§7.28 demo-repo bootstrap seed manifest + label provisioning (offline proxy, #47)"
+# Offline proxy for E0-1 (#47). The LIVE gh label/issue creation against
+# ReclaimByDesign/demo-repository is an OPERATOR step (run bootstrap-labels.sh
+# with PIPELINE_REPO set, then `gh issue create` from this manifest) and is
+# intentionally NOT asserted here — smoke stays network-free. We assert the
+# committed artifacts: the seed manifest's shape + its deterministic offline
+# classification, and that label provisioning would target the demo repo.
+SEED="${ROOT}/scripts/demo/seed/backlog.json"
+# (a) Manifest is valid JSON: an array of >=5 issues, each carrying the queued label.
+if jq -e 'type=="array" and length>=5 and all(.[]; (.labels|index("queued")))' "$SEED" >/dev/null 2>&1; then
+  pass "seed manifest: >=5 issues, each labelled queued"
+else
+  fail "seed manifest invalid (need array, length>=5, every item labelled queued)"
+fi
+# (b) bootstrap-labels.sh dry-run, targeted at the demo repo via PIPELINE_REPO,
+#     would create the queued label there (the operator's live run is the same
+#     no-op-safe `--force` upsert). Network-free: PIPELINE_DRY_RUN stays on.
+seed_bl="$(PIPELINE_DRY_RUN=1 PIPELINE_REPO=ReclaimByDesign/demo-repository bash "${ROOT}/scripts/bootstrap-labels.sh" 2>&1)"
+assert_contains "bootstrap-labels would create the queued label" "$seed_bl" "gh label create queued"
+assert_contains "bootstrap-labels would target the demo repo" "$seed_bl" "--repo ReclaimByDesign/demo-repository"
+assert_contains "label upsert is idempotent (--force)" "$seed_bl" "--force"
+# (c) Every manifest issue classifies schema-valid + deterministically (offline),
+#     and the backlog spans distinct classifier routes plus a clear decline shape —
+#     a representative web-dev mix (bug, feature, vague, large, out-of-scope, typo).
+SEEDTMP="$(mktemp -d 2>/dev/null || mktemp -d -t seed)"
+seed_len="$(jq 'length' "$SEED")"
+seed_routes=""; seed_actions=""; seed_confs=""; seed_det=1; seed_schema=1
+for ((i=0; i<seed_len; i++)); do
+  jq -c ".[$i]" "$SEED" > "${SEEDTMP}/one.json"
+  s1="$(python3 "${CLS}/classify.py" --issue-json "${SEEDTMP}/one.json" 2>/dev/null)"
+  s2="$(python3 "${CLS}/classify.py" --issue-json "${SEEDTMP}/one.json" 2>/dev/null)"
+  [[ "$s1" == "$s2" ]] || seed_det=0
+  if ! printf '%s' "$s1" | jq -e '
+      . as $r
+      | (["implement","needs-human","wont-do","duplicate?","decompose"]|index($r.action))!=null
+      and (["xs","s","m","l"]|index($r.scope))!=null
+      and (["gen-local","gen-default","gen-frontier"]|index($r.route))!=null
+      and ($r.confidence|type)=="number" and $r.confidence>=0 and $r.confidence<=1
+    ' >/dev/null 2>&1; then seed_schema=0; fi
+  seed_routes="${seed_routes}$(printf '%s' "$s1" | jq -r '.route')"$'\n'
+  seed_actions="${seed_actions}$(printf '%s' "$s1" | jq -r '.action')"$'\n'
+  seed_confs="${seed_confs}$(printf '%s' "$s1" | jq -r '.confidence')"$'\n'
+done
+[[ "$seed_schema" == 1 ]] && pass "every seed issue classifies schema-valid" || fail "a seed issue classified out-of-schema"
+[[ "$seed_det" == 1 ]] && pass "seed classification is deterministic across runs" || fail "seed classification nondeterministic"
+seed_uroutes="$(printf '%s' "$seed_routes" | sort -u | grep -c .)"
+[[ "$seed_uroutes" -ge 2 ]] && pass "seed exercises >=2 distinct classifier routes ($seed_uroutes)" \
+  || fail "seed does not span >=2 distinct routes" "$seed_routes"
+if printf '%s' "$seed_actions" | grep -qx 'wont-do'; then
+  pass "seed includes an out-of-scope -> wont-do issue"
+else
+  fail "seed has no wont-do (out-of-scope) issue" "$seed_actions"
+fi
+seed_min_conf="$(printf '%s' "$seed_confs" | sort -n | head -1)"
+awk -v c="$seed_min_conf" 'BEGIN{exit !(c<0.55)}' \
+  && pass "seed includes a sub-threshold (needs-human-bound) issue (min conf=${seed_min_conf} < 0.55)" \
+  || fail "no sub-threshold issue in seed (min conf=${seed_min_conf})"
+# (d) seed-backlog.sh dry-run: would create one issue per manifest entry, each
+#     labelled queued, against the demo repo — and mutates nothing (dry-run).
+seed_sb="$(PIPELINE_DRY_RUN=1 PIPELINE_REPO=ReclaimByDesign/demo-repository bash "${ROOT}/scripts/demo/seed/seed-backlog.sh" 2>&1)"
+seed_creates="$(printf '%s\n' "$seed_sb" | grep -c 'gh issue create')"
+[[ "$seed_creates" -eq "$seed_len" ]] \
+  && pass "seed-backlog dry-run: one 'gh issue create' per manifest entry ($seed_creates)" \
+  || fail "seed-backlog dry-run create count != manifest length" "got $seed_creates, want $seed_len"
+assert_contains "seed-backlog labels each issue queued" "$seed_sb" "--label queued"
+assert_contains "seed-backlog targets the demo repo" "$seed_sb" "--repo ReclaimByDesign/demo-repository"
+rm -rf "${SEEDTMP}"
 
 # ---------------------------------------------------------------------------
 # §7 section-numbering authority (smoke-sections-v1, issue #51). Enforces the
