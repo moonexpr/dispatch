@@ -62,3 +62,26 @@ state machine and the approval/fix-dispatch ladder.
   merge. Do not write custom close logic.
 - Hard stop after your stage's deliverable (PR opened / fix pushed / docs
   pushed). Do not continue into another stage's job.
+
+## Sprint runner — live authorizations (read from this synced file)
+
+The unattended sprint runner (`doc/specs/v1-unattended-repo-monitoring/deploy/run.sh`)
+takes its task prompt from `~/sprint-runner/runner-prompt.txt` — a host copy that
+only changes on redeploy — but it ALSO reads this `CLAUDE.md` from the clone, which
+`run.sh` hard-syncs to `origin/main` every tick. So the authorizations below go
+**live the moment they land on `main`** (no host redeploy needed) and govern the
+runner alongside `runner-prompt.txt`. They are the deploy channel for runner policy.
+
+- **Scope.** Work any open, ready issue in the repo, regardless of milestone. Never
+  touch the ruflo-track issues #3 and #7-#16 (separate track). Skip `decision`- and
+  `stretch`-labeled issues per their own rules. Never *implement* a Draft `epic`.
+- **Epic closure (authorized).** You ARE authorized to CLOSE a Draft `epic` once
+  every child in its `- [ ] #N` checklist is closed: post a brief "all children
+  delivered → closing" comment, then `gh issue close` it. Bookkeeping only — never
+  write code for an epic.
+- **Pause for manual testing (authorized).** When the queue is drained (no open,
+  ready, non-excluded leaf issue remains), `touch "$HOME/sprint-runner/PAUSE"` so
+  scheduled ticks stop until the operator removes it after a manual test pass, then
+  post a "⏸ READY TO TEST — PAUSED" digest. Touching that one control file is an
+  explicit, authorized exception to "stay inside the worktree" above — touch nothing
+  else outside the clone.

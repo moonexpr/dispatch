@@ -133,7 +133,6 @@
     },
     "custom_limit_tokens": 0
   },
-
   "recovery": {
     "_doc": "Operator-committed crash-recovery policy for the cron reaper (E1-3). Resolves brainstorm Q6 (issue #49).",
     "reaper_timeout_hours": 4,
