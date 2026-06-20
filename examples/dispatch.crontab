@@ -25,12 +25,14 @@ DISPATCH_HOME=/opt/dispatch
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# --- the tick: 4x/day at 00:07, 06:07, 12:07, 18:07 -----------------------
+# --- the tick: every 2 hours (12x/day) at 00:07, 02:07, 04:07, … 22:07 ----
 # Fields: min hour dom mon dow  command
+# `*/2` in the hour field fires on every even hour; the `:07` minute offset
+# keeps each tick off the top-of-hour and away from contention.
 # `cd $DISPATCH_HOME` so common.sh finds pipeline.env; the inline env vars are
 # set explicitly (PIPELINE_REPO + the deliberate live flag); the outer flock
 # guards against overlap; stdout+stderr append to the cron log.
-7 0,6,12,18 * * * cd /opt/dispatch && PIPELINE_REPO=owner/your-repo PIPELINE_DRY_RUN=0 flock -n /tmp/dispatch.cron.lock ./entrypoint.sh --repo owner/your-repo >> /opt/dispatch/dispatch.cron.log 2>&1
+7 */2 * * * cd /opt/dispatch && PIPELINE_REPO=owner/your-repo PIPELINE_DRY_RUN=0 flock -n /tmp/dispatch.cron.lock ./entrypoint.sh --repo owner/your-repo >> /opt/dispatch/dispatch.cron.log 2>&1
 
 # Upgrade paths (NOT the 1.0 default — see README "Scheduling unattended ticks"):
 #   (a) OpenClaw Gateway — scheduler + webhook receiver + operator chat I/O.

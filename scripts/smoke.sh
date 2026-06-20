@@ -607,6 +607,9 @@ crontab_txt="$(cat "${CRONTAB_EX}" 2>/dev/null)"
 launchd_txt="$(cat "${LAUNCHD_EX}" 2>/dev/null)"
 assert_contains "crontab example invokes entrypoint.sh" "$crontab_txt" "entrypoint.sh"
 assert_contains "launchd example invokes entrypoint.sh" "$launchd_txt" "entrypoint.sh"
+# (1b) The tick runs every 2 hours / 12x per day (issue #69): the schedule uses
+#      the `*/2` hour field with the `:07` minute offset preserved.
+assert_contains "crontab tick fires every 2 hours (12x/day) with :07 offset" "$crontab_txt" "7 */2 * * *"
 # (2) Live-run is never accidental: PIPELINE_DRY_RUN is set explicitly, and the
 #     example serializes via flock (and/or documents the in-process E1-1 lock).
 assert_contains "crontab sets PIPELINE_DRY_RUN explicitly" "$crontab_txt" "PIPELINE_DRY_RUN"

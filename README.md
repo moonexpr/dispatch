@@ -217,7 +217,7 @@ examples: [`examples/dispatch.crontab`](examples/dispatch.crontab) and
 paths and repo, then install:
 
 ```bash
-# Linux: 4x/day at 00:07, 06:07, 12:07, 18:07
+# Linux: every 2 hours (12x/day) at 00:07, 02:07, 04:07, … 22:07
 crontab examples/dispatch.crontab
 
 # macOS:
