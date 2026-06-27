@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
+import adversary  # src/orchestration/adversary.py — #111 cross-model weigh-in
 import characteristics  # src/architect/characteristics.py
 import decompose  # src/architect/decompose.py
 import resources  # src/architect/resources.py
@@ -145,13 +146,50 @@ def draft_work_plan(inputs: Dict[str, Any]) -> Dict[str, Any]:
     return {"work_plan": work_plan}
 
 
+def _adversary_dry_run() -> bool:
+    """Dry-run unless PIPELINE_DRY_RUN is explicitly disabled (defaults ON, so the
+    spec phase never makes a live model call offline / in smoke / in e2e)."""
+    return os.environ.get("PIPELINE_DRY_RUN", "1").strip().lower() not in ("0", "false", "no")
+
+
+def _approval_note(weigh_in: Dict[str, Any]) -> str:
+    """Human-readable approval note recording the #111 weigh-in (advisory)."""
+    if not weigh_in.get("available"):
+        return "auto-approved (no adversary configured — fail-open)"
+    model = weigh_in.get("model")
+    if weigh_in.get("dry_run"):
+        return f"auto-approved (adversary {model} resolved; dry-run, not called)"
+    if weigh_in.get("verdict"):
+        return f"auto-approved (adversary {model} weigh-in: {weigh_in['verdict']})"
+    return f"auto-approved (adversary {model} consulted; {weigh_in.get('error', 'no verdict')})"
+
+
 def submit(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """A8 — bundle {work_plan, orchestration_script}; auto-approved."""
+    """A8 — bundle {work_plan, orchestration_script}; auto-approved.
+
+    Fills the reserved adversarial-challenge seam (#111): before the plan is
+    handed on, a cross-model — ideally non-Anthropic — adversary weighs in. The
+    weigh-in is ADVISORY (recorded in the submission; it never flips ``approved``)
+    and FAIL-OPEN (no backend / error / timeout / dry-run -> approve as today)."""
+    work_plan = inputs.get("work_plan") or {}
+    strat = work_plan.get("strategy")
+    weigh_in = adversary.weigh_in(
+        "architect-submit",
+        {
+            "issue": work_plan.get("issue"),
+            "strategy": strat.get("abc") if isinstance(strat, dict) else strat,
+            "bucket": work_plan.get("bucket"),
+            "acceptance_criteria_count": len(work_plan.get("acceptance_criteria") or []),
+        },
+        untrusted_text="\n".join(work_plan.get("acceptance_criteria") or []),
+        dry_run=_adversary_dry_run(),
+    )
     submission = {
         "work_plan": inputs.get("work_plan"),
         "orchestration_script": inputs.get("orchestration_script"),
-        "approved": True,
-        "approval_note": "auto-approved (adversarial-challenge seam reserved)",
+        "approved": True,  # advisory: the weigh-in is recorded, never vetoes
+        "approval_note": _approval_note(weigh_in),
+        "adversary_weigh_in": weigh_in,
     }
     return {"submission": submission}
 

@@ -16,7 +16,7 @@ import os
 import re
 import sys
 
-from . import common
+from . import adversary, common
 
 
 def load_payload(arg=None) -> str:
@@ -78,6 +78,21 @@ def main(argv=None) -> int:
             f"success). Exiting 0."
         )
         return 0
+
+    # #111 cross-model adversarial weigh-in before escalating (advisory, fail-open,
+    # dry-run-safe). Covers both the tier bump and the fix-attempt-3 -> needs-human
+    # cap below; recorded to the ledger but NEVER vetoes the escalation.
+    wi = adversary.weigh_in(
+        "fix-ladder",
+        {"pr": pr, "attempt": attempt, "tier": tier, "conclusion": conclusion},
+        untrusted_text=brief,
+        dry_run=common.is_dry_run(),
+    )
+    common.log(
+        f"PR #{pr}: adversary weigh-in ({wi.get('backend') or 'none'}): "
+        f"{wi.get('verdict') or wi.get('reason') or wi.get('error') or 'n/a'}"
+    )
+    common.ledger_emit("adversary-weigh-in", pr, json.dumps(wi, ensure_ascii=False))
 
     if tier == "needs-human":
         common.log(f"PR #{pr}: attempt {attempt} exceeds cap (3) -> escalating to operator.")

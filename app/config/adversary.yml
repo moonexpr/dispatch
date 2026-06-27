@@ -1,0 +1,28 @@
+# adversary.yml — cross-model adversarial weigh-in before escalation (#111).
+#
+# Read by src/orchestration/adversary.py via the engine.filesys facade. A
+# missing/corrupt file falls back to the same defaults in code, so the pipeline
+# always has a usable shape. Override the path with DISPATCH_ADVERSARY_CONFIG
+# only if needed (absolute paths pass through engine.filesys.resolve).
+#
+# The gate is ADVISORY and FAIL-OPEN: it never vetoes or blocks an escalation,
+# it never runs a live model under dry-run, and any error/timeout degrades to
+# "escalate as today". Backend precedence: HuggingFace (hf_model) -> OpenRouter
+# (OPENROUTER_API_KEY) -> Anthropic frontier (opus, last resort).
+adversary:
+  enabled: true
+
+  # HuggingFace adversary model id — a genuinely different family (least shared
+  # blind spots). Empty -> skip the HF tier even when HF_TOKEN is set.
+  # e.g. meta-llama/Llama-3.1-8B-Instruct
+  hf_model: ""
+
+  # OpenRouter model id (non-Anthropic). Empty -> the models.py OPENROUTER_MODEL
+  # default (openai/gpt-4o-mini). e.g. google/gemini-2.0-flash-001
+  openrouter_model: ""
+
+  # Soft timeout for the weigh-in call; on timeout the gate fails open.
+  timeout_seconds: 30
+
+  # Cap the adversary's reply length (it only needs VERDICT + one-sentence REASON).
+  max_tokens: 512

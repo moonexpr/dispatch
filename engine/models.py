@@ -8,15 +8,17 @@ Model aliases
   opus    → claude-opus-4-8              frontier / hardest problems
   local   → gen-local (MLX Qwen3-Coder) via LiteLLM proxy
   hf:<id> → HuggingFace Inference API   e.g. hf:facebook/bart-large-mnli
+  or:<id> → OpenRouter chat completions e.g. or:openai/gpt-4o-mini (non-Anthropic adversary)
 
 Backend auto-selection (priority order)
 ---------------------------------------
   1. litellm    LITELLM_BASE_URL is set → OpenAI-compatible proxy handles routing
-  2. anthropic  ANTHROPIC_API_KEY is set → direct Anthropic Messages API
-  3. huggingface HF_TOKEN is set; only for hf: aliases
-  4. cli        subprocess `claude -p`; no API key required
+  2. huggingface HF_TOKEN is set; only for hf: aliases
+  3. openrouter  OPENROUTER_API_KEY is set; only for or: aliases (OpenAI-compatible)
+  4. anthropic  ANTHROPIC_API_KEY is set → direct Anthropic Messages API
+  5. cli        subprocess `claude -p`; no API key required
 
-Override: MODELS_BACKEND=litellm|anthropic|huggingface|cli
+Override: MODELS_BACKEND=litellm|huggingface|openrouter|anthropic|cli
 
 Env vars consumed
 -----------------
@@ -29,6 +31,10 @@ Env vars consumed
   ANTHROPIC_FRONTIER_MODEL   override opus model id
   HF_TOKEN                   HuggingFace auth token
   HF_API_URL                 HF Inference API base (default: https://api-inference.huggingface.co)
+  OPENROUTER_API_KEY         OpenRouter auth token (enables the openrouter backend)
+  OPENROUTER_MODEL           default OpenRouter model id when an or: alias omits one
+                             (default: openai/gpt-4o-mini)
+  OPENROUTER_BASE_URL        OpenRouter API base (default: https://openrouter.ai/api/v1)
   CLAUDE_BIN                 claude CLI binary (default: claude)
 
 Public API
@@ -125,6 +131,8 @@ def _detect_backend(model: str) -> str:
         return "litellm"
     if model.startswith("hf:") and os.environ.get("HF_TOKEN"):
         return "huggingface"
+    if model.startswith("or:") and os.environ.get("OPENROUTER_API_KEY"):
+        return "openrouter"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic"
     return "cli"
@@ -242,6 +250,33 @@ def _backend_huggingface(
     return resp.get("generated_text", str(resp))
 
 
+def _backend_openrouter(
+    model: str,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    temperature: float,
+) -> str:
+    """OpenRouter (OpenAI-compatible chat completions). Lets the pipeline reach a
+    genuinely non-Anthropic adversary family (gpt-*, gemini-*, llama-*, …) for the
+    #111 cross-model weigh-in. The model id is the bare OpenRouter id; accept an
+    explicit ``or:<id>`` alias, else fall back to OPENROUTER_MODEL."""
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
+    model_id = model[3:] if model.startswith("or:") else \
+        os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    if not model_id:
+        model_id = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    base = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    resp = _post_json(
+        f"{base}/chat/completions",
+        {"model": model_id, "messages": messages,
+         "max_tokens": max_tokens, "temperature": temperature},
+        {"Authorization": f"Bearer {api_key}"},
+    )
+    return resp["choices"][0]["message"]["content"]
+
+
 def _backend_cli(
     model: str,
     messages: List[Dict[str, str]],
@@ -277,6 +312,7 @@ _BACKENDS = {
     "litellm":     _backend_litellm,
     "anthropic":   _backend_anthropic,
     "huggingface": _backend_huggingface,
+    "openrouter":  _backend_openrouter,
     "cli":         _backend_cli,
 }
 

@@ -31,7 +31,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))            # src/baseworkflow
 _BW = os.path.dirname(_HERE)                                  # src/baseworkflow
 _SRC = os.path.dirname(_BW)                                   # src
 _ROOT = os.path.dirname(_SRC)                                 # repo root
-for _p in (_ROOT, _SRC, os.path.join(_SRC, "architect"), os.path.join(_SRC, "budget"), _BW):
+for _p in (_ROOT, _SRC, os.path.join(_SRC, "architect"), os.path.join(_SRC, "budget"),
+           os.path.join(_SRC, "orchestration"), _BW):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
