@@ -37,8 +37,7 @@ WORKPLAN.md
 .claude/agents/
 CLAUDE.local.md
 
-# ruflo per-run state (the rest of .claude-flow/ config is tracked)
-.claude-flow/agents.json
-.claude-flow/hive-mind/
+# ruflo/.claude-flow runtime — no longer tracked; ignore the whole dir
+.claude-flow/
 # local test-run finding drafts (the GitHub issue comments are the durable record)
 scripts/demo/testrun-findings/
