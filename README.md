@@ -62,6 +62,51 @@ source of truth across runs.
 
 ---
 
+## Architecture
+
+Under the operational pipeline, the dispatch **engine** models work as
+**Controllers** — control structures whose body is Sequences and Loops over
+**Actions**:
+
+| Action | Role |
+|--------|------|
+| `Procedure` | deterministic leaf (milliseconds) |
+| `Inference` | agent leaf — a Claude Agent SDK call (seconds–minutes) |
+| `Program` | a nested Controller — the sole recursion point |
+
+Each Controller carries three **Shelves** (`input`, `deliverables`, `shared`),
+and **Governors** (decorators) enforce budget, permission (deny-by-default), and
+iteration caps over every Action uniformly. `BaseController` fixes a
+`spec → work → build` phase skeleton; `BaseWorkflow` fills it with the
+Architect/Admin/Engineering cycle, where the Architect emits a serialized
+orchestration script that the Admin deserializes and runs.
+
+**Control-flow formalism — Harel statecharts (HFSM).** Per
+[ADR-001](docs/adr/001-hfsm-automata.md), controller control flow and
+inter-controller coordination are an HFSM (hierarchy + orthogonality + broadcast
++ history + guards, under run-to-completion semantics):
+
+- **Externalized transitions** — `(event, guard, source, target, action)`
+  objects, not control flow buried in a Controller body.
+- **A single run-to-completion (RTC) interpreter** owns the agenda over a
+  **serializable active configuration**; Controllers never invoke one another
+  directly.
+- **Addressable state IDs** so any transition can target any Controller/Action.
+- **Deep history (H\*)** → resume a crashed run from its deepest active position
+  (the Issues-as-durable-state-machine bias).
+- **Orthogonal regions** → `parallel` phases; **broadcast events + `in(state)`
+  guards** → future peer communication.
+
+The serialized statechart (SCXML / UML-aligned) doubles as the Architect's
+orchestration script. v1 **builds the seams** (externalized transitions,
+addressable IDs, RTC loop, a reserved event queue) while the broadcast bus and
+cross-region guards stay **stubbed** until multiple Controllers run
+concurrently. Full rationale, the options weighed (plain call stack, flat FSM,
+behavior tree), and action items live in
+[`docs/adr/001-hfsm-automata.md`](docs/adr/001-hfsm-automata.md).
+
+---
+
 ## Usage
 
 ```bash

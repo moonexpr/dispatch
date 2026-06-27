@@ -15,6 +15,16 @@ kind, governors, budgets, and the monitor loop — now live in
 The budget constants are read FROM the YAML (single source of truth). Building a
 ``BaseWorkflow`` is side-effect-free (it constructs a statechart and compiles it);
 the input shelf is seeded at run time, not construction.
+
+Architecture (ADR-001 — Harel statecharts / HFSM). A ``BaseWorkflow`` is a
+**Controller** (an OR-superstate) whose ``spec → work → build`` phases compile to
+a serializable statechart driven by the engine's run-to-completion interpreter
+over an active configuration. The YAML names the **Actions** — ``Procedure``
+(deterministic leaf), ``Inference`` (agent leaf), ``Program`` (nested Controller,
+the sole recursion point) — wired through ``bindings``; **Governor** decorators
+carry the budget / permission / iteration caps; the three **Shelves**
+(``input`` / ``deliverables`` / ``shared``) are the data model. See
+``docs/adr/001-hfsm-automata.md``.
 """
 from __future__ import annotations
 
