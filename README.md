@@ -38,16 +38,17 @@ that reads a Job Request JSON and writes an Invoice JSON to stdout.
 
 ## Flow
 
-> **Engine status (as of Phase 3 of the BaseWorkflow wiring).** `BaseWorkflow`
-> (the `engine/` + `app/config/` automata substrate) is now the **DEFAULT**
-> authoring engine for the workorder stage, selected by `DISPATCH_ENGINE`
-> (`baseworkflow` default | `visitor` explicit fallback). On a bare tick the
+> **Engine status.** `BaseWorkflow` (the `engine/` + `app/config/` automata
+> substrate) is the authoring engine for the workorder stage. On every tick the
 > visitor's `visit_workorder` runs a BaseWorkflow (via
 > `src/orchestration/baseworkflow_bridge.py`) over the visitor-built Job Request
 > and folds the authored `orchestration_script` / `work_plan` into it before the
 > engineer (`engineer_sdk.py`) consumes it — fail-safe, falling back to the
-> original request on any error. Set `DISPATCH_ENGINE=visitor` to skip
-> BaseWorkflow authoring and run the historical pure-visitor path unchanged.
+> original request on any error. The historical `DISPATCH_ENGINE=visitor`
+> authoring fallback (skip BaseWorkflow, run the pure-visitor path unchanged) is
+> **deprecated and disabled for release** — it is no longer selectable; an
+> explicit `DISPATCH_ENGINE=visitor` is ignored with a warning and BaseWorkflow
+> runs anyway.
 > The GitHub lifecycle of every tick (claim → labels → PR → closure) is still
 > owned by the `src/orchestration` visitor pipeline
 > (`src/orchestration/pipeline.py`), and the engineer is still `engineer_sdk.py`;

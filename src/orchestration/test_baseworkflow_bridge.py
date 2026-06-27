@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """test_baseworkflow_bridge.py — BaseWorkflow authoring seam unit tests.
 
-Proves the feature-flagged, fail-safe BaseWorkflow authoring seam
-(``src/orchestration/baseworkflow_bridge.py`` + the ``DISPATCH_ENGINE`` flag
-wired into ``visitors.ExecutionVisitor.visit_workorder``). As of Phase 3,
-``baseworkflow`` is the DEFAULT engine and ``visitor`` is the explicit fallback:
+Proves the fail-safe BaseWorkflow authoring seam
+(``src/orchestration/baseworkflow_bridge.py`` wired into
+``visitors.ExecutionVisitor.visit_workorder``). ``baseworkflow`` is the only
+supported engine; the historical ``visitor`` authoring fallback is deprecated
+and disabled for release:
 
   (a) with DISPATCH_ENGINE=baseworkflow + dry-run, ``author_via_baseworkflow``
       enriches the request with ``orchestration_script`` + ``work_plan`` and
       makes NO model call;
   (b) the fail-safe returns the ORIGINAL request unchanged on any error;
-  (c) DISPATCH_ENGINE=visitor (the explicit fallback) leaves ``ctx.job_request``
-      untouched and never reaches the bridge;
-  (d) with DISPATCH_ENGINE unset, the Phase-3 default (baseworkflow) drives
+  (c) the deprecated DISPATCH_ENGINE=visitor opt-in is IGNORED — the bridge runs
+      and the request is enriched anyway (the visitor authoring path is disabled);
+  (d) with DISPATCH_ENGINE unset, the default (baseworkflow) drives
       visit_workorder through the bridge and enriches the request.
 
 No pytest in this repo — a runnable, self-asserting module (exit 0 = pass),
@@ -186,9 +187,9 @@ def _run_visit_workorder_with_tripwire():
     return called["n"], json.loads(ctx.job_request)
 
 
-def test_visitor_fallback_untouched() -> None:
-    """(c) DISPATCH_ENGINE=visitor (the explicit fallback) leaves ctx.job_request
-    untouched and never reaches the baseworkflow bridge."""
+def test_visitor_opt_in_disabled() -> None:
+    """(c) DISPATCH_ENGINE=visitor is DEPRECATED and DISABLED for release: the
+    opt-in is ignored, so the bridge still runs and the request is enriched."""
     os.environ["PIPELINE_DRY_RUN"] = "1"
     os.environ["DISPATCH_ENGINE"] = "visitor"
     try:
@@ -196,11 +197,11 @@ def test_visitor_fallback_untouched() -> None:
     finally:
         os.environ.pop("DISPATCH_ENGINE", None)
 
-    _ok(n == 0, "visitor-fallback path does not call the baseworkflow bridge")
-    _ok("orchestration_script" not in built and "work_plan" not in built,
-        "visitor-fallback path leaves the Job Request unenriched")
+    _ok(n >= 1, "disabled visitor opt-in is ignored; the baseworkflow bridge runs anyway")
+    _ok("orchestration_script" in built and "work_plan" in built,
+        "request is enriched despite DISPATCH_ENGINE=visitor (fallback disabled)")
     _ok(built.get("issue") == 42 and built.get("route") == "gen-default",
-        "visitor-fallback path builds the visitor Job Request as before")
+        "visitor opt-in path still preserves the Job Request fields")
 
 
 def test_default_engine_enriches() -> None:
@@ -222,7 +223,7 @@ def main() -> int:
     test_enrich_dry_run_no_model_call()
     test_enrich_carries_plan_units_for_fanout()
     test_failsafe_returns_original_on_error()
-    test_visitor_fallback_untouched()
+    test_visitor_opt_in_disabled()
     test_default_engine_enriches()
     print(f"-- bridge tests: PASS={_PASS} FAIL={_FAIL} --")
     return 1 if _FAIL else 0

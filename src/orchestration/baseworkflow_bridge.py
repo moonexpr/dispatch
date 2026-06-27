@@ -1,17 +1,18 @@
 """baseworkflow_bridge.py — the live-tick seam onto the BaseWorkflow engine.
 
-Phase 2 of wiring the dispatch live tick onto ``src/baseworkflow``. This module
-is an **additive, feature-flagged, fail-safe** seam: when ``DISPATCH_ENGINE`` is
-set to ``baseworkflow`` (default is ``visitor``), :func:`author_via_baseworkflow`
+Wires the dispatch live tick onto ``src/baseworkflow``. BaseWorkflow is the only
+supported workorder authoring engine: on every tick :func:`author_via_baseworkflow`
 runs a :class:`~baseworkflow.BaseWorkflow` over the Job Request the workorder
 stage just built, and folds the workflow's authored ``orchestration_script`` and
 ``work_plan`` deliverables back into the Job Request dict so the downstream
 ``engineer`` stage (``engineer_sdk.py``) can consume the Architect decomposition.
 
-Design rules (binding, per the Phase-2 contract):
+The historical ``DISPATCH_ENGINE=visitor`` authoring fallback (which left the Job
+Request unchanged) is DEPRECATED and DISABLED for release — it is no longer
+selectable; see ``visitors.py`` ``visit_workorder``.
 
-  * **Additive.** The default ``visitor`` path is byte-for-byte unchanged — this
-    module is only reached when ``DISPATCH_ENGINE == "baseworkflow"``.
+Design rules (binding):
+
   * **Dry-run honoured.** ``BaseWorkflow`` is run via ``run_live(..., dry_run=…)``
     where the dry-run flag is read from ``PIPELINE_DRY_RUN`` (the pipeline's
     single source of truth via ``common.is_dry_run``). Under dry-run the

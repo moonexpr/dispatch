@@ -191,23 +191,28 @@ class ExecutionVisitor(StageVisitor):
                 "confidence": conf,
             }
         )
-        # Authoring-engine seam (Phase 3, DEFAULT ON). DISPATCH_ENGINE selects the
-        # workorder authoring engine: `baseworkflow` (the DEFAULT) runs a
-        # BaseWorkflow over the Job Request and folds its authored
-        # orchestration_script / work_plan back in; `visitor` is the explicit
-        # fallback that leaves the Job Request byte-for-byte unchanged. Fail-safe:
-        # on any error the request is returned unchanged. The fallback literal here
-        # mirrors common.py's _default("DISPATCH_ENGINE", "baseworkflow").
-        if common.env("DISPATCH_ENGINE", "baseworkflow") == "baseworkflow":
-            from .baseworkflow_bridge import author_via_baseworkflow
-
-            ctx.job_request = author_via_baseworkflow(ctx.job_request)
-        else:
+        # Authoring engine. `baseworkflow` is the ONLY supported workorder authoring
+        # engine: it runs a BaseWorkflow over the Job Request and folds its authored
+        # orchestration_script / work_plan back in (fail-safe: on any error the
+        # request is returned unchanged). The historical `visitor` authoring engine —
+        # which left the Job Request byte-for-byte unchanged — is DEPRECATED and
+        # DISABLED for release: `DISPATCH_ENGINE=visitor` is no longer selectable. An
+        # explicit opt-in is ignored (with a warning) and baseworkflow runs anyway.
+        # The default literal mirrors common.py's
+        # _default("DISPATCH_ENGINE", "baseworkflow").
+        if common.env("DISPATCH_ENGINE", "baseworkflow") != "baseworkflow":
             common.warn(
-                "DISPATCH_ENGINE=visitor selects the deprecated visitors authoring "
-                "engine. It is kept only as a fallback and will not be supported in "
-                "the future; migrate to the default baseworkflow engine."
+                "DISPATCH_ENGINE=visitor selects the deprecated visitor authoring "
+                "engine, which is DISABLED as of release. Ignoring it and using the "
+                "supported baseworkflow engine; unset DISPATCH_ENGINE to silence this."
             )
+        from .baseworkflow_bridge import author_via_baseworkflow
+
+        ctx.job_request = author_via_baseworkflow(ctx.job_request)
+        # --- DEPRECATED / DISABLED: the legacy `visitor` authoring fallback once
+        # lived here as the `else` arm above — it left ctx.job_request byte-for-byte
+        # unchanged instead of running BaseWorkflow authoring. It is retained in
+        # history for reference only and is no longer reachable. ---
 
         # Freeze the seam on the LIVE path (#143): validate the Job Request's
         # seam projection against schemas/job-request.v1.json BEFORE it is handed to
