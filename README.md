@@ -1,16 +1,17 @@
 # dispatch
 
-**dispatch** selects engineering jobs from a GitHub Issues queue, issues them
-to a ruflo engineer agent, and processes the Invoice the agent returns —
-closing the loop or escalating based on outcome.
+**dispatch** selects engineering jobs from a GitHub Issues queue and runs each
+through a **Workflow** — a Controller that drives Actions across a
+`spec → work → build` cycle — then processes the Invoice it returns, closing the
+loop or escalating based on outcome.
 
 Three responsibilities, nothing more:
 
-1. **Issue intake** — fetch and classify queued issues via `gh-intake.sh`,
-   store them in the ruflo task queue, claim one at a time.
-2. **Job issuance** — the ruflo swarm coordinator hands a structured Job
-   Request to an engineer agent with the issue, route, and scope.
-3. **Work plan approval** — receive the agent's Invoice; on success arm
+1. **Issue intake** — fetch and classify queued issues, claim one at a time.
+2. **Job issuance** — the Workflow's Architect phase composes a structured Job
+   Request (issue, route, scope); the Engineering phase runs it as an Action —
+   the engineer (`ENGINEER_BIN`).
+3. **Work plan approval** — receive the engineer's Invoice; on success arm
    auto-merge (awaiting human approval); on failure advance the fix-attempt
    ladder; on ambiguity escalate to the operator via a GitHub comment.
 
@@ -23,14 +24,17 @@ Three responsibilities, nothing more:
 
 ## Roles
 
-| Role | What it does | Backed by |
-|------|-------------|-----------|
-| **Coordinator** | Intake → Job Request → Invoice review | ruflo swarm (hierarchical-mesh) |
-| **Engineer** | Executes the job in a git worktree, returns an Invoice | ruflo engineer agent (`ENGINEER_BIN`) |
+dispatch runs one **Workflow** (`BaseWorkflow`) per work unit — a top-level
+**Controller** whose phases drive **Actions** over a `spec → work → build` cycle:
 
-The two roles are fully decoupled. `ENGINEER_BIN` can be any binary that reads
-a Job Request JSON and writes an Invoice JSON to stdout; the default is a ruflo
-engineer agent spawned by the coordinator via the claude-flow MCP.
+| Phase | What it does | Actions |
+|-------|-------------|---------|
+| **Architect** | classify → decompose → compose the Job Request / work order | `Procedure` + `Inference` |
+| **Engineering** | execute the work order in a git worktree, return an Invoice | the engineer (`ENGINEER_BIN`), wrapped as an `Inference` |
+| **Admin** | store results, update docs, run adversarial review, approve or escalate | `Procedure` + `Inference` |
+
+The engineer is decoupled from the workflow: `ENGINEER_BIN` can be any binary
+that reads a Job Request JSON and writes an Invoice JSON to stdout.
 
 ## Flow
 
@@ -38,27 +42,22 @@ engineer agent spawned by the coordinator via the claude-flow MCP.
 GitHub Issues (queued)
         │
         ▼
-  [INTAKE] gh-intake.sh → intake-to-ruflo bridge
-    fetch → normalize → store in ruflo task queue
-        │
-        ▼
-  [COORDINATOR] ruflo hierarchical swarm
-    classify → route → claim one issue (SubagentStart hook: queued → claimed)
+  [INTAKE] fetch → classify → claim one issue (queued → claimed)
         │
         ▼ Job Request {issue, route, scope, confidence}
-  [ENGINEER] ruflo engineer agent
-    implement → test → open PR
+  [WORKFLOW] BaseWorkflow — a Controller driving Actions (spec → work → build)
+    Architect (compose work order) → Engineering (execute) → Admin (store · docs · review)
         │
         ▼ Invoice {status, pr_number, cost, summary, …}
-  [APPROVAL] SubagentStop hook → architect-intake.sh
+  [APPROVAL]
     completed   → post summary + arm auto-merge (human approves to merge)
-    failed      → fix-attempt ladder (fix-dispatch.sh, up to 3 attempts)
+    failed      → fix-attempt ladder (up to 3 attempts)
     needs-human → label + comment on the issue for the operator
 ```
 
-All durable state lives in **GitHub** (issues, labels, PRs, comments).
-Ruflo provides session memory and swarm coordination; GitHub is the
-source of truth across runs.
+All durable state lives in **GitHub** (issues, labels, PRs, comments). Within a
+run, the workflow's **Shelves** (`input` / `deliverables` / `shared`) hold the
+working state; GitHub is the source of truth across runs.
 
 ---
 
@@ -184,19 +183,22 @@ refactor, vague defer, decline-shaped ask) and its mechanics are documented in
 
 ---
 
-## Engines
+## Engine
 
-dispatch assembles existing engines; it builds nothing custom.
+dispatch ships a small **workflow engine** — controllers, actions, and a
+run-to-completion interpreter — under `engine/`, driven by declarative YAML
+under `app/config/`.
 
-| Concern | Engine |
-|---------|--------|
-| Swarm coordination | ruflo V3 (hierarchical-mesh, up to 15 agents, `.claude-flow/config.yaml`) |
-| Session memory | ruflo hybrid memory (HNSW + file, `.claude-flow/data/`) |
-| Hook lifecycle | ruflo hooks in `.claude/settings.json` (SubagentStart/Stop, PostToolUse) |
-| Issue intake | `scripts/gh-intake.sh` → `scripts/intake-to-ruflo.sh` bridge |
-| Issue classification | Deterministic keyword classifier (`src/classifier/classify.py`) |
-| Queue + state machine | GitHub Issues + labels (`scripts/bootstrap-labels.sh`) |
-| Job execution | ruflo engineer agent (or any binary speaking Job Request / Invoice JSON) |
+| Concern | Where |
+|---------|-------|
+| Workflow / controller runtime | `engine/workflow/` (controller · loader · visitor · registry) |
+| Actions, governors, interpreter | `engine/actions/` (action · control · governor · interpreter · shelf · statechart) |
+| Workflow definition | `app/config/baseworkflow.yml` + `app/config/actions/**` (one file per Action) |
+| Agent definitions | `app/config/agents/*.yaml` (architect · coder · reviewer · tester · security-architect) |
+| Model routing | `engine/models.py` + `app/config/models.yml` (LiteLLM · Anthropic · HF · CLI) |
+| Issue classification | deterministic keyword classifier (`src/classifier/classify.py`) |
+| Queue + state machine | GitHub Issues + labels |
+| Job execution | the engineer Action (`ENGINEER_BIN` — any Job Request → Invoice binary) |
 | CI gate | GitHub Actions (`.github/workflows/ci.yml`) |
 
 ## Label state machine
@@ -314,27 +316,22 @@ deliverable when an issue is under-specified) round out the five 1.0 capabilitie
 ## Layout
 
 ```
-entrypoint.sh            ← start here: a tick, or `entrypoint.sh report`
-dispatch                 ← architect work-order emitter (./dispatch --fixture …)
+entrypoint.sh            ← run one tick (intake → workflow → approval)
+dispatch · dispatch.py   ← workflow / work-order entrypoints (./dispatch --fixture …)
 RUNBOOK.md               operator guide: schedule · inspect · digest · budget · reaper
 schemas/                 invoice.json · job-request.json
-engine/             common.py · proc.py · models.py (LiteLLM/Anthropic/HF/CLI) · dag.py (issue DAG)
-src/intake/         intake.py · pipeline.py · ranker.py
-src/architect/      dispatch.py · resources.py (work-order generation)
-src/classifier/     classify.py (deterministic keyword triage)
-src/budget/         oracle.py · guard.py (soft-cap, claude-monitor)
-src/reports/        report.py (operator digest renderer)
-src/tuning.json     selection · generation · budget.window · recovery.*
-scripts/                 gh-intake.sh · intake-to-ruflo.sh (bridge)
-                         pipeline.sh · dispatch.sh · fix-dispatch.sh · closure.sh
-                         architect-intake.sh · mock-engineer.sh
-                         bootstrap-labels.sh · deploy-remote.sh
-                         smoke.sh · lib/common.sh · fixtures/
-scripts/demo/            snapshot.sh · mutate.py · replay.sh · scenarios/ (demo harness)
+engine/                  the dispatch workflow engine
+  workflow/              controller · loader · visitor · registry
+  actions/               action · control · governor · interpreter · shelf · statechart
+  models.py · proc.py · filesys.py · runtime.py
+app/config/              baseworkflow.yml · actions/** · agents/*.yaml · models.yml · state_machine.yml
+src/architect/           work-order generation (decompose · strategy · verify · resources …)
+src/baseworkflow/        baseworkflow.py — loads app/config into a Controller · bindings/
+src/classifier/          classify.py (deterministic keyword triage)
+src/budget/              oracle · guard · reconcile (soft-cap)
+src/intake/              intake.py · pipeline.py
+scripts/                 claude-engineer.sh · mock-engineer.sh · smoke.sh · debug-classify.sh
 examples/                dispatch.crontab · dispatch.launchd.plist (schedulers)
-.claude/                 settings.json (hooks) · agents/ · skills/ · helpers/
-.claude-flow/            config.yaml · data/ · logs/ · sessions/
-.mcp.json                claude-flow MCP config
 .github/workflows/       ci.yml
 ```
 
