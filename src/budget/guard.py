@@ -36,16 +36,21 @@ sys.path.insert(0, _HERE)                    # src/budget — for oracle
 import oracle  # noqa: E402
 import tuning  # noqa: E402
 
-_DEFAULT_SOFT_CAP = 0.85
-
 
 def _soft_cap_fraction() -> float:
-    """The operator-committed soft cap (tuning.budget.window.soft_cap_fraction)."""
+    """The operator-committed soft cap (tuning.budget.window.soft_cap_fraction).
+
+    Config is the single source of this value (#144): the tuning loader resolves
+    it from app/config/tuning.yml, deep-merged over its own validated DEFAULTS,
+    and degrades fail-safe to that default when the file/key is absent — so no
+    literal soft-cap is duplicated here. ``BUDGET_SOFT_CAP_FRACTION`` is that
+    resolved value; we re-read the live window block first so a hot-edited config
+    is honoured, falling back to the loader's exposed default."""
     window = (tuning.load().get("budget", {}) or {}).get("window", {}) or {}
     try:
         return float(window.get("soft_cap_fraction"))
     except (TypeError, ValueError):
-        return _DEFAULT_SOFT_CAP
+        return tuning.BUDGET_SOFT_CAP_FRACTION
 
 
 def should_throttle() -> Dict[str, Any]:

@@ -42,6 +42,16 @@ _SKELETON: Dict[str, Any] = {
     "purpose": {"labels": {}, "keyword_rules": [], "default": "new-feature", "harness": {}},
     "strategy": {"dynamic_purposes": [], "swarm_min_parallel_units": 2, "layouts": {}},
     "issues_affected": {"include_dag_neighbours": True},
+    # prep-stage structural fallbacks (#144). These are the SINGLE in-code copy of
+    # the provisioner allowlist + branch/worktree conventions, owned by this
+    # loader's skeleton — prep.py no longer carries its own _DEFAULT_* duplicates.
+    # The committed app/config/workplan-rules.yml is the source of the live values;
+    # these only keep the shape so a missing/corrupt YAML degrades, not crashes.
+    "prep": {
+        "known_provisioners": ["none", "marketplace", "skill"],
+        "branch_prefix": "pipeline/issue-",
+        "worktree_root": ".worktrees",
+    },
 }
 
 

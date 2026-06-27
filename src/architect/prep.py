@@ -46,11 +46,10 @@ sys.path.insert(0, _HERE)
 import characteristics as _characteristics  # noqa: E402
 import workplan_config                      # noqa: E402
 
-# Defaults if the YAML omits a `prep` section (kept here as structural fallback
-# only — the real values live in workplan-rules.yml, like every other rule).
-_DEFAULT_KNOWN_PROVISIONERS = ["none", "marketplace", "skill"]
-_DEFAULT_BRANCH_PREFIX = "pipeline/issue-"
-_DEFAULT_WORKTREE_ROOT = ".worktrees"
+# The prep `known_provisioners` allowlist + branch/worktree conventions live in
+# app/config/workplan-rules.yml (the single source); workplan_config's content-free
+# skeleton holds the structural fallback when the YAML is absent (#144). No value
+# duplicates are kept here — `load()` always resolves a `prep` section.
 
 
 def _setup_steps(setup: str) -> List[str]:
@@ -133,13 +132,19 @@ def build(job: Dict[str, Any],
     issuance and ``block_reason`` says why.
     """
     rules = workplan_config.load()
+    # `prep` is always present: the live values come from workplan-rules.yml and,
+    # when absent, from workplan_config's content-free skeleton (#144). The
+    # `_DEFAULT_*` fallback (workplan_config._SKELETON["prep"]) backstops a
+    # partial YAML that omits an individual key.
+    _skel_prep = workplan_config._SKELETON.get("prep", {})
     prep_cfg = (rules.get("prep") or {})
     known = [str(p).strip().lower()
-             for p in (prep_cfg.get("known_provisioners") or _DEFAULT_KNOWN_PROVISIONERS)]
+             for p in (prep_cfg.get("known_provisioners")
+                       or _skel_prep["known_provisioners"])]
     branch_prefix = (branch_prefix if branch_prefix is not None
-                     else str(prep_cfg.get("branch_prefix") or _DEFAULT_BRANCH_PREFIX))
+                     else str(prep_cfg.get("branch_prefix") or _skel_prep["branch_prefix"]))
     worktree_root = (worktree_root if worktree_root is not None
-                     else str(prep_cfg.get("worktree_root") or _DEFAULT_WORKTREE_ROOT))
+                     else str(prep_cfg.get("worktree_root") or _skel_prep["worktree_root"]))
 
     # The three load-bearing characteristics (purpose→harness, strategy→layout,
     # issues_affected) — computed exactly as the work order surfaces them.
