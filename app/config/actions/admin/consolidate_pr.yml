@@ -1,0 +1,25 @@
+# M7.5 — consolidate the engineering result into ONE pull request (the squash-
+# consolidation seam). The engineering agents COMMIT to one issue branch; this
+# build-phase action opens the single PR for that branch (the squash itself is
+# armed at merge time by admin:intake_invoice via `pr merge --auto --squash`).
+# Moving PR-creation out of the per-unit engineer is what makes a decomposed issue
+# land as one reviewable PR instead of N. A procedure; reads the run Context for
+# ctx.dry_run, which gates the gh write (no network on the dry-run path).
+token: admin:consolidate_pr
+kind: procedure
+bind: consolidate_pr
+budget: admin
+
+# gh-write capability declared in the same namespaced vocabulary as
+# intake_invoice (declarative today; the real dry-run safety is enforced
+# imperatively in the binding via ctx.dry_run).
+permission:
+  - gh:pr:create        # open the one consolidated PR for the engineering branch
+
+interface:
+  in:
+    engineering_result: deliverables.engineering_result
+    work_plan: deliverables.work_plan
+    job: input.job
+  out:
+    consolidation: deliverables.consolidation

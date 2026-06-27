@@ -52,11 +52,14 @@ phases:
         max_iterations: 3
         body: engineer:execute_orchestration
 
-  # build — the Administrator's documentation + persistence, then the engineer-
-  # invoice intake (the gh-write label-state-machine transition; #137 rescaffold
-  # on a failed/partial result). Runs last so engineering_result + the stored
-  # record are both available.
+  # build — the Administrator's documentation + persistence, then the squash-
+  # consolidation (open ONE PR for the engineering branch — engineers commit, the
+  # build phase opens the PR), then the engineer-invoice intake (the gh-write
+  # label-state-machine transition; #137 rescaffold on a failed/partial result,
+  # arm `--squash` auto-merge on completed). Runs last so engineering_result + the
+  # stored record + the consolidated PR number are all available.
   build:
     - admin:update_docs
     - admin:store
+    - admin:consolidate_pr
     - admin:intake_invoice

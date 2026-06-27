@@ -10,6 +10,7 @@ intake (the first GitHub-mutating action in the workflow engine). Composes the
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict
 
 import prep  # src/architect/prep.py
@@ -18,6 +19,7 @@ import rescaffold  # src/architect/rescaffold.py — the shared #137 directive
 # common carries the dry-run-aware gh wrapper + run-ledger (orchestration policy).
 # bindings/__init__ puts src/orchestration on sys.path, so this is a flat import.
 import common  # src/orchestration/common.py
+from engine import proc  # engine.proc — capturing subprocess wrapper (PR-create stdout)
 
 
 def prepare_env(inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,6 +65,112 @@ def store(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# M7.5 — consolidate the engineering result into ONE pull request.              #
+#                                                                               #
+# This is the squash-consolidation seam: the engineering Program (work phase)   #
+# leaves the unit-agents' work as commits on ONE issue branch — the engineers   #
+# COMMIT, they do not open PRs. The build phase opens a single PR for that       #
+# branch; the actual squash happens at merge time, where intake_invoice arms     #
+# `pr merge --auto --squash` (so the unit commits collapse to one commit on the  #
+# base). Moving PR-creation here — out of the per-unit engineer — is what lets a #
+# decomposed issue land as one reviewable PR instead of N.                       #
+#                                                                               #
+# Per-issue scope (one BaseWorkflow run = one issue, the work_plan invariant     #
+# "one issue, one branch, one PR"). A cross-issue / per-tick super-PR is a       #
+# deliberately deferred layer ABOVE this per-issue build phase.                  #
+#                                                                               #
+# GitHub-mutating, so — like intake_invoice — every write is gated on            #
+# ``ctx.dry_run``; under dry-run the action records the intended `gh pr create`  #
+# (greppable DRY-RUN line) and makes no network call.                            #
+# --------------------------------------------------------------------------- #
+def _default_branch(job: Dict[str, Any]) -> str:
+    """Base branch for the PR: an explicit job hint, else PIPELINE_DEFAULT_BRANCH,
+    else ``main`` (the overwhelming default for the target repos)."""
+    return str(job.get("default_branch") or os.environ.get("PIPELINE_DEFAULT_BRANCH") or "main")
+
+
+def _engineer_branch(engineering_result: Dict[str, Any], job: Dict[str, Any], issue: str) -> str:
+    """The branch the engineering Program pushed its commits to. Prefer a branch the
+    program surfaced (value/meta), then a job hint, then the canonical
+    ``pipeline/issue-<n>`` the engineer names by convention."""
+    for carrier in (engineering_result.get("value"), engineering_result.get("meta")):
+        if isinstance(carrier, dict) and carrier.get("branch"):
+            return str(carrier["branch"])
+    if job.get("branch"):
+        return str(job["branch"])
+    return f"pipeline/issue-{issue}"
+
+
+def consolidate_pr(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+    """M7.5 — open ONE consolidated PR for the engineering branch, or record a skip.
+
+    Only a ``completed`` engineering result yields a PR — a partial/failed/
+    needs-human result has nothing shippable, so we record a skip and let
+    ``intake_invoice`` drive the fix-ladder / escalation. The PR body restates the
+    work plan's acceptance criteria and carries ``Closes #<n>`` so GitHub auto-closes
+    the issue on (squash-)merge. Writes ``consolidation`` to the deliverables shelf;
+    ``intake_invoice`` reads ``consolidation.pr_number`` to arm auto-merge."""
+    engineering_result = inputs.get("engineering_result") or {}
+    job = inputs.get("job") or {}
+    work_plan = inputs.get("work_plan") or {}
+    issue = job.get("issue")
+    issue = "" if issue is None else str(issue)
+    title = job.get("title") or f"issue #{issue}"
+    status = _invoice_status(engineering_result)
+    dry = bool(getattr(ctx, "dry_run", True))
+
+    if status != "completed":
+        common.log(f"consolidate-pr: issue=#{issue} status={status} — nothing to ship, no PR (skip)")
+        return {"consolidation": {
+            "issue": issue, "status": status, "pr_number": None, "branch": None,
+            "skipped": True, "dry_run": dry, "mutations": [],
+        }}
+
+    branch = _engineer_branch(engineering_result, job, issue)
+    base = _default_branch(job)
+    criteria = work_plan.get("acceptance_criteria") or []
+    acc_block = "\n".join(f"- [ ] {c}" for c in criteria) or "- [ ] see issue acceptance criteria"
+    summary = (engineering_result.get("meta") or {}).get("summary") or ""
+    pr_title = f"Implement #{issue}: {title}"
+    pr_body = (
+        f"Consolidated implementation of #{issue} by the dispatch BaseWorkflow build "
+        f"phase. The engineering agents committed to `{branch}`; this single PR "
+        f"squash-merges them.\n\n## Acceptance\n{acc_block}\n\n{summary}\n\nCloses #{issue}"
+    )
+    # --repo is appended by gh_mutate / gh_repo_args from PIPELINE_REPO (parity with
+    # intake_invoice), so it is NOT in the arg vector here.
+    args = ["pr", "create", "--base", base, "--head", branch,
+            "--title", pr_title, "--body", pr_body]
+    mutations = [[str(a) for a in args]]
+    common.log(f"consolidate-pr: issue=#{issue} branch={branch} base={base} dry_run={dry}")
+
+    pr_number: Any = None
+    pr_url = ""
+    if dry:
+        # Record-only: prints the greppable DRY-RUN line, makes no network call.
+        common.gh_mutate(*args)
+    else:
+        cmd = [os.environ.get("GH_BIN", "gh"), *args, *common.gh_repo_args()]
+        res = proc.run(cmd, capture=True)
+        pr_url = (res.stdout or "").strip()
+        tail = pr_url.rstrip("/").rsplit("/", 1)[-1] if pr_url else ""
+        if res.returncode == 0 and tail.isdigit():
+            pr_number = int(tail)
+        else:
+            # Branch is pushed but the PR could not be opened — partial (work done,
+            # no PR to arm-merge). intake_invoice then runs the partial transition.
+            status = "partial"
+            common.log(f"consolidate-pr: PR creation failed for #{issue} "
+                       f"(rc={res.returncode}) — partial")
+
+    return {"consolidation": {
+        "issue": issue, "status": status, "pr_number": pr_number, "pr_url": pr_url,
+        "branch": branch, "base": base, "skipped": False, "dry_run": dry,
+        "mutations": mutations,
+    }}
+
+
+# --------------------------------------------------------------------------- #
 # M8 — intake the engineer invoice and drive the GitHub label state machine.    #
 # Ported from the DEPRECATED src/orchestration/visitors.py::visit_intake_invoice #
 # (the `completed`/`partial`/`failed`/`needs-human` transitions). This is the    #
@@ -105,12 +213,20 @@ def intake_invoice(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     common.py's DRY-RUN discipline). Faithful port of visitors.py."""
     engineering_result = inputs.get("engineering_result") or {}
     job = inputs.get("job") or {}
+    # The PR now comes from the build-phase consolidation (admin:consolidate_pr),
+    # not from the engineer — read its pr_number and (possibly downgraded) status
+    # from there, falling back to the job for callers that don't run consolidation.
+    consolidation = inputs.get("consolidation") or {}
     issue = job.get("issue")
     issue = "" if issue is None else str(issue)
-    pr_number = job.get("pr_number")
+    pr_number = consolidation.get("pr_number")
+    if pr_number is None:
+        pr_number = job.get("pr_number")
     pr_number = "" if pr_number is None else str(pr_number)
     route_used = job.get("route") or "gen-local"
-    status = _invoice_status(engineering_result)
+    # consolidate_pr may DOWNGRADE a completed result to "partial" when the PR could
+    # not be opened (branch pushed, no PR to arm); honor the consolidation verdict.
+    status = consolidation.get("status") or _invoice_status(engineering_result)
     summary = (engineering_result.get("meta") or {}).get("summary") or "(no summary)"
 
     dry = bool(getattr(ctx, "dry_run", True))
@@ -184,4 +300,5 @@ def register(reg: Any) -> None:
     reg.register_action("write_adversarial", write_adversarial)
     reg.register_action("update_docs", update_docs)
     reg.register_action("store", store, needs_ctx=True)
+    reg.register_action("consolidate_pr", consolidate_pr, needs_ctx=True)
     reg.register_action("intake_invoice", intake_invoice, needs_ctx=True)
