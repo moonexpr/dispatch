@@ -68,6 +68,17 @@ DEFAULTS: Dict[str, Any] = {
             },
             "scope_route": {"xs": "gen-local", "s": "gen-local",
                             "m": "gen-default", "l": "gen-frontier"},
+            # Controlled vocabularies (TriageResult enums). The CONTENT — which
+            # actions/scopes/routes are valid — is data; the classification LOGIC
+            # stays in classify.py. epic_prefix is the (lowercased) title marker
+            # that flags an [Epic] container issue for decomposition.
+            "vocab": {
+                "actions": ["implement", "needs-human", "wont-do",
+                            "duplicate?", "decompose"],
+                "scopes": ["xs", "s", "m", "l"],
+                "routes": ["gen-local", "gen-default", "gen-frontier"],
+                "epic_prefix": "[epic]",
+            },
         },
         "ranker": {
             "fwd_patterns": [
@@ -296,6 +307,12 @@ CLASSIFY_HINTS: Dict[str, Tuple[str, ...]] = {
     k: tuple(v) for k, v in _SEL["classify"]["hints"].items()}
 CONF: Dict[str, Any] = dict(_SEL["classify"]["conf"])
 SCOPE_ROUTE: Dict[str, str] = dict(_SEL["classify"]["scope_route"])
+# Classifier controlled vocabularies (TriageResult enums) — data, not logic.
+_VOCAB = _SEL["classify"]["vocab"]
+ACTIONS: Tuple[str, ...] = tuple(_VOCAB["actions"])
+SCOPES: Tuple[str, ...] = tuple(_VOCAB["scopes"])
+ROUTES: Tuple[str, ...] = tuple(_VOCAB["routes"])
+EPIC_PREFIX: str = str(_VOCAB["epic_prefix"])
 DEP_FWD: Tuple[str, ...] = tuple(_SEL["ranker"]["fwd_patterns"])
 DEP_REV: Tuple[str, ...] = tuple(_SEL["ranker"]["rev_patterns"])
 

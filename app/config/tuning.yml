@@ -86,6 +86,26 @@ selection:
       s: gen-local
       m: gen-default
       l: gen-frontier
+    vocab:
+      _doc: 'Controlled vocabularies (the TriageResult enums) — which actions/scopes/routes are valid.
+        Content only; the classification LOGIC stays in src/classifier/classify.py. epic_prefix is the
+        (lowercased) title marker that flags an [Epic] container issue for decomposition.'
+      actions:
+      - implement
+      - needs-human
+      - wont-do
+      - duplicate?
+      - decompose
+      scopes:
+      - xs
+      - s
+      - m
+      - l
+      routes:
+      - gen-local
+      - gen-default
+      - gen-frontier
+      epic_prefix: '[epic]'
   ranker:
     _doc: 'Offline deterministic dependency parse. Regexes (each with one (\d+) capture group) that find
       issue cross-references in title+body. Markdown emphasis is stripped and matching is MULTILINE before

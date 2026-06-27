@@ -45,9 +45,13 @@ import tuning  # noqa: E402
 # --- Schema (HANDOFF §5.3) -------------------------------------------------
 # "decompose" = an [Epic]/container issue: not an atomic unit of work; selection
 # expands it into its constituent sub-issues rather than dispatching it directly.
-ACTIONS = ("implement", "needs-human", "wont-do", "duplicate?", "decompose")
-SCOPES = ("xs", "s", "m", "l")
-ROUTES = ("gen-local", "gen-default", "gen-frontier")
+# Controlled vocabularies (the TriageResult enums) are CONTENT, not logic — they
+# live in the shared config (app/config/tuning.yml, selection.classify.vocab) and
+# are sourced from the loader. Kept as module-level names so callers can still do
+# ``from classify import ACTIONS``. The classification LOGIC below stays in Python.
+ACTIONS = tuning.ACTIONS
+SCOPES = tuning.SCOPES
+ROUTES = tuning.ROUTES
 
 # scope -> route map (mirrors scripts/lib/common.sh route_for_scope).
 # Tunable via app/config/tuning.yml (selection.classify.scope_route).
@@ -92,7 +96,7 @@ def _is_epic(title: str) -> bool:
     than by keyword, so a child issue that merely *cites* its parent (e.g.
     ``**Parent epic:** #1`` in the body) is never misread as an epic itself.
     """
-    return title.strip().lower().startswith("[epic]")
+    return title.strip().lower().startswith(tuning.EPIC_PREFIX)
 
 
 def classify(title: str, body: str) -> TriageResult:
