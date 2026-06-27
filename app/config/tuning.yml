@@ -252,6 +252,16 @@ generation:
     cap_bytes: 6000
     contract_cap: 4000
     schema_cap: 4000
+  intake:
+    _doc: 'Conversation + history embedding caps (#132). intake.py fetches the issue''s comment thread and
+      a relevant slice of commit history; the architect embeds them as new EMBEDDED RESOURCES subsections.
+      These caps keep a busy thread from blowing the plan''s read budget. max_comments / max_commits: how
+      many of each to embed (most-recent kept). comment_cap_bytes: per-comment body cap. history_cap_bytes:
+      total cap on the rendered history block.'
+    max_comments: 8
+    comment_cap_bytes: 1200
+    max_commits: 10
+    history_cap_bytes: 2000
   workorder:
     _doc: Rendering knobs. route_alias maps a route to the model alias used by the opt-in --llm sharpen
       path. box_width is the header box width in columns.

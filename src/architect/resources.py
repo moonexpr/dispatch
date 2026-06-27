@@ -33,6 +33,12 @@ _FUNC_RE = re.compile(r'\b([a-z_][a-z0-9_]+)\(\)')
 _MAX_FILES = tuning.RES_CAPS["max_files"]   # cap embedded referenced files (logged when exceeded)
 _CAP_BYTES = tuning.RES_CAPS["cap_bytes"]   # cap bytes per embedded file (logged when truncated)
 
+# Conversation + history caps (#132) — tunable via app/config/tuning.yml
+# (generation.intake). Keep a busy thread from blowing the plan's read budget.
+_MAX_COMMENTS = tuning.INTAKE_CAPS["max_comments"]
+_COMMENT_CAP = tuning.INTAKE_CAPS["comment_cap_bytes"]
+_HISTORY_CAP = tuning.INTAKE_CAPS["history_cap_bytes"]
+
 
 def _safe_isfile(repo_root: str, rel: str):
     p = os.path.normpath(os.path.join(repo_root, rel))
@@ -135,8 +141,43 @@ def _filter_contract(text: str) -> str:
     return f"{title}\n\n{body}" if title else body
 
 
+def select_conversation(conversation: List[Dict[str, str]]):
+    """Cap the comment thread for embedding (#132): keep the most-recent
+    `_MAX_COMMENTS`, each body capped to `_COMMENT_CAP` bytes. Returns
+    (kept_comments, dropped_count) — both data-driven via tuning.INTAKE_CAPS.
+    Comment text is untrusted data; this only truncates, never interprets it."""
+    convo = list(conversation or [])
+    dropped = max(0, len(convo) - _MAX_COMMENTS)
+    kept = convo[-_MAX_COMMENTS:] if _MAX_COMMENTS else []
+    out = []
+    for c in kept:
+        body, _ = _cap(str(c.get("body") or ""), _COMMENT_CAP)
+        out.append({"author": str(c.get("author") or ""),
+                    "created_at": str(c.get("created_at") or ""),
+                    "body": body})
+    return out, dropped
+
+
+def select_history(history: List[Dict[str, str]]):
+    """Cap the relevant-history slice for embedding (#132): accumulate rows until
+    the rendered total would exceed `_HISTORY_CAP` bytes. Returns
+    (kept_rows, dropped_count). History text is untrusted data — truncated only."""
+    rows = list(history or [])
+    out, used = [], 0
+    for h in rows:
+        line = f"{h.get('kind','')} {h.get('ref','')} {h.get('summary','')} {h.get('url','')}"
+        if out and used + len(line) > _HISTORY_CAP:
+            break
+        out.append({"kind": str(h.get("kind") or ""), "ref": str(h.get("ref") or ""),
+                    "summary": str(h.get("summary") or ""), "url": str(h.get("url") or "")})
+        used += len(line)
+    return out, len(rows) - len(out)
+
+
 def gather(job: Dict[str, Any], repo_root: str,
-           research_rel: str = None) -> Dict[str, Any]:
+           research_rel: str = None,
+           conversation: List[Dict[str, str]] = None,
+           history: List[Dict[str, str]] = None) -> Dict[str, Any]:
     """Collect everything the work order should embed for `job`.
 
     `research_rel` (E6-3 / #56): the repo-relative `docs/research/<topic>.md`
@@ -183,6 +224,12 @@ def gather(job: Dict[str, Any], repo_root: str,
     if os.path.isfile(spath):
         schema, _ = _read_capped(spath, cap=tuning.RES_CAPS["schema_cap"])
 
+    # Conversation + relevant history (#132): the issue's comment thread and a
+    # commit/PR slice, capped for embedding. Untrusted data — capped, never
+    # interpreted; rendered by workorder.py as EMBEDDED RESOURCES subsections.
+    convo_kept, convo_dropped = select_conversation(conversation or [])
+    hist_kept, hist_dropped = select_history(history or [])
+
     return {
         "discovered": discovered,
         "files": files,
@@ -192,4 +239,8 @@ def gather(job: Dict[str, Any], repo_root: str,
         "contract": contract,
         "invoice_schema": schema,
         "research_file": research_file,   # E6-3 (#56): embedded research path or None
+        "conversation": convo_kept,           # #132: capped comment thread
+        "conversation_dropped": convo_dropped,
+        "history": hist_kept,                 # #132: capped relevant-history slice
+        "history_dropped": hist_dropped,
     }

@@ -135,6 +135,7 @@ def _fetch(args: argparse.Namespace, gh_bin: str) -> List[Dict[str, Any]]:
     # then built from this saved information downstream (_graph_and_urls).
     repo_slug = (args.repo or os.environ.get("INTAKE_REPO")
                  or os.environ.get("PIPELINE_REPO") or "ReclaimByDesign/dispatch")
+    convo_fx = os.environ.get("INTAKE_FIXTURE_CONVERSATION", "")  # #132 offline seam
     if args.project:
         org, _, num = args.project.partition("/")
         if not org or not num:
@@ -153,6 +154,14 @@ def _fetch(args: argparse.Namespace, gh_bin: str) -> List[Dict[str, Any]]:
         refresh=getattr(args, "refresh", False),
         fixture_project=args.fixture or "" if args.project else "",
         fixture_repo="" if args.project else (args.fixture or ""),
+        # Ground the work order with each issue's comment thread + relevant
+        # history (#132). A live gh fetch is only ever attempted for a LIVE source
+        # (--repo/--project) or when an INTAKE_FIXTURE_CONVERSATION fixture is
+        # supplied; an offline --fixture queue with no conversation fixture stays
+        # offline (empty thread) so the smoke + demo harnesses make no live gh
+        # call — byte-identical to pre-#132 orders.
+        with_conversation=bool(args.repo or args.project) or bool(convo_fx),
+        fixture_conversation=convo_fx,
     )
     return [asdict(i) for i in items]
 
@@ -248,7 +257,9 @@ def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
     research_rel = "docs/research/%s.md" % _research.topic_for({**job, "number": n})
     research_present = _resources.has_file(repo_root, research_rel)
     res = _resources.gather(job, repo_root,
-                            research_rel=research_rel if research_present else None)
+                            research_rel=research_rel if research_present else None,
+                            conversation=item.get("conversation") or [],
+                            history=item.get("history") or [])
     wplan = _decompose.plan(job, res["discovered"], verify_cmd=verify_cmd)
     # Research-mode (E6-1 verdict → E6-2 order). detect_gap needs the issue labels
     # (the job dict carries none) and the classifier confidence (already in triage).

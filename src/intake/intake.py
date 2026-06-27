@@ -18,6 +18,9 @@ Env-var equivalents (pipeline.env)
   INTAKE_LIMIT           max items to fetch (default: 50)
   INTAKE_FIXTURE_PROJECT path to raw gh project item-list JSON (offline / tests)
   INTAKE_FIXTURE_REPO    path to raw gh issue list JSON (offline / tests)
+  INTAKE_FIXTURE_CONVERSATION path to a conversation/history fixture: a JSON object
+                         keyed by issue number (string), each value
+                         {"comments": [...], "history": [...]} (offline / tests)
   GH_BIN                 gh binary (default: gh)
 
 Output schema (JSON array elements)
@@ -32,6 +35,8 @@ Output schema (JSON array elements)
   dispatch        str|None project Dispatch field value (None if absent)
   hours_estimate  int|None project Hours Estimate field (None if absent)
   source_url      str      full GitHub URL to the issue
+  conversation    list     issue comment thread: [{author, created_at, body}]  (#132)
+  history         list     relevant commit/PR slice: [{kind, ref, summary, url}] (#132)
 
 Usage
 -----
@@ -80,6 +85,12 @@ class IntakeItem:
     # fixtures written before these fields existed still load via IntakeItem(**d).
     milestone: Optional[str] = None
     iteration: Optional[str] = None
+    # Conversation + relevant history (#132). The comment thread and a commit/PR
+    # slice that ground the work order. Default empty so older snapshots/fixtures
+    # (written before these fields existed) still load via IntakeItem(**d), and so
+    # the cheap list path — which never enriches — round-trips unchanged.
+    conversation: List[Dict[str, str]] = field(default_factory=list)
+    history: List[Dict[str, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +137,118 @@ def _label_names(*sources: Any) -> List[str]:
             if name:
                 out.append(name)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Conversation + relevant history (#132)
+# ---------------------------------------------------------------------------
+# intake also embeds the issue's comment THREAD (triage, repro steps, maintainer
+# guidance) and a RELEVANT-HISTORY slice (linked PRs / recent commits) so the
+# architect's work order starts grounded. Both are UNTRUSTED data, exactly like
+# the body — fetched and stored verbatim, never interpreted. An offline fixture
+# seam (INTAKE_FIXTURE_CONVERSATION / fixture_conversation=) keeps smoke + demo
+# harnesses from making any live gh call.
+
+def _normalize_comments(raw: Any) -> List[Dict[str, str]]:
+    """Flatten a `gh issue view --json comments` list to [{author, created_at, body}]."""
+    out: List[Dict[str, str]] = []
+    for c in raw or []:
+        if not isinstance(c, dict):
+            continue
+        author = c.get("author")
+        login = author.get("login") if isinstance(author, dict) else author
+        out.append({
+            "author": str(login or ""),
+            "created_at": str(c.get("createdAt") or c.get("created_at") or ""),
+            "body": str(c.get("body") or ""),
+        })
+    return out
+
+
+def _normalize_history(raw: Any) -> List[Dict[str, str]]:
+    """Flatten a relevant-history list to [{kind, ref, summary, url}].
+
+    Accepts pre-shaped fixture rows ({kind, ref, summary, url}) as-is, and the
+    raw `gh pr list` shape ({number, title, url}) — mapped to a 'pr' row."""
+    out: List[Dict[str, str]] = []
+    for h in raw or []:
+        if not isinstance(h, dict):
+            continue
+        if "ref" in h or "kind" in h:
+            out.append({
+                "kind": str(h.get("kind") or "ref"),
+                "ref": str(h.get("ref") or ""),
+                "summary": str(h.get("summary") or ""),
+                "url": str(h.get("url") or ""),
+            })
+        elif "number" in h:        # raw gh pr/commit row
+            out.append({
+                "kind": "pr",
+                "ref": f"#{h.get('number')}",
+                "summary": str(h.get("title") or ""),
+                "url": str(h.get("url") or ""),
+            })
+    return out
+
+
+def fetch_conversation(
+    repo: str,
+    number: int,
+    *,
+    fixture_path: str = "",
+    gh_bin: str = "gh",
+) -> Dict[str, List[Dict[str, str]]]:
+    """Fetch the issue's comment thread + relevant history for one issue.
+
+    Returns {"conversation": [...], "history": [...]}. With `fixture_path` set
+    (or INTAKE_FIXTURE_CONVERSATION in env), reads the offline fixture instead of
+    calling gh — the seam that keeps smoke + demo harnesses offline. The fixture
+    is a JSON object keyed by issue number (string), each value carrying optional
+    "comments" and "history" lists. A missing key yields empty lists.
+    """
+    if fixture_path:
+        table = _load_json(fixture_path)
+        entry = (table or {}).get(str(number)) or {}
+        return {
+            "conversation": _normalize_comments(entry.get("comments")),
+            "history": _normalize_history(entry.get("history")),
+        }
+    # Live: one `gh issue view` for comments. History (linked PRs) is best-effort
+    # and tolerant of failure — a thread is still useful without it.
+    convo = _gh("issue", "view", str(number), "--repo", repo,
+                "--json", "comments", gh_bin=gh_bin)
+    history: List[Dict[str, str]] = []
+    try:
+        prs = _gh("pr", "list", "--repo", repo, "--search", f"linked:{number}",
+                  "--state", "all", "--json", "number,title,url",
+                  "--limit", "10", gh_bin=gh_bin)
+        history = _normalize_history(prs)
+    except RuntimeError:
+        history = []
+    return {
+        "conversation": _normalize_comments((convo or {}).get("comments")),
+        "history": history,
+    }
+
+
+def enrich_conversation(
+    items: List["IntakeItem"],
+    *,
+    fixture_path: str = "",
+    gh_bin: str = "gh",
+) -> List["IntakeItem"]:
+    """Populate each item's `conversation` + `history` in place and return `items`.
+
+    Offline when a fixture is supplied; otherwise one `gh issue view` per item.
+    Used by the provider to ground selected issues; the cheap list path that does
+    not need the thread simply never calls this."""
+    fx = fixture_path or os.environ.get("INTAKE_FIXTURE_CONVERSATION", "")
+    for it in items:
+        data = fetch_conversation(it.repository or "", it.number,
+                                  fixture_path=fx, gh_bin=gh_bin)
+        it.conversation = data["conversation"]
+        it.history = data["history"]
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +408,8 @@ def provide_items(
     persist: bool = True,
     fixture_project: str = "",
     fixture_repo: str = "",
+    with_conversation: bool = False,
+    fixture_conversation: str = "",
 ) -> List[IntakeItem]:
     """THE single entry point every consumer uses to obtain issue information.
 
@@ -296,23 +421,37 @@ def provide_items(
       3. otherwise                                              -> one live fetch
          via intake_from_{project,repo}, then persist the snapshot so every other
          selector reads the same saved information offline.
+
+    When `with_conversation` is set, each item is additionally grounded with its
+    comment thread + relevant history (#132) via enrich_conversation — offline
+    when a conversation fixture is supplied. Items already carrying a conversation
+    (a snapshot that captured it) are left untouched, so the enrichment never
+    re-fetches what a snapshot already holds.
     """
     fp = fixture_project or os.environ.get("INTAKE_FIXTURE_PROJECT", "")
     fr = fixture_repo or os.environ.get("INTAKE_FIXTURE_REPO", "")
 
+    def _ground(items: List[IntakeItem]) -> List[IntakeItem]:
+        if with_conversation:
+            pending = [it for it in items if not it.conversation and not it.history]
+            if pending:
+                enrich_conversation(pending, fixture_path=fixture_conversation,
+                                    gh_bin=gh_bin)
+        return items
+
     # 1. Explicit fixture seam (offline; never cached as a snapshot).
     if project and fp:
         org, num = project.split("/", 1)
-        return intake_from_project(org, num, status_filter=status_filter,
-                                   limit=limit, fixture_path=fp, gh_bin=gh_bin)
+        return _ground(intake_from_project(org, num, status_filter=status_filter,
+                                           limit=limit, fixture_path=fp, gh_bin=gh_bin))
     if repo and fr:
-        return intake_from_repo(repo, label_filter=label_filter, limit=limit,
-                                fixture_path=fr, gh_bin=gh_bin)
+        return _ground(intake_from_repo(repo, label_filter=label_filter, limit=limit,
+                                        fixture_path=fr, gh_bin=gh_bin))
 
     # 2. Saved snapshot (offline) unless a refresh was requested.
     snap = snapshot_path(snapshot)
     if not refresh and os.path.exists(snap):
-        return load_items(snap)
+        return _ground(load_items(snap))
 
     # 3. The one live fetch, then persist for downstream offline reads.
     if project:
@@ -322,6 +461,7 @@ def provide_items(
     else:
         items = intake_from_repo(repo, label_filter=label_filter, limit=limit,
                                  fixture_path="", gh_bin=gh_bin)
+    _ground(items)
     if persist:
         try:
             save_items(items, snap)

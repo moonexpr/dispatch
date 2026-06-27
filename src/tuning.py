@@ -183,6 +183,16 @@ DEFAULTS: Dict[str, Any] = {
         },
         "resources": {"max_files": 6, "cap_bytes": 6000,
                       "contract_cap": 4000, "schema_cap": 4000},
+        # Conversation + history embedding caps (#132). intake.py fetches the
+        # issue's comment thread and a relevant slice of commit history; the
+        # architect embeds them as new EMBEDDED RESOURCES subsections. These caps
+        # keep a busy thread from blowing the plan's read budget — data-driven so
+        # the bound is tuned here, not in Python (per the systems/content split).
+        # max_comments / max_commits: how many of each to embed (most-recent
+        # kept). comment_cap_bytes: per-comment body cap. history_cap_bytes:
+        # total cap on the rendered history block.
+        "intake": {"max_comments": 8, "comment_cap_bytes": 1200,
+                   "max_commits": 10, "history_cap_bytes": 2000},
         "workorder": {
             "route_alias": {"gen-local": "local", "gen-default": "sonnet",
                             "gen-frontier": "opus"},
@@ -364,6 +374,10 @@ DECOMPOSE_COMPLEXITY: Dict[str, Any] = dict(_GEN["decompose"]["complexity"])
 DECOMPOSE_TEMPLATES: Dict[str, str] = dict(_GEN["decompose"]["templates"])
 SPEC_RULES: List[Dict[str, Any]] = list(_GEN["decompose"]["specialization_rules"])
 RES_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["resources"].items()}
+# Conversation + history embedding caps (#132) — read by src/intake/intake.py
+# (how many comments/commits to fetch) and src/architect/resources.py (per-item
+# byte caps on what gets embedded into the work order).
+INTAKE_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["intake"].items()}
 ROUTE_ALIAS: Dict[str, str] = dict(_GEN["workorder"]["route_alias"])
 BOX_W: int = int(_GEN["workorder"]["box_width"])
 # Work-order block LAYOUT templates (#144) — label/layout text as data, filled
