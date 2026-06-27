@@ -161,6 +161,12 @@ class ExecutionVisitor(StageVisitor):
             from .baseworkflow_bridge import author_via_baseworkflow
 
             ctx.job_request = author_via_baseworkflow(ctx.job_request)
+        else:
+            common.warn(
+                "DISPATCH_ENGINE=visitor selects the deprecated visitors authoring "
+                "engine. It is kept only as a fallback and will not be supported in "
+                "the future; migrate to the default baseworkflow engine."
+            )
 
         # Run-ledger: the architect emitted the work order for this issue.
         common.ledger_emit("work-order", num, "{}")
