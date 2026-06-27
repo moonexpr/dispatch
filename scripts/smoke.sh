@@ -390,6 +390,24 @@ if python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' "${ROOT}/app/
 else
   fail "app/config/tuning.yml is not valid YAML"
 fi
+# Issue-type priority dial (#138): among same-depth, same-maturity leaves a ready
+# bug outranks an enhancement even when the enhancement has the older (lower)
+# issue number — the bugs-first default, retunable via type_weights in
+# selection-weights.yml.
+bugfirst="$(RANKER_OFFLINE=1 python3 -c "
+import sys
+sys.path.insert(0,'${ROOT}/src/intake'); sys.path.insert(0,'${ROOT}/src'); sys.path.insert(0,'${ROOT}')
+import ranker
+from engine import structures as dag
+import tuning
+items=[{'number':1148,'title':'Add IPFS','labels':['enhancement'],'body':''},
+       {'number':1516,'title':'crash','labels':['bug'],'body':''}]
+g=dag.build(items, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
+print(','.join(str(i['number']) for i in sorted(items, key=lambda it: ranker.priority_key(it,g))))
+" 2>/dev/null)"
+[[ "$bugfirst" == "1516,1148" ]] \
+  && pass "selection dial: a newer bug outranks an older enhancement (bugs-first #138)" \
+  || fail "bugs-first selection dial (#138)" "got '$bugfirst' (want 1516,1148)"
 rm -rf "$DAGDIR"
 
 # ---------------------------------------------------------------------------

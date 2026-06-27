@@ -8,7 +8,8 @@
 # Ordering among ready (dispatchable) issues, in precedence:
 #   dependency depth (foundational first — a correctness constraint, not tunable)
 #     -> then the tunable `sort` precedence below (leaf-before-feature, earlier
-#        milestone, earlier iteration, lower issue number, higher label weight).
+#        milestone, earlier iteration, the bugs-first issue-type dial, lower issue
+#        number, higher label weight).
 # The dependency-depth primary key is hard-wired in ranker.priority_key; the
 # `sort` list defines everything after it.
 #
@@ -22,6 +23,17 @@ label_weights:
   candidate: 2
   draft: 1
   unscheduled: 0
+
+# type_weights: issue-TYPE priority dial — the bugs-vs-features knob. HIGHER
+# dispatches first, folded in ahead of the issue-number tie-break so a ready bug
+# outranks a same-maturity, same-depth enhancement instead of losing to the
+# oldest issue number. Default is bugs-first (stabilize before extending); flip
+# `bug` and a feature type for a feature-push sprint. An issue's weight is the
+# max over its labels; labels not listed weigh 0. Matching is case-insensitive.
+type_weights:
+  bug: 3
+  enhancement: 0
+  feature: 0
 
 # feature_labels: labels that mark an issue as a container (feature/epic) rather
 # than a unit of work; containers sort AFTER leaves. Title "[Epic] ..." also
@@ -42,6 +54,7 @@ feature_labels:
 #                feature_last  0=leaf, 1=feature/epic container  (leaves first)
 #                milestone     structured (year, seq) milestone key (earlier first)
 #                iteration     structured (year, seq) iteration key (earlier first)
+#                type_weight   max issue-TYPE weight — the bugs-first dial (higher first)
 #                issue_number  the issue number (lower first = creation order)
 #                label_weight  max maturity-ladder label weight (higher first)
 #   direction: "asc" (smaller value sorts first) or "desc" (larger value first).
@@ -54,5 +67,6 @@ sort:
   - {signal: feature_last, direction: asc}   # leaves before features/epics
   - {signal: milestone,    direction: asc}   # earlier milestone first
   - {signal: iteration,    direction: asc}   # earlier iteration first
+  - {signal: type_weight,  direction: desc}  # bugs-first dial (#138) — before the number tie-break
   - {signal: issue_number, direction: asc}   # lower issue number (created earlier)
   - {signal: label_weight, direction: desc}  # higher label weight (final tie-break)

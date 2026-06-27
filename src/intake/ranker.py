@@ -65,17 +65,20 @@ DEFAULT_MODEL = os.environ.get("RANKER_MODEL", "haiku")
 # values. The dependency-depth primary key (foundational-first) is a HARD
 # correctness constraint hard-wired in priority_key, never expressed in the spec.
 _WEIGHTS_SKELETON: Dict[str, Any] = {
-    # Content-free skeleton: empty label table (every label weighs 0) and no
-    # feature labels — a usable, deterministic shape, not the real policy values.
+    # Content-free skeleton: empty label/type tables (every label/type weighs 0)
+    # and no feature labels — a usable, deterministic shape, not the real values.
     "label_weights": {},
     "feature_labels": [],
+    "type_weights": {},
     # Minimal spec-driven precedence sufficient to keep ordering total + stable
-    # if the config is absent: issue number, then label weight (the same relative
-    # order the committed file uses, sans milestone/iteration which need no shape).
+    # if the config is absent: the bugs-first issue-type dial (#138) ahead of the
+    # issue-number tie-break, then label weight (the same relative order the
+    # committed file uses, sans milestone/iteration which need no shape).
     "sort": [
         {"signal": "feature_last", "direction": "asc"},
         {"signal": "milestone", "direction": "asc"},
         {"signal": "iteration", "direction": "asc"},
+        {"signal": "type_weight", "direction": "desc"},
         {"signal": "issue_number", "direction": "asc"},
         {"signal": "label_weight", "direction": "desc"},
     ],
@@ -85,7 +88,7 @@ _WEIGHTS_SKELETON: Dict[str, Any] = {
 _WEIGHTS_REL = "config/selection-weights.yml"
 
 
-def _load_weights() -> "tuple[Dict[str, int], frozenset, tuple]":
+def _load_weights() -> "tuple[Dict[str, int], frozenset, tuple, Dict[str, int]]":
     data: Dict[str, Any] = {}
     try:                                       # missing file / no yaml / parse error
         path = os.environ.get("DISPATCH_SELECTION_WEIGHTS") or _WEIGHTS_REL
@@ -98,19 +101,35 @@ def _load_weights() -> "tuple[Dict[str, int], frozenset, tuple]":
     fl = frozenset(str(s).lower()
                    for s in (data.get("feature_labels")
                              or _WEIGHTS_SKELETON["feature_labels"]))
+    tw = dict(_WEIGHTS_SKELETON["type_weights"])
+    tw.update({str(k).lower(): int(v)
+               for k, v in (data.get("type_weights") or {}).items()})
     # Sort precedence: file spec wins; fall back to the skeleton's stable shape.
     spec_raw = data.get("sort") or _WEIGHTS_SKELETON["sort"]
     spec = tuple((str(e["signal"]), str(e.get("direction", "asc")).lower())
                  for e in spec_raw)
-    return lw, fl, spec
+    return lw, fl, spec, tw
 
 
-LABEL_WEIGHT, FEATURE_LABELS, SORT_SPEC = _load_weights()
+LABEL_WEIGHT, FEATURE_LABELS, SORT_SPEC, TYPE_WEIGHT = _load_weights()
 
 
 def _label_weight(labels: List[str]) -> int:
     """Highest maturity-ladder weight among an issue's labels (0 if none match)."""
     return max((LABEL_WEIGHT.get(str(l).lower(), 0) for l in (labels or [])),
+               default=0)
+
+
+def _type_weight(labels: List[str]) -> int:
+    """Highest issue-type weight among an issue's labels (0 if none match).
+
+    The operator-tunable bugs-vs-features dial: by default `bug` weighs 3 and
+    other types 0, so a ready bug outranks a same-maturity, same-depth
+    enhancement *before* the issue-number tie-break — a newer critical bug is
+    not buried under an older enhancement. Matching is case-insensitive and the
+    weight is the max over an issue's labels, mirroring `_label_weight`. Retune
+    (or flip to a feature-push) via type_weights in selection-weights.yml."""
+    return max((TYPE_WEIGHT.get(str(l).lower(), 0) for l in (labels or [])),
                default=0)
 
 
@@ -153,6 +172,7 @@ _SIGNALS: Dict[str, Any] = {
     "feature_last": lambda item, n: _is_feat(item),
     "milestone":    lambda item, n: _seq_key(item.get("milestone")),
     "iteration":    lambda item, n: _seq_key(item.get("iteration")),
+    "type_weight":  lambda item, n: _type_weight(item.get("labels") or []),
     "issue_number": lambda item, n: n,
     "label_weight": lambda item, n: _label_weight(item.get("labels") or []),
 }
@@ -165,10 +185,11 @@ def priority_key(item: Dict[str, Any], graph) -> tuple:
     constraint, hard-wired here and never tunable. The remaining keys are built by
     interpreting SORT_SPEC (app/config/selection-weights.yml: sort), an ordered
     list of {signal, direction} entries; earlier entries dominate. Today's spec
-    yields: leaves before features, earlier milestone, earlier iteration, then
-    issue number (creation order = foundational-first among equals), with label
-    weight (Blocker > Release > Candidate > Draft > Unscheduled) as the final
-    tie-break only. "desc" negates the extracted value.
+    yields: leaves before features, earlier milestone, earlier iteration, then the
+    bugs-first issue-type dial (#138 — a ready bug outranks a same-maturity
+    enhancement), then issue number (creation order = foundational-first among
+    equals), with label weight (Blocker > Release > Candidate > Draft >
+    Unscheduled) as the final tie-break only. "desc" negates the extracted value.
     """
     n = int(item["number"])
     keys: List[Any] = [graph.depth.get(n, 0)]   # hard-wired foundational-first primary
@@ -273,6 +294,9 @@ def _rank_offline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             bits.append(f"ms={i['milestone']}")
         if i.get("iteration"):
             bits.append(f"it={i['iteration']}")
+        tw = _type_weight(i.get("labels") or [])
+        if tw:
+            bits.append(f"tw={tw}")
         w = _label_weight(i.get("labels") or [])
         if w:
             bits.append(f"lw={w}")
