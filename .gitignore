@@ -16,6 +16,8 @@ tokens.txt
 scripts/demo/rounds/
 # Stray ruflo runtime state under src/ (NOT the tracked root .claude-flow/ config).
 src/.claude-flow/
+# RealActionFactory FileShelf sink (durable shelves; regenerable each run, e.g. run_live/test_e2e).
+app/actions/
 
 # Python / tooling noise
 __pycache__/

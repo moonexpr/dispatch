@@ -38,6 +38,19 @@ that reads a Job Request JSON and writes an Invoice JSON to stdout.
 
 ## Flow
 
+> **Engine status (as of Phase 1 of the BaseWorkflow wiring).** The intended
+> design — and the diagram below — is for `BaseWorkflow` (the `engine/` +
+> `app/config/` automata substrate) to drive each tick. **Today it does not.**
+> The live tick is driven by the `src/orchestration` visitor pipeline
+> (`src/orchestration/pipeline.py`), which owns the GitHub lifecycle
+> (claim → labels → PR → closure) and invokes the engineer. BaseWorkflow is
+> additive and exercised by its own tests/demos; its foundational live runner
+> (`src/baseworkflow.run_live(...)` against `RealActionFactory`) exists but is
+> not yet wired into `dispatch.py`. Feature-flagging it onto the tick
+> (`DISPATCH_ENGINE=baseworkflow`), bridging its engineering Action to
+> `engineer_sdk`, and the real GitHub bindings are Phase 2+ work. Read the
+> diagram below as the target architecture, not the current call path.
+
 ```
 GitHub Issues (queued)
         │

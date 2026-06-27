@@ -218,6 +218,17 @@ class RealActionFactory(AbstractActionFactory):
 
     def _inference_runner(self, spec: InferenceSpec, payload: Any, ctx: Any) -> Output:
         if getattr(ctx, "dry_run", True):
+            # Dry-run: never touch a model or the network. When the spec carries a
+            # deterministic oracle (the workflow's interface body — every compiled
+            # Inference does), honor it so dry-run output matches the structured
+            # shape the downstream adapters/bindings expect (e.g. the JSON work
+            # plan). Specs with no oracle (a genuine production inference) fall
+            # back to a textual placeholder.
+            if spec.oracle is not None:
+                value = spec.oracle(payload, ctx)
+                if isinstance(value, Output):
+                    return value
+                return Output(value, meta={"usage": 0, "model": spec.model, "source": "dry-run"})
             return Output(
                 f"[dry-run:{spec.model}] {spec.prompt[:80]}".strip(),
                 meta={"usage": 0, "model": spec.model, "source": "dry-run"},

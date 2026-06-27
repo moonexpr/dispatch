@@ -138,3 +138,35 @@ def run_mock(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
         "deliverables": wf.shelves.deliverables.snapshot(),
         "interpreter": wf.last_interpreter,
     }
+
+
+def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = True) -> Dict[str, Any]:
+    """Run a BaseWorkflow against the ``RealActionFactory`` and return the same
+    summary shape as :func:`run_mock`.
+
+    This is the foundational *live* runner (Phase 1 of wiring BaseWorkflow onto
+    the live tick). It is identical to :func:`run_mock` except for the injected
+    factory: ``RealActionFactory`` carries the enforcing governors, the durable
+    ``FileShelf`` family, and the ``engine.models.chat`` inference runner.
+
+    Under ``dry_run=True`` (the default) the real inference runner returns a
+    deterministic placeholder instead of calling a model, so this runner stays
+    side-effect-free with respect to the network/model. NOTE: ``RealActionFactory``
+    uses ``FileShelf`` (durable on-disk shelves), so it is not as hermetic as the
+    in-memory mock path — callers wanting zero disk writes should pass an explicit
+    shelf-backed configuration. No orchestration-tick wiring is done here; that is
+    Phase 2+.
+    """
+    from engine.actions import RealActionFactory
+
+    factory = RealActionFactory()
+    wf = BaseWorkflow(factory, job=job, triage=triage)
+    ctx = wf.context(dry_run=dry_run)
+    result = wf.run(ctx=ctx)
+    return {
+        "result": result,
+        "ctx": ctx,
+        "workflow": wf,
+        "deliverables": wf.shelves.deliverables.snapshot(),
+        "interpreter": wf.last_interpreter,
+    }

@@ -87,6 +87,46 @@ def test_runs_green_with_all_deliverables() -> None:
     check("submission auto-approved", sub.get("approved") is True)
 
 
+def test_run_live_dry_run_matches_mock() -> None:
+    """The foundational LIVE runner (Phase 1): ``run_live(dry_run=True)`` runs the
+    same BaseWorkflow against the ``RealActionFactory`` (enforcing governors, real
+    inference runner) and must (a) run green, (b) produce the SAME deliverable key
+    set as ``run_mock``, and (c) make NO model/network call — it must stay on the
+    deterministic dry-run path. We prove (c) by detonating ``engine.models.chat``
+    for the duration of the run: any real inference would raise, failing the run."""
+    import engine.models as _models
+
+    sentinel = {"called": False}
+
+    def _boom(*a, **kw):  # any real model call trips this
+        sentinel["called"] = True
+        raise AssertionError("run_live(dry_run=True) called engine.models.chat (real model)")
+
+    orig_chat = getattr(_models, "chat", None)
+    _models.chat = _boom  # type: ignore[attr-defined]
+    try:
+        live = bw.run_live(JOB, TRIAGE, dry_run=True)
+    finally:
+        if orig_chat is not None:
+            _models.chat = orig_chat  # type: ignore[attr-defined]
+        # RealActionFactory uses durable FileShelf; clean up the run's sink.
+        import shutil
+        shutil.rmtree(os.path.join(_ROOT, "app", "actions"), ignore_errors=True)
+
+    r = live["result"]
+    check("run_live runs green (dry-run)", r.ok, repr(getattr(r, "error", "")) if not r.ok else "")
+    check("run_live made no real model call", sentinel["called"] is False)
+    check("run_live ran under dry_run", live["ctx"].dry_run is True)
+    live_keys = set(live["deliverables"].keys())
+    mock_keys = set(bw.run_mock(JOB, TRIAGE)["deliverables"].keys())
+    check("run_live deliverable keys == run_mock", live_keys == mock_keys,
+          f"sym_diff={sorted(live_keys ^ mock_keys)}")
+    # uses the real (enforcing) factory family, not the mock
+    check("run_live used RealActionFactory",
+          type(live["workflow"].factory).__name__ == "RealActionFactory",
+          f"factory={type(live['workflow'].factory).__name__}")
+
+
 def test_budget_tracked_and_phased() -> None:
     out = bw.run_mock(JOB, TRIAGE)
     ctx = out["ctx"]
@@ -288,6 +328,7 @@ def test_yaml_workflow() -> None:
 def main() -> int:
     for fn in (
         test_runs_green_with_all_deliverables,
+        test_run_live_dry_run_matches_mock,
         test_budget_tracked_and_phased,
         test_no_real_side_effects,
         test_machine_is_serializable_statechart,

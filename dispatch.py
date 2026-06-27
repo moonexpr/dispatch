@@ -5,9 +5,20 @@ The grounded replacement for the former shell launchers (the thin ``./pipeline``
 ``./dispatch`` passthroughs and ``deploy/run.sh``). The whole pipeline is Python:
 the orchestration layer (``src/orchestration``, visitor-pattern stages) parses the
 flags and runs the tick; the Engineer is the Claude Agent SDK engineer
-(``src/orchestration/engineer_sdk.py``, Claude-subscription auth, multi-agent); the
-workflow it drives is the YAML ``baseworkflow`` engine (``engine/workflow``). No
+(``src/orchestration/engineer_sdk.py``, Claude-subscription auth, multi-agent). No
 shell anywhere in dispatch.
+
+Engine status (read this before assuming): the live tick is driven TODAY by the
+``src/orchestration`` visitor pipeline (``src/orchestration/pipeline.py``), which
+owns the GitHub lifecycle (claim/labels/PR/closure) and invokes the Engineer. The
+BaseWorkflow engine (``engine/workflow`` + ``engine/actions`` + ``src/baseworkflow``)
+is a separate, additive automata substrate that does NOT yet drive the tick. Its
+foundational live runner — ``src/baseworkflow.run_live(...)`` against
+``RealActionFactory`` — exists as of Phase 1, but is not wired into this entry
+point. Wiring it behind a feature flag (e.g. ``DISPATCH_ENGINE=baseworkflow``),
+bridging BaseWorkflow's engineering Action to ``engineer_sdk``, and the real
+GitHub bindings are Phase 2+ work — not done here. Do not claim BaseWorkflow
+drives the tick until that wiring lands.
 
   python3 dispatch.py [FLAGS]                  run a full tick
       -b/--bootstrap  -r/--repo OWNER/REPO  -l/--live  -e/--engineer BIN
