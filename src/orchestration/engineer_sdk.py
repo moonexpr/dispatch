@@ -434,30 +434,28 @@ def _run_cli(*, clone_dir: str, prompt: str, model: str, timeout: int) -> _CliRe
     stripped). The lead agent may still fan out to per-unit engineering agents via
     its Task/Agent tool (multi-agent); the SCRIPT — never the model — owns git/gh."""
     sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    # Context isolation (issue #159): repoint the Claude config home to a clean temp
-    # dir so the OPERATOR's ~/.claude — its CLAUDE.md, memory-injection hooks, and
-    # settings, all about the harness project — does NOT load into the engineer's
-    # session and poison the target deliverable. Subscription auth is unaffected (it
-    # lives in the OS keychain, which CLAUDE_CONFIG_DIR does not namespace); the
-    # target clone's own CLAUDE.md still loads (cwd-based) — the wanted signal.
-    import shutil as _shutil
-
-    iso_cfg = tempfile.mkdtemp(prefix="engineer-cfg-")
-    sub_env["CLAUDE_CONFIG_DIR"] = iso_cfg
+    # Context isolation (issue #159) WITHOUT breaking subscription auth. The earlier
+    # approach repointed CLAUDE_CONFIG_DIR at a clean temp dir, but the login is bound
+    # to the real config home — a fresh/empty config reports "Not logged in · Please
+    # run /login" (the OS-keychain item is not portable to a clean dir), so the
+    # engineer would fail EVERY issue. Fix: keep the real config home for auth and
+    # instead exclude the operator's USER-level settings + hooks (incl. the dispatch
+    # memory-injection PreToolUse hook — the primary contamination vector) via
+    # `--setting-sources project`. The target clone's own CLAUDE.md still loads (cwd)
+    # — the wanted signal. Residual: user-level CLAUDE.md memory may still load; see
+    # #158 for the fuller auth-preserving config-copy isolation.
     claude = _envc("CLAUDE_BIN", "claude")
     cmd = [
         claude, "-p", prompt,
         "--output-format", "json",
         "--permission-mode", "bypassPermissions",
+        "--setting-sources", "project",
         "--model", model,
         "--add-dir", clone_dir,
     ]
-    try:
-        proc = subprocess.run(
-            cmd, cwd=clone_dir, env=sub_env, capture_output=True, text=True, timeout=timeout
-        )
-    finally:
-        _shutil.rmtree(iso_cfg, ignore_errors=True)
+    proc = subprocess.run(
+        cmd, cwd=clone_dir, env=sub_env, capture_output=True, text=True, timeout=timeout
+    )
     res = _CliResult()
     res.is_error = proc.returncode != 0
     out = (proc.stdout or "").strip()
@@ -657,9 +655,10 @@ def _live(job: Dict[str, Any]) -> Dict[str, Any]:
             _git(clone_dir, "add", "-A")
             commit = _git(
                 clone_dir,
-                "-c", "user.name=dispatch-engineer",
-                "-c", "user.email=dispatch-engineer@reclaimbydesign.local",
-                "-c", "commit.gpgsign=false",  # bot commit; headless has no GPG TTY/pinentry
+                # No identity override: inherit whatever git author the environment
+                # configured (no synthetic 'dispatch-engineer' co-author). gpgsign off:
+                # headless has no GPG TTY/pinentry.
+                "-c", "commit.gpgsign=false",
                 "commit", "-q", "-m", f"Implement #{issue}: {title}\n\nCloses #{issue}",
             )  # may be a no-op when the model already committed
             if commit.returncode != 0:
@@ -711,8 +710,7 @@ def _live(job: Dict[str, Any]) -> Dict[str, Any]:
                 _git(clone_dir, "add", "-A")
                 _git(
                     clone_dir,
-                    "-c", "user.name=dispatch-engineer",
-                    "-c", "user.email=dispatch-engineer@reclaimbydesign.local",
+                    # Inherit the environment's git author (no synthetic co-author).
                     "-c", "commit.gpgsign=false",
                     "commit", "-q", "-m", f"Scrub leaked harness terms ({', '.join(leaked)}) from #{issue}",
                 )

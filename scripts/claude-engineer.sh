@@ -261,9 +261,11 @@ fi
 changed_lines="$(git diff --numstat | awk '{a+=$1; d+=$2} END{print a+d+0}')"
 scope_actual="$(scope_from_lines "${changed_lines}")"
 
-# Commit on the worker branch.
+# Commit on the worker branch. No identity override: inherit whatever git author the
+# environment configured (no synthetic 'dispatch-engineer' co-author). gpgsign off:
+# headless has no GPG TTY/pinentry.
 git add -A
-git -c user.name="dispatch-engineer" -c user.email="dispatch-engineer@reclaimbydesign.local" \
+git -c commit.gpgsign=false \
     commit -q -m "$(printf 'Implement #%s: %s\n\nCloses #%s' "${issue}" "${title}" "${issue}")" \
   || fail_invoice "failed" "git commit produced no commit for #${issue}."
 
