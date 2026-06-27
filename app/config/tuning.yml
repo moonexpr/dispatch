@@ -274,7 +274,7 @@ generation:
     low_confidence_threshold: 0.55
     needs_research_label: needs-research
     route: gen-local
-    dispatch_enabled: false
+    dispatch_enabled: true
 budget:
   _doc: 'Operator-committed budget reconciliation for the soft-cap guard (E5-3). Resolves brainstorm Q3-residual
     (issue #48).'
