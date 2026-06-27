@@ -132,6 +132,32 @@ generation:
       is true; an ''all_of'' condition is an AND group. Conditions match the lowercased repo-relative
       path (path_*) or its basename (basename_*). The final rule has "default": true.'
     swarm_max: 15
+    complexity:
+      _doc: 'Complexity-aware staffing (#134). Number of IMPLEMENTATION slices a job splits into scales
+        with signals ALREADY on the item (scope, labels, body length) — never new intake data (#132/#133).
+        scope_slices: base slices by triage scope (xs/s/m stay 1 => zero change for small work; l/xl earn
+        more). label_slice_bonus: extra slices per label whose name CONTAINS a key (summed). deep_bug_labels:
+        substrings marking a hard bug — they add a diagnosis phase + 1 bonus slice. thread_depth_*: a body-length
+        proxy for thread depth — one extra slice per N chars, capped. diagnosis_min_slices: emit a distinct
+        DIAGNOSIS unit when slices reach this (or a deep-bug label is present). All counts are capped at swarm_max.'
+      scope_slices:
+        xs: 1
+        s: 1
+        m: 1
+        l: 2
+        xl: 3
+      label_slice_bonus:
+        epic: 2
+        deep-bug: 1
+      deep_bug_labels:
+      - bug
+      - regression
+      - crash
+      - defect
+      - race
+      thread_depth_chars_per_slice: 1200
+      thread_depth_max_bonus: 2
+      diagnosis_min_slices: 2
     specialization_rules:
     - any:
       - basename_contains: smoke

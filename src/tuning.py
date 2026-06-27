@@ -96,6 +96,30 @@ DEFAULTS: Dict[str, Any] = {
         },
         "decompose": {
             "swarm_max": 15,
+            # Complexity-aware staffing (#134). The number of IMPLEMENTATION
+            # slices a job is split into scales with signals already on the
+            # item — never with new intake data (that is #132/#133, separate).
+            # Trivial issues stay at 1 slice (today's 2-unit plan); deep/large
+            # issues fan out into real swarms, capped at swarm_max.
+            "complexity": {
+                # Base implementation slices by triage scope. xs/s/m stay at 1
+                # (zero behaviour change for small/trivial work); l/xl earn more.
+                "scope_slices": {"xs": 1, "s": 1, "m": 1, "l": 2, "xl": 3},
+                # Extra slices per label signal whose name CONTAINS one of these
+                # substrings (lowercased match). Summed across matches.
+                "label_slice_bonus": {"epic": 2, "deep-bug": 1},
+                # Labels (substring match) marking a deep/hard bug — they add a
+                # diagnosis phase and one diagnostic slice's worth of bonus.
+                "deep_bug_labels": ["bug", "regression", "crash", "defect", "race"],
+                # One extra slice per this many chars of issue body (a thread-depth
+                # proxy: a long, detailed body implies more independent work),
+                # capped by thread_depth_max_bonus. 0 disables the body signal.
+                "thread_depth_chars_per_slice": 1200,
+                "thread_depth_max_bonus": 2,
+                # Emit a distinct DIAGNOSIS unit (a real phase split, not a stub)
+                # when the slice count reaches this, or a deep-bug label is present.
+                "diagnosis_min_slices": 2,
+            },
             "specialization_rules": [
                 {"any": [{"basename_contains": "smoke"}, {"path_contains": "test"},
                          {"path_contains": "/fixtures/"}],
@@ -280,6 +304,9 @@ SCOPE_BUDGET: Dict[str, int] = {k: int(v) for k, v in _GEN["approval"]["scope_bu
 PHASE_SPLIT: Tuple[Tuple[str, float], ...] = tuple(
     (name, frac) for name, frac in _GEN["approval"]["phase_split"])
 SWARM_MAX: int = int(_GEN["decompose"]["swarm_max"])
+# Complexity-aware decomposition knobs (#134) — read by decompose.plan to scale
+# implementation slices / emit a diagnosis phase from signals already on the item.
+DECOMPOSE_COMPLEXITY: Dict[str, Any] = dict(_GEN["decompose"]["complexity"])
 SPEC_RULES: List[Dict[str, Any]] = list(_GEN["decompose"]["specialization_rules"])
 RES_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["resources"].items()}
 ROUTE_ALIAS: Dict[str, str] = dict(_GEN["workorder"]["route_alias"])
