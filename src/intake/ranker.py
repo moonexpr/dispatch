@@ -102,15 +102,25 @@ def _is_feat(item: Dict[str, Any]) -> int:
 
 
 def _seq_key(val: Optional[str]):
-    """Order milestones/iterations earliest-first. A trailing integer (e.g.
-    "Sprint 10") sorts numerically; values without one fall back to their string;
-    a missing value sorts last. Deterministic for identical input."""
+    """Order milestones/iterations earliest-first as a structured (year, seq) key.
+
+    A 4-digit year (1900–2099) anchors the ordering: it is the dominant component,
+    so "Q1 2026" sorts after "Q2 2025" regardless of the quarter number. The first
+    *other* integer (e.g. the 1 in "Q1", the 10 in "Sprint 10") is the secondary
+    seq within that year. With no year present we fall back to the first integer as
+    the seq (year 0), so single-token milestones like "Sprint 10" keep their old
+    relative order. Values with no integer fall back to their string; a missing
+    value sorts last. Deterministic and total — never raises."""
     if not val:
-        return (2, 0, "")
-    nums = re.findall(r"\d+", val)
-    if nums:
-        return (0, int(nums[-1]), val)
-    return (1, 0, val)
+        return (3, 0, 0, "")
+    nums = [int(n) for n in re.findall(r"\d+", val)]
+    if not nums:
+        return (2, 0, 0, val)
+    year = next((n for n in nums if 1900 <= n <= 2099), 0)
+    if year:
+        seq = next((n for n in nums if not (1900 <= n <= 2099)), 0)
+        return (0, year, seq, val)
+    return (1, 0, nums[0], val)
 
 
 def priority_key(item: Dict[str, Any], graph) -> tuple:

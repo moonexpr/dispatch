@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -61,12 +62,20 @@ def _setup_steps(setup: str) -> List[str]:
 
 def _provisioner_for(harness_entry: Dict[str, Any], has_setup: bool) -> str:
     """The provisioner kind for a harness: explicit ``provision:`` on the harness
-    entry wins; otherwise inferred — a harness that carries a ``setup`` is a
-    ``marketplace`` provision, one without is a ``none`` (no-op)."""
+    entry wins; otherwise inferred FROM SETUP CONTENT — a setup that drives a
+    ``/plugin`` install/marketplace command is a ``marketplace`` provision; a
+    harness with no setup is a ``none`` (no-op). A non-empty setup with no
+    recognizable provisioner signal returns ``"unknown"`` so it FAILS SAFE at the
+    allowlist gate rather than being mis-tagged ``marketplace`` and issued."""
     explicit = str(harness_entry.get("provision") or "").strip().lower()
     if explicit:
         return explicit
-    return "marketplace" if has_setup else "none"
+    if not has_setup:
+        return "none"
+    setup = str(harness_entry.get("setup") or "")
+    if re.search(r"/plugin\s+(?:install|marketplace)\b", setup):
+        return "marketplace"
+    return "unknown"
 
 
 def _orchestration(strategy_rec: Dict[str, Any],
