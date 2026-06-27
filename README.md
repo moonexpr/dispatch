@@ -218,6 +218,24 @@ under `app/config/`.
 | Job execution | the engineer Action (`ENGINEER_BIN` — any Job Request → Invoice binary) |
 | CI gate | GitHub Actions (`.github/workflows/ci.yml`) |
 
+**Known limitations (live-engine migration, Phase 2).** The workflow engine is
+mid-migration onto the live tick (`run_live`); two gaps are tracked here rather
+than as issues:
+
+- **`needs-human` derivation.** `admin:intake_invoice` derives the invoice
+  status from the engineer's `engineering_result` (`{ok, value, meta}`). The
+  bare shape only expresses `completed`/`partial`/`failed`; **`needs-human` is
+  reachable only via an explicit `meta.status`**. A richer Engineer that sets
+  `meta.status` drives the escalation transition; until then the derived mapping
+  cannot.
+- **Permission enforcement for `procedure` actions.** The `PermissionGovernor`
+  gates on an action's required tool set, which a `procedure` does not expose —
+  so a side-effecting procedure's declared `permission:` list (e.g.
+  `admin:intake_invoice`'s `gh:*` capabilities) is **auditable metadata, not yet
+  enforced**. Real safety on the gh-write path is the **`ctx.dry_run` gate** in
+  the binding (no network under dry-run). Procedure-level capability enforcement
+  is future work.
+
 ## Label state machine
 
 `queued → claimed → pr-open → in-review → done-pending-merge → done`
