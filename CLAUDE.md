@@ -1,8 +1,10 @@
 # CLAUDE.md — Unit-of-Work Contract
 
-This repository is an **unattended engineering pipeline** backed by ruflo V3
-swarm coordination. If you are a worker session invoked by it (via
-`/implement-task`, `/fix-ci`, or `/update-docs`), this contract is binding.
+This repository is an **unattended engineering pipeline** driven by a workflow
+engine of Controllers and Actions (see [`README.md`](./README.md) and
+[`docs/adr/001-hfsm-automata.md`](./docs/adr/001-hfsm-automata.md)). If you are a
+worker session invoked by it (via `/implement-task`, `/fix-ci`, or
+`/update-docs`), this contract is binding.
 Read it before acting. The full design is in
 [`HANDOFF-pipeline-v0.md`](./HANDOFF-pipeline-v0.md); the spec there wins on
 any detail this summary omits.
@@ -17,11 +19,11 @@ PR-based review flow (described in **The contract** below) is **deferred until
 the repo leaves development**. Until then, `main` is the working branch.
 (Solo-dev no-PR posture set 2026-06-16; extended to all sessions 2026-06-27.)
 
-**Execution layer:** ruflo hierarchical-mesh swarm (`.claude-flow/config.yaml`,
-up to 15 agents). The coordinator picks up tasks from the ruflo memory store
-(fed by `gh-intake.sh`) and spawns engineer agents via the claude-flow MCP.
-Hook lifecycle events (`SubagentStart`, `SubagentStop`) drive the GitHub label
-state machine and the approval/fix-dispatch ladder.
+**Execution layer:** dispatch's own workflow engine (`engine/` + `app/config/`).
+A `BaseWorkflow` Controller drives Actions across `spec → work → build`: the
+Architect phase composes the work order, the Engineering phase runs the engineer
+(`ENGINEER_BIN`), and the Admin phase stores results, updates docs, and advances
+the GitHub label state machine and approval/fix ladder.
 
 ## The contract (HANDOFF §5.7)
 
@@ -41,13 +43,12 @@ state machine and the approval/fix-dispatch ladder.
   (CI + one human approval) and auto-merge — not by any agent.
 - **Never edit labels outside your stage.** The label state machine
   (`queued → claimed → pr-open → in-review → docs-pending → done`) is owned by
-  `dispatch.sh`, `fix-dispatch.sh`, the workflow steps, and `closure.sh`. Touch
-  only the transition your stage owns.
+  the workflow's stages. Touch only the transition your stage owns.
 - **All durable knowledge goes into the PR/issue thread.** GitHub (PR body,
-  comments, labels) is the source of truth across runs. Ruflo session memory
-  (`.claude-flow/data/`) provides within-run coordination but is not durable
-  across independent pipeline ticks — do not rely on it for cross-session state.
-  Write anything the next session needs into the PR/issue thread.
+  comments, labels) is the source of truth across runs. The workflow's Shelves
+  hold within-run state only — not durable across independent pipeline ticks, so
+  do not rely on them for cross-session state. Write anything the next session
+  needs into the PR/issue thread.
 
 ## Security posture (HANDOFF §8)
 
@@ -79,7 +80,7 @@ only changes on redeploy — but it ALSO reads this `CLAUDE.md` from the clone, 
 runner alongside `runner-prompt.txt`. They are the deploy channel for runner policy.
 
 - **Scope.** Work any open, ready issue in the repo, regardless of milestone. Never
-  touch the ruflo-track issues #3 and #7-#16 (separate track). Skip `decision`- and
+  touch issues #3 and #7-#16 (a separate track). Skip `decision`- and
   `stretch`-labeled issues per their own rules. Never *implement* a Draft `epic`.
 - **Epic closure (authorized).** You ARE authorized to CLOSE a Draft `epic` once
   every child in its `- [ ] #N` checklist is closed: post a brief "all children
