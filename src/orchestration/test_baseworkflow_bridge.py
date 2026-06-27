@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""test_baseworkflow_bridge.py — Phase-2 seam unit tests.
+"""test_baseworkflow_bridge.py — BaseWorkflow authoring seam unit tests.
 
-Proves the additive, feature-flagged, fail-safe BaseWorkflow authoring seam
+Proves the feature-flagged, fail-safe BaseWorkflow authoring seam
 (``src/orchestration/baseworkflow_bridge.py`` + the ``DISPATCH_ENGINE`` flag
-wired into ``visitors.ExecutionVisitor.visit_workorder``):
+wired into ``visitors.ExecutionVisitor.visit_workorder``). As of Phase 3,
+``baseworkflow`` is the DEFAULT engine and ``visitor`` is the explicit fallback:
 
   (a) with DISPATCH_ENGINE=baseworkflow + dry-run, ``author_via_baseworkflow``
       enriches the request with ``orchestration_script`` + ``work_plan`` and
       makes NO model call;
   (b) the fail-safe returns the ORIGINAL request unchanged on any error;
-  (c) the default flag (visitor) leaves ``ctx.job_request`` untouched.
+  (c) DISPATCH_ENGINE=visitor (the explicit fallback) leaves ``ctx.job_request``
+      untouched and never reaches the bridge;
+  (d) with DISPATCH_ENGINE unset, the Phase-3 default (baseworkflow) drives
+      visit_workorder through the bridge and enriches the request.
 
 No pytest in this repo — a runnable, self-asserting module (exit 0 = pass),
 matching the shell-harness convention.
@@ -116,19 +120,16 @@ def test_failsafe_returns_original_on_error() -> None:
     _ok(out == _JOB_REQUEST, "forced run_live failure returns the original request byte-for-byte")
 
 
-def test_default_flag_off_untouched() -> None:
-    """(c) DISPATCH_ENGINE unset/visitor leaves ctx.job_request untouched."""
-    os.environ["PIPELINE_DRY_RUN"] = "1"
-    os.environ.pop("DISPATCH_ENGINE", None)  # default is visitor
-
+def _run_visit_workorder_with_tripwire():
+    """Drive ExecutionVisitor.visit_workorder with the bridge replaced by a
+    tripwire that counts calls. Returns (call_count, built_job_request)."""
     from src.orchestration.visitors import ExecutionVisitor, TickContext
     from src.orchestration import baseworkflow_bridge as bridge
 
-    # Tripwire: if the default path ever calls the bridge, the test fails loudly.
     called = {"n": 0}
     orig = bridge.author_via_baseworkflow
 
-    def _tripwire(req):  # pragma: no cover — default path must not reach here
+    def _tripwire(req):
         called["n"] += 1
         return orig(req)
 
@@ -156,19 +157,46 @@ def test_default_flag_off_untouched() -> None:
         bridge.author_via_baseworkflow = orig
         bmod.author_via_baseworkflow = bmod_orig
 
-    built = json.loads(ctx.job_request)
-    _ok(called["n"] == 0, "default (visitor) path does not call the baseworkflow bridge")
+    return called["n"], json.loads(ctx.job_request)
+
+
+def test_visitor_fallback_untouched() -> None:
+    """(c) DISPATCH_ENGINE=visitor (the explicit fallback) leaves ctx.job_request
+    untouched and never reaches the baseworkflow bridge."""
+    os.environ["PIPELINE_DRY_RUN"] = "1"
+    os.environ["DISPATCH_ENGINE"] = "visitor"
+    try:
+        n, built = _run_visit_workorder_with_tripwire()
+    finally:
+        os.environ.pop("DISPATCH_ENGINE", None)
+
+    _ok(n == 0, "visitor-fallback path does not call the baseworkflow bridge")
     _ok("orchestration_script" not in built and "work_plan" not in built,
-        "default path leaves the Job Request unenriched")
+        "visitor-fallback path leaves the Job Request unenriched")
     _ok(built.get("issue") == 42 and built.get("route") == "gen-default",
-        "default path builds the visitor Job Request as before")
+        "visitor-fallback path builds the visitor Job Request as before")
+
+
+def test_default_engine_enriches() -> None:
+    """(d) With DISPATCH_ENGINE unset, the Phase-3 default (baseworkflow) drives
+    visit_workorder through the bridge and enriches the Job Request."""
+    os.environ["PIPELINE_DRY_RUN"] = "1"
+    os.environ.pop("DISPATCH_ENGINE", None)  # default is now baseworkflow
+    n, built = _run_visit_workorder_with_tripwire()
+
+    _ok(n >= 1, "default (baseworkflow) path calls the baseworkflow bridge")
+    _ok("orchestration_script" in built and "work_plan" in built,
+        "default path enriches the Job Request with orchestration_script + work_plan")
+    _ok(built.get("issue") == 42 and built.get("route") == "gen-default",
+        "default path preserves the visitor Job Request fields")
 
 
 def main() -> int:
     print("== test_baseworkflow_bridge ==")
     test_enrich_dry_run_no_model_call()
     test_failsafe_returns_original_on_error()
-    test_default_flag_off_untouched()
+    test_visitor_fallback_untouched()
+    test_default_engine_enriches()
     print(f"-- bridge tests: PASS={_PASS} FAIL={_FAIL} --")
     return 1 if _FAIL else 0
 

@@ -8,17 +8,25 @@ flags and runs the tick; the Engineer is the Claude Agent SDK engineer
 (``src/orchestration/engineer_sdk.py``, Claude-subscription auth, multi-agent). No
 shell anywhere in dispatch.
 
-Engine status (read this before assuming): the live tick is driven TODAY by the
-``src/orchestration`` visitor pipeline (``src/orchestration/pipeline.py``), which
-owns the GitHub lifecycle (claim/labels/PR/closure) and invokes the Engineer. The
-BaseWorkflow engine (``engine/workflow`` + ``engine/actions`` + ``src/baseworkflow``)
-is a separate, additive automata substrate that does NOT yet drive the tick. Its
-foundational live runner — ``src/baseworkflow.run_live(...)`` against
-``RealActionFactory`` — exists as of Phase 1, but is not wired into this entry
-point. Wiring it behind a feature flag (e.g. ``DISPATCH_ENGINE=baseworkflow``),
-bridging BaseWorkflow's engineering Action to ``engineer_sdk``, and the real
-GitHub bindings are Phase 2+ work — not done here. Do not claim BaseWorkflow
-drives the tick until that wiring lands.
+Engine status (read this before assuming): the GitHub lifecycle of every tick —
+claim/labels/PR/closure — is still owned by the ``src/orchestration`` visitor
+pipeline (``src/orchestration/pipeline.py``), and the Engineer is still
+``engineer_sdk.py``. What changed in Phase 3 is the *authoring* engine for the
+workorder stage, selected by ``DISPATCH_ENGINE``:
+
+  - ``baseworkflow`` (the DEFAULT as of Phase 3): the visitor's ``visit_workorder``
+    runs a BaseWorkflow (``engine/workflow`` + ``engine/actions`` +
+    ``src/baseworkflow``, via ``src/orchestration/baseworkflow_bridge.py``) over the
+    visitor-built Job Request and folds the authored ``orchestration_script`` /
+    ``work_plan`` into it before the Engineer consumes it. Fail-safe: on any error
+    the bridge returns the original request unchanged and logs a fallback line.
+  - ``visitor`` (explicit fallback): skips BaseWorkflow authoring entirely and runs
+    the historical visitor-built Job Request unchanged.
+
+So a bare tick now routes its workorder authoring through BaseWorkflow; set
+``DISPATCH_ENGINE=visitor`` to fall back to the pure visitor path. BaseWorkflow
+authors the spec/orchestration_script that feeds the Engineer — it does not own the
+GitHub lifecycle and is not itself the Engineer.
 
   python3 dispatch.py [FLAGS]                  run a full tick
       -b/--bootstrap  -r/--repo OWNER/REPO  -l/--live  -e/--engineer BIN

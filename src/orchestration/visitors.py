@@ -150,12 +150,14 @@ class ExecutionVisitor(StageVisitor):
                 "confidence": conf,
             }
         )
-        # Authoring-engine seam (Phase 2, DEFAULT OFF). When DISPATCH_ENGINE is
-        # `baseworkflow`, run a BaseWorkflow over the Job Request and fold its
-        # authored orchestration_script / work_plan back in. Fail-safe: on any
-        # error the request is returned unchanged. The default `visitor` path is
-        # byte-for-byte unchanged.
-        if common.env("DISPATCH_ENGINE", "visitor") == "baseworkflow":
+        # Authoring-engine seam (Phase 3, DEFAULT ON). DISPATCH_ENGINE selects the
+        # workorder authoring engine: `baseworkflow` (the DEFAULT) runs a
+        # BaseWorkflow over the Job Request and folds its authored
+        # orchestration_script / work_plan back in; `visitor` is the explicit
+        # fallback that leaves the Job Request byte-for-byte unchanged. Fail-safe:
+        # on any error the request is returned unchanged. The fallback literal here
+        # mirrors common.py's _default("DISPATCH_ENGINE", "baseworkflow").
+        if common.env("DISPATCH_ENGINE", "baseworkflow") == "baseworkflow":
             from .baseworkflow_bridge import author_via_baseworkflow
 
             ctx.job_request = author_via_baseworkflow(ctx.job_request)
