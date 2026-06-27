@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "invoice.v1",
+  "title": "Engineer Invoice (v1)",
+  "description": "The architect↔worker seam, return half. The structured completion artifact the Engineer returns to the Architect after a job finishes; the Architect uses it to close the issue, record cost, and calibrate future routing. Re-issued as v1 to carry schema_version alongside work-order.v1 / job-request.v1 — one version family across the seam. Versioning discipline: additive → minor (consumers ignore unknown fields); breaking → bump schema_version (major) + a dual-emit compat window.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "invoice_id",
+    "issue",
+    "repo",
+    "status",
+    "route_used",
+    "cost",
+    "summary",
+    "timestamp"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the Invoice contract. Additive → minor (unknown fields ignored); breaking → bump this major + a dual-emit compat window."
+    },
+    "invoice_id": {
+      "type": "string",
+      "description": "Unique identifier for this invoice (e.g. uuid4 or issue-<n>-<timestamp>)."
+    },
+    "issue": {
+      "type": "integer",
+      "description": "GitHub issue number the job was executed against."
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$",
+      "description": "owner/repo the issue belongs to."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed", "partial", "needs-human"],
+      "description": "completed — PR opened and CI green; failed — unrecoverable error; partial — work done but CI or tests still red; needs-human — Engineer hit an ambiguity it cannot resolve."
+    },
+    "branch": {
+      "type": ["string", "null"],
+      "description": "Git branch the Engineer pushed work to (e.g. pipeline/issue-101). Null if no commit was made."
+    },
+    "pr_number": {
+      "type": ["integer", "null"],
+      "description": "Pull request number opened by the Engineer. Null if no PR was created."
+    },
+    "scope_actual": {
+      "type": "string",
+      "enum": ["xs", "s", "m", "l", "xl"],
+      "description": "Actual complexity the Engineer observed. Compared against the Architect's classified scope to calibrate future routing."
+    },
+    "route_used": {
+      "type": "string",
+      "enum": ["gen-local", "gen-default", "gen-frontier"],
+      "description": "Model tier the Engineer consumed. Lets the Architect track cost vs scope."
+    },
+    "cost": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "tokens_in": { "type": "integer" },
+        "tokens_out": { "type": "integer" },
+        "duration_seconds": { "type": "number" },
+        "model": {
+          "type": "string",
+          "description": "Exact model id used (e.g. anthropic/claude-sonnet-4-6)."
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Paths or URLs of produced artifacts (files changed, PR URL, test report).",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "description": "Error messages if status is failed or partial.",
+      "items": { "type": "string" }
+    },
+    "summary": {
+      "type": "string",
+      "description": "One-paragraph human-readable account of what was done (or why it failed). Posted by the Architect as a PR/issue comment."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 completion time."
+    }
+  }
+}

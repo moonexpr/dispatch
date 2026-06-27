@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "work-order.v1",
+  "title": "Work Order (v1)",
+  "description": "The architect↔worker seam, full envelope. This is the richest contract the Architect emits — the `dispatch.py --json` machine envelope: the job fields, the authorization grant, the decomposed units + staffing, the work-plan characteristics, the dispatch mode, the rendered work_order text, and the dependency edges. job-request.v1 is a strict subset / projection of this (the job fields + schema_version), so a v1 Work Order and a v1 Job Request stay one version family with no worker churn. Versioning discipline: additive fields are minor (consumers ignore unknown fields — note the permissive nested objects below, which let the Architect's internals evolve behind WorkOrder v1); breaking changes bump schema_version (major) with a compat window during which the Architect emits both.",
+  "type": "object",
+  "required": [
+    "schema_version", "job_id", "issue", "repo", "title", "body", "route", "scope", "confidence",
+    "authorization", "units", "staffing", "characteristics", "mode", "work_order"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the Work Order contract. Additive → minor (unknown fields ignored); breaking → bump this major + a dual-emit compat window."
+    },
+    "job_id": { "type": "string", "description": "Unique identifier for this job." },
+    "issue": { "type": "integer", "description": "GitHub issue number." },
+    "repo": {
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$",
+      "description": "owner/repo the issue belongs to."
+    },
+    "title": { "type": "string", "description": "Issue title." },
+    "body": { "type": "string", "description": "Issue body — full requirements and acceptance criteria." },
+    "route": {
+      "type": "string",
+      "enum": ["gen-local", "gen-default", "gen-frontier"],
+      "description": "Model tier the Architect selected for this job."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["xs", "s", "m", "l"],
+      "description": "Architect's estimated complexity."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Classifier confidence that this issue is implementable autonomously."
+    },
+    "issue_url": {
+      "type": "string",
+      "description": "Canonical URL of the issue, when known (empty string from offline fixtures)."
+    },
+    "authorization": {
+      "type": "object",
+      "description": "The budget + scope + stop-condition grant the Architect issues for the job. Seam-stable keys are required; the Architect may add fields (consumers ignore unknown ones).",
+      "required": ["session_id", "route", "scope", "budget_tokens", "constraint", "stop_condition"],
+      "additionalProperties": true,
+      "properties": {
+        "session_id": { "type": "string" },
+        "route": { "type": "string", "enum": ["gen-local", "gen-default", "gen-frontier"] },
+        "scope": { "type": "string" },
+        "budget_tokens": { "type": "integer", "minimum": 0 },
+        "constraint": { "type": "string" },
+        "stop_condition": { "type": "string" }
+      }
+    },
+    "units": {
+      "type": "array",
+      "description": "The Architect's decomposition into work units. Empty array when the job is a single undivided unit. Per-unit keys below are the seam-stable contract; the Architect may attach more.",
+      "items": {
+        "type": "object",
+        "required": ["id", "deliverable"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "deliverable": { "type": "string" },
+          "files": { "type": "array", "items": { "type": "string" } },
+          "depends_on": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "staffing": {
+      "type": "object",
+      "description": "How many agents staff the units and how they are assigned. Internals (complexity signals, caps) evolve behind v1; only the seam keys are required.",
+      "required": ["agent_count", "assignments"],
+      "additionalProperties": true,
+      "properties": {
+        "agent_count": { "type": "integer", "minimum": 0 },
+        "assignments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["unit", "specialist"],
+            "additionalProperties": true,
+            "properties": {
+              "unit": { "type": "string" },
+              "specialist": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "characteristics": {
+      "type": "object",
+      "description": "The work-plan characteristics (strategy / purpose / issues_affected). Data-driven from app/config/workplan-rules.yml; the inner shapes evolve behind v1.",
+      "required": ["strategy", "purpose", "issues_affected"],
+      "additionalProperties": true
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["implementation", "research"],
+      "description": "Dispatch mode: an implementation order, or a research order on the cheap research route."
+    },
+    "work_order": {
+      "type": "string",
+      "description": "The fully rendered, human-readable work order text the Engineer reads."
+    },
+    "blocked_by": {
+      "type": "array",
+      "description": "Issues this one depends on, as {number, url} pairs (present only when the DAG was built).",
+      "items": {
+        "type": "object",
+        "required": ["number", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "number": { "type": "integer" },
+          "url": { "type": "string" }
+        }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "description": "Issues that depend on this one, as {number, url} pairs.",
+      "items": {
+        "type": "object",
+        "required": ["number", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "number": { "type": "integer" },
+          "url": { "type": "string" }
+        }
+      }
+    }
+  }
+}

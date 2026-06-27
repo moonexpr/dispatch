@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "job_id": "dispatch-issue-101",
+  "issue": 101,
+  "repo": "ReclaimByDesign/dispatch",
+  "title": "Add a --json flag to the foo subcommand",
+  "body": "The foo subcommand should accept --json and emit a machine-readable envelope.\n\nAcceptance: `foo --json` prints valid JSON; existing text output unchanged.",
+  "route": "gen-default",
+  "scope": "m",
+  "confidence": 0.82
+}

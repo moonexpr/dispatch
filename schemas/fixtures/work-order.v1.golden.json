@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "job_id": "dispatch-issue-101",
+  "issue": 101,
+  "repo": "ReclaimByDesign/dispatch",
+  "title": "Add a --json flag to the foo subcommand",
+  "body": "The foo subcommand should accept --json and emit a machine-readable envelope.\n\nAcceptance: `foo --json` prints valid JSON; existing text output unchanged.",
+  "route": "gen-default",
+  "scope": "m",
+  "confidence": 0.82,
+  "issue_url": "https://github.com/ReclaimByDesign/dispatch/issues/101",
+  "authorization": {
+    "session_id": "dispatch-issue-101",
+    "branch": "pipeline/issue-101",
+    "route": "gen-default",
+    "scope": "m",
+    "dry_run": true,
+    "budget_tokens": 80000,
+    "reserve_tokens": 16000,
+    "phase_budgets": {
+      "READ": 12000,
+      "IMPLEMENT": 36000,
+      "VERIFY": 9600,
+      "COMMIT & PR": 6400
+    },
+    "constraint": "The job is bounded by the issue's stated scope. Adjacent work is not authorized — note it in the PR thread and stop. One issue, one branch, one PR.",
+    "stop_condition": "PR open · do not push to main · do not merge"
+  },
+  "units": [
+    {
+      "id": "A",
+      "deliverable": "Implement the --json flag in `src/foo.py` per the issue's acceptance criteria.",
+      "files": ["src/foo.py"],
+      "specialization": {
+        "function": "engineer",
+        "domain": "backend (Python)",
+        "label": "backend (Python) engineer"
+      },
+      "depends_on": [],
+      "phase": "implement",
+      "acceptance": "`foo --json` prints valid JSON and `bash scripts/smoke.sh` stays green."
+    },
+    {
+      "id": "B",
+      "deliverable": "Add test coverage for the --json output.",
+      "files": ["tests/test_foo.py"],
+      "specialization": {
+        "function": "engineer",
+        "domain": "QA / test automation",
+        "label": "QA / test automation engineer"
+      },
+      "depends_on": ["A"],
+      "phase": "verify",
+      "acceptance": "A test asserts the --json envelope shape."
+    }
+  ],
+  "staffing": {
+    "agent_count": 2,
+    "swarm_max": 15,
+    "capped": false,
+    "parallel": ["A"],
+    "sequential_tail": ["B"],
+    "complexity": {
+      "slices": 1,
+      "diagnosis": false,
+      "signals": {
+        "scope": "m",
+        "labels": [],
+        "deep_bug": false,
+        "depth_bonus": 0
+      }
+    },
+    "assignments": [
+      { "unit": "A", "specialist": "backend (Python) engineer" },
+      { "unit": "B", "specialist": "QA / test automation engineer" }
+    ]
+  },
+  "characteristics": {
+    "purpose": {
+      "purpose": "new-feature",
+      "source": "default",
+      "harness": "ponytail",
+      "harness_ref": "https://github.com/DietrichGebert/ponytail",
+      "harness_setup": "/plugin marketplace add DietrichGebert/ponytail && /plugin install ponytail@ponytail",
+      "harness_rationale": "New development — run under the ponytail skill: write the MINIMUM code that satisfies the acceptance criteria; prefer platform built-ins; keep every safety guard."
+    },
+    "strategy": {
+      "strategy": "sequential",
+      "summary": "One agent, ordered phases. Units run back-to-back; no parallel fan-out.",
+      "requires_parallelization_rationale": false,
+      "parallelization_rationale": "",
+      "parallel_units": ["A"]
+    },
+    "issues_affected": {
+      "resolves": [101],
+      "blocked_by": [],
+      "blocks": []
+    }
+  },
+  "mode": "implementation",
+  "work_order": "WORK PLAN — issue #101 (ReclaimByDesign/dispatch)\n\nImplement the --json flag on the foo subcommand. Stay inside the issue's stated\nscope: one issue, one branch, one PR. Make `bash scripts/smoke.sh` green before\nopening the PR.\n",
+  "blocked_by": [],
+  "blocks": [
+    { "number": 142, "url": "https://github.com/ReclaimByDesign/dispatch/issues/142" }
+  ]
+}

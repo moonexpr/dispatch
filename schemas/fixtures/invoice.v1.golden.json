@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "invoice_id": "issue-101-20260613T120000Z",
+  "issue": 101,
+  "repo": "ReclaimByDesign/dispatch",
+  "status": "completed",
+  "branch": "pipeline/issue-101",
+  "pr_number": 142,
+  "scope_actual": "m",
+  "route_used": "gen-default",
+  "cost": {
+    "tokens_in": 18432,
+    "tokens_out": 5120,
+    "duration_seconds": 84.5,
+    "model": "anthropic/claude-sonnet-4-6"
+  },
+  "artifacts": [
+    "src/foo.py",
+    "tests/test_foo.py",
+    "https://github.com/ReclaimByDesign/dispatch/pull/142"
+  ],
+  "errors": [],
+  "summary": "Added the --json flag to the foo subcommand and a test asserting the envelope shape. Existing text output is unchanged; smoke.sh stays green.",
+  "timestamp": "2026-06-13T12:01:24Z"
+}
