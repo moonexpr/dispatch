@@ -52,6 +52,7 @@ EXPECTED_DELIVERABLES = {
     "purpose", "work_unit", "plan", "strategy", "bucket", "budget",
     "orchestration_script", "work_plan", "submission",
     "env", "adversarial_tests", "engineering_result", "docs", "stored",
+    "intake",
 }
 
 _RESULTS: list = []
@@ -325,6 +326,77 @@ def test_yaml_workflow() -> None:
           f"phases={sorted(rendered.get('phases', {}))}")
 
 
+def test_intake_invoice_transitions() -> None:
+    """admin:intake_invoice (#137 + the engineer-invoice -> label transition ported
+    from the deprecated visitors.py) — the FIRST gh-mutating workflow action. Under
+    ``ctx.dry_run`` it must drive the right label transition for each invoice status
+    WITHOUT any real gh mutation, and on partial/failed it must post the shared
+    rescaffold directive + emit a ``fix-rescaffold`` ledger event (#137)."""
+    import bindings
+    import importlib
+
+    reg = bindings.build_registry()
+    binding = reg.action_binding("intake_invoice")
+    check("intake_invoice registered + needs_ctx", binding.needs_ctx is True)
+    intake_invoice = binding.fn
+
+    # Detonate the real gh wrapper and capture the run-ledger so we can assert the
+    # dry-run path makes NO gh mutation and emits the right ledger events.
+    common = importlib.import_module("common")
+    orig_mutate, orig_ledger = common.gh_mutate, common.ledger_emit
+    ledger_calls: list = []
+
+    def _boom_mutate(*a, **k):  # any real gh mutation under dry-run is a failure
+        raise AssertionError(f"intake_invoice called gh_mutate under dry-run: {a}")
+
+    common.gh_mutate = _boom_mutate  # type: ignore[assignment]
+    common.ledger_emit = lambda stage, issue="", fields="": ledger_calls.append((stage, issue, fields))  # type: ignore[assignment]
+
+    JOBP = {"issue": 9001, "pr_number": 4242, "route": "gen-default"}
+
+    def _run(er):  # dry-run intake; returns the transition record + ledger stages
+        ledger_calls.clear()
+        ctx = _fresh_ctx(dry_run=True)
+        ctx.shelves.input.put("job", JOBP)
+        out = intake_invoice({"engineering_result": er, "job": JOBP}, ctx)
+        return out["intake"], [s for s, _, _ in ledger_calls]
+
+    try:
+        # completed: arm auto-merge + relabel claimed -> done-pending-merge + closure
+        rec, stages = _run({"ok": True, "value": {"done": True}, "meta": {"summary": "ok"}})
+        labels = [m for m in rec["mutations"]]
+        check("completed -> status completed", rec["status"] == "completed", f"rec={rec['status']}")
+        check("completed arms auto-merge", any(m[:2] == ["pr", "merge"] for m in labels))
+        check("completed relabels done-pending-merge",
+              any("done-pending-merge" in m for m in labels))
+        check("completed emits closure ledger", "closure" in stages, f"stages={stages}")
+
+        # failed: fix-attempt-1 + rescaffold directive + fix-rescaffold ledger (#137)
+        rec, stages = _run({"ok": False, "value": None, "meta": {"summary": "boom"}})
+        muts = rec["mutations"]
+        check("failed -> status failed", rec["status"] == "failed", f"rec={rec['status']}")
+        check("failed adds fix-attempt-1", any("fix-attempt-1" in m for m in muts))
+        check("failed posts rescaffold directive (#137)",
+              any(any("rescaffold" in str(tok) for tok in m) for m in muts))
+        check("failed emits fix-rescaffold ledger (#137)", "fix-rescaffold" in stages, f"stages={stages}")
+
+        # partial: ok but falsy value -> same fix-attempt-1 + rescaffold path
+        rec, stages = _run({"ok": True, "value": None, "meta": {"summary": "half"}})
+        check("partial -> status partial", rec["status"] == "partial", f"rec={rec['status']}")
+        check("partial emits fix-rescaffold ledger (#137)", "fix-rescaffold" in stages, f"stages={stages}")
+
+        # needs-human: only reachable via an explicit meta.status
+        rec, stages = _run({"ok": False, "value": None, "meta": {"status": "needs-human", "summary": "stuck"}})
+        check("explicit meta.status=needs-human honored", rec["status"] == "needs-human", f"rec={rec['status']}")
+        check("needs-human relabels off claimed",
+              any("--remove-label" in m and "claimed" in m for m in rec["mutations"]))
+
+        # dry-run safety: every transition recorded mutations but none hit gh
+        check("dry-run recorded intended mutations without calling gh", rec["dry_run"] is True)
+    finally:
+        common.gh_mutate, common.ledger_emit = orig_mutate, orig_ledger  # type: ignore[assignment]
+
+
 def main() -> int:
     for fn in (
         test_runs_green_with_all_deliverables,
@@ -338,6 +410,7 @@ def main() -> int:
         test_governor_budget_enforced,
         test_program_depth_recorded,
         test_yaml_workflow,
+        test_intake_invoice_transitions,
     ):
         try:
             fn()

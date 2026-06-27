@@ -177,10 +177,20 @@ alone as in-flight work.
   `DISPATCH_CLAIM_TIMEOUT_HOURS`.
 - **Disable:** `DISPATCH_REAPER_ENABLED=0` skips the reaper step.
 - **Engineer-failure policy:** `recovery.engineer_failure_policy` is
-  `architect-rescaffold` — on an engineer non-zero exit / `failed` status, the
-  issue is re-submitted to the architect for a fresh (possibly finer-grained)
-  work order rather than retrying the identical order or escalating immediately;
-  `needs-human` only if re-scaffolding yields no workable plan.
+  `architect-rescaffold` — on an engineer non-zero exit / `failed` (or `partial`)
+  status, the issue is re-submitted to the architect for a fresh (possibly
+  finer-grained) work order rather than retrying the identical order or escalating
+  immediately; `needs-human` only if re-scaffolding yields no workable plan. This
+  policy is now realized by the **workflow engine**: the `admin:intake_invoice`
+  action (`app/config/actions/admin/intake_invoice.yml`, bound in
+  `src/baseworkflow/bindings/admin.py`) runs at the end of the `build` phase,
+  reads the `engineering_result`, and on `partial`/`failed` labels `fix-attempt-1`,
+  posts the shared #137 **diagnose-then-replan** directive
+  (`src/architect/rescaffold.py`), and emits a `fix-rescaffold` run-ledger event —
+  the same directive the CI fix-ladder posts. (This supersedes the engineer-invoice
+  handler in the deprecated `src/orchestration/visitors.py`; every gh mutation is
+  gated on the engine's `ctx.dry_run`, so a dry-run tick records the intended
+  transition without touching GitHub.)
 - **CI fix-ladder (distinct path):** on a CI failure the fix-ladder bumps the
   model tier **and**, per #137, posts a revised **diagnose-then-replan** directive
   that feeds the CI failure signal back (durably on the PR thread + a run-ledger

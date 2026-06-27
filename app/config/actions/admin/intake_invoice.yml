@@ -1,0 +1,36 @@
+# M8 — intake the engineer's result and advance the GitHub label state machine
+# (the first gh-MUTATING action in the workflow engine). A procedure; it reads the
+# engineering result + the job, performs gh writes (gated on ctx.dry_run inside the
+# binding), and records the transition it performed/intended on the deliverables
+# shelf. Ported from the deprecated src/orchestration/visitors.py.
+token: admin:intake_invoice
+kind: procedure
+bind: intake_invoice
+budget: admin
+
+# Permission precedent (#137 / first gh-write action). Deny-by-default is `[]`;
+# here we declare the gh write *capabilities* this action uses, in the namespaced
+# `gh:<subcommand>` vocabulary, so the manifest documents — auditably — exactly
+# which GitHub mutations the action is authorized to make.
+#
+# Enforcement note: the engine's PermissionGovernor gates on an action's REQUIRED
+# tool set, which for an `inference` defaults to its `spec.tools`. A `procedure`
+# exposes no `spec.tools`, so today this list is DECLARATIVE — the governor admits
+# the procedure regardless of the list's contents (it cannot yet derive a gh
+# capability requirement from a procedure body). Listing the capabilities here
+# (a) sets the vocabulary for when procedure-level gh-capability enforcement lands,
+# and (b) keeps the wiring honest: a non-empty list still constructs the permission
+# Governor (the workflow carries the gate), and the real dry-run safety is enforced
+# imperatively in the binding via `ctx.dry_run`.
+permission:
+  - gh:issue:edit       # add/remove the claimed/done-pending-merge/fix-attempt-1/needs-human labels
+  - gh:issue:comment    # post the needs-human escalation comment
+  - gh:pr:comment       # post the engineer-invoice + rescaffold (#137) comments
+  - gh:pr:merge         # arm auto-merge on a completed unit
+
+interface:
+  in:
+    engineering_result: deliverables.engineering_result
+    job: input.job
+  out:
+    intake: deliverables.intake

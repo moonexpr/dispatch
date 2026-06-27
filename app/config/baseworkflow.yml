@@ -52,7 +52,11 @@ phases:
         max_iterations: 3
         body: engineer:execute_orchestration
 
-  # build — the Administrator's documentation + persistence.
+  # build — the Administrator's documentation + persistence, then the engineer-
+  # invoice intake (the gh-write label-state-machine transition; #137 rescaffold
+  # on a failed/partial result). Runs last so engineering_result + the stored
+  # record are both available.
   build:
     - admin:update_docs
     - admin:store
+    - admin:intake_invoice
