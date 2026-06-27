@@ -75,8 +75,19 @@ def author_via_baseworkflow(job_request_json: str) -> str:
 
     Parses ``job_request_json`` (the compact JSON the workorder stage produced),
     runs a ``BaseWorkflow`` over it (dry-run gated by ``PIPELINE_DRY_RUN``), and
-    merges the authored ``orchestration_script`` and ``work_plan`` deliverables
-    into the request dict. Returns the enriched request as compact JSON.
+    merges the authored ``orchestration_script``, ``work_plan`` and ``plan``
+    deliverables into the request dict. Returns the enriched request as compact
+    JSON.
+
+    The ``plan`` deliverable (``decompose.plan()`` output:
+    ``{"units": [...], "staffing": {...}, "criteria": [...]}``) is what unlocks
+    multi-agent fan-out downstream: the SDK Engineer's ``_extract_units`` already
+    recognises ``job["plan"]["units"]`` as a decomposition carrier and
+    materialises one engineering agent per unit. Without it the Engineer sees no
+    units and falls back to a single agent — even though the Architect authored a
+    multi-unit decomposition (the orchestration_script ``phases`` carry the same
+    units in flattened form, which the Engineer does NOT read). Folding ``plan``
+    is the seam that makes the authored staffing actually staff agents.
 
     On ANY failure the ORIGINAL ``job_request_json`` is returned unchanged and a
     diagnostic is written to stderr — the seam never breaks the tick.
@@ -104,7 +115,10 @@ def author_via_baseworkflow(job_request_json: str) -> str:
         deliv = summary.get("deliverables") or {}
 
         enriched = dict(req)
-        for key in ("orchestration_script", "work_plan"):
+        # ``plan`` carries the structured units/staffing the Engineer fans out on
+        # (job["plan"]["units"]); orchestration_script/work_plan are the authored
+        # program + plan record. Fold all three when the workflow produced them.
+        for key in ("orchestration_script", "work_plan", "plan"):
             if key in deliv and deliv[key] is not None:
                 enriched[key] = deliv[key]
 

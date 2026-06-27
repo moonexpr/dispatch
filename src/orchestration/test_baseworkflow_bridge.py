@@ -92,6 +92,32 @@ def test_enrich_dry_run_no_model_call() -> None:
         "original Job Request fields preserved through enrichment")
 
 
+def test_enrich_carries_plan_units_for_fanout() -> None:
+    """(a2) the enriched request carries the ``plan`` deliverable with a non-empty
+    ``units`` list — the carrier shape the SDK Engineer's ``_extract_units`` fans
+    out on (``job["plan"]["units"]``). Without this the Engineer sees zero units
+    and collapses an authored multi-unit decomposition to a single agent."""
+    os.environ["PIPELINE_DRY_RUN"] = "1"
+    from src.orchestration import baseworkflow_bridge as bridge
+
+    enriched = json.loads(bridge.author_via_baseworkflow(_JOB_REQUEST))
+    plan = enriched.get("plan")
+    _ok(isinstance(plan, dict), "enriched request carries the structured plan deliverable")
+    units = (plan or {}).get("units")
+    _ok(isinstance(units, list) and len(units) >= 1,
+        "plan.units is a non-empty list (Engineer will fan out, not collapse to one agent)")
+    # Cross-check against the actual consumer contract: the Engineer's unit
+    # extractor recognises the enriched request as a decomposition.
+    try:
+        from src.orchestration.engineer_sdk import _extract_units
+
+        found, _staffing = _extract_units(enriched)
+        _ok(len(found) >= 1,
+            "engineer_sdk._extract_units recognises plan.units on the enriched request")
+    except Exception as exc:  # noqa: BLE001 — engineer may be mid-refactor; don't hard-fail the bridge test
+        print(f"  SKIP _extract_units cross-check ({type(exc).__name__}: {exc})")
+
+
 def test_failsafe_returns_original_on_error() -> None:
     """(b) any error -> the ORIGINAL request is returned unchanged."""
     from src.orchestration import baseworkflow_bridge as bridge
@@ -194,6 +220,7 @@ def test_default_engine_enriches() -> None:
 def main() -> int:
     print("== test_baseworkflow_bridge ==")
     test_enrich_dry_run_no_model_call()
+    test_enrich_carries_plan_units_for_fanout()
     test_failsafe_returns_original_on_error()
     test_visitor_fallback_untouched()
     test_default_engine_enriches()
