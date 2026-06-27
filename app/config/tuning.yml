@@ -178,6 +178,19 @@ generation:
       thread_depth_chars_per_slice: 1200
       thread_depth_max_bonus: 2
       diagnosis_min_slices: 2
+    templates:
+      _doc: 'Work-order UNIT TEXT templates (#144). The template TEXT is data; decompose.plan still
+        COMPUTES the fields and fills these via str.format. Placeholders: {issue} {path} {gate} {focus}
+        {suffix}. Block scalars (|) preserve exact text. Any literal brace must be escaped {{ }}.'
+      diagnosis_deliverable: 'Diagnose issue #{issue}: reproduce, isolate the root cause across {focus},
+        and write down the fix plan the implementation slices follow.'
+      diagnosis_acceptance: Root cause is identified and a concrete, sliceable fix plan is recorded.
+      file_deliverable: Implement the change in `{path}` per the issue's acceptance criteria.
+      file_acceptance: '`{path}` is correct in isolation and {gate} stays green.'
+      slice_deliverable: 'Implement issue #{issue}{suffix} per its acceptance criteria.'
+      slice_acceptance: '{gate} stays green and this slice''s portion of the acceptance criteria is met.'
+      verify_deliverable: 'Integrate the units, run {gate}, and open the PR with `Closes #{issue}`.'
+      verify_acceptance: '{gate} is green (0 FAIL); PR opened against `main`, not merged.'
     specialization_rules:
     - any:
       - basename_contains: smoke
@@ -247,6 +260,12 @@ generation:
       gen-default: sonnet
       gen-frontier: opus
     box_width: 70
+    block:
+      _doc: 'TEST PROCEDURE block LAYOUT template (#144). The label/layout TEXT is data; workorder still
+        COMPUTES the setup/exercise/verify VALUES and fills this via str.format. The unit header line
+        stays in Python. A double-quoted scalar (not block |) is used so the leading two-space label
+        indentation survives — block scalars strip common leading indentation.'
+      test_procedure: "  Setup:     {setup}\n  Exercise:  {exercise}\n  Verify:    {verify}"
   research:
     _doc: Research-mode gap-detection + order emission (Pillar 2, E6-1/E6-2). detect_gap() reads enabled/low_confidence_threshold/needs_research_label;
       the architect renders a research work order on the cheap `route` when a gap is found. enabled=false

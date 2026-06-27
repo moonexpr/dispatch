@@ -34,6 +34,9 @@ import tuning  # noqa: E402
 # Rendering knobs — tunable via app/config/tuning.yml (generation.workorder).
 _ROUTE_ALIAS = tuning.ROUTE_ALIAS
 _BOX_W = tuning.BOX_W
+# TEST PROCEDURE block LAYOUT template (#144) — label/layout text is data; the
+# setup/exercise/verify VALUES stay computed below and fill it via str.format.
+_BLOCK = tuning.WORKORDER_BLOCK
 
 
 def _box(title: str, rows) -> str:
@@ -145,9 +148,7 @@ def _test_procedure_section(plan: Dict[str, Any], verify_cmd: str) -> str:
                   "it must pass offline under PIPELINE_DRY_RUN=1.")
         lines.append(
             f"Unit {u['id']} — {u['specialization']['label']}\n"
-            f"  Setup:     {setup}\n"
-            f"  Exercise:  {exercise}\n"
-            f"  Verify:    {verify}"
+            + _BLOCK["test_procedure"].format(setup=setup, exercise=exercise, verify=verify)
         )
     return _section(
         "TEST PROCEDURE  (prove each unit: setup → exercise → verify)",

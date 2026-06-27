@@ -31,6 +31,12 @@ _SWARM_MAX = tuning.SWARM_MAX
 # (generation.decompose.complexity); this module only matches + renders.
 _CX = tuning.DECOMPOSE_COMPLEXITY
 
+# Work-order UNIT TEXT templates (#144) — the template STRINGS live in config
+# (generation.decompose.templates); this module COMPUTES the fields
+# (issue/path/gate/focus/suffix) and fills them via str.format. A missing config
+# falls back to DEFAULTS (byte-identical text).
+_TPL = tuning.DECOMPOSE_TEMPLATES
+
 
 def _spec_for(path: str):
     """Map a file/area to a (function, domain) specialization.
@@ -182,13 +188,12 @@ def plan(job: Dict[str, Any], discovered: List[str],
         focus = ", ".join(f"`{p}`" for p in discovered[:4]) or "the referenced code paths"
         units.append({
             "id": "",
-            "deliverable": f"Diagnose issue #{issue}: reproduce, isolate the root cause across "
-                           f"{focus}, and write down the fix plan the implementation slices follow.",
+            "deliverable": _TPL["diagnosis_deliverable"].format(issue=issue, focus=focus),
             "files": list(discovered),
             "specialization": _spec("analyst", "diagnostics / root-cause"),
             "depends_on": [],
             "phase": "diagnosis",
-            "acceptance": "Root cause is identified and a concrete, sliceable fix plan is recorded.",
+            "acceptance": _TPL["diagnosis_acceptance"].format(),
         })
 
     # Implementation phase: one cohesive unit per referenced file, then — when
@@ -199,12 +204,12 @@ def plan(job: Dict[str, Any], discovered: List[str],
         fn, domain = _spec_for(path)
         units.append({
             "id": "",
-            "deliverable": f"Implement the change in `{path}` per the issue's acceptance criteria.",
+            "deliverable": _TPL["file_deliverable"].format(path=path),
             "files": [path],
             "specialization": _spec(fn, domain),
             "depends_on": [],
             "phase": "implement",
-            "acceptance": f"`{path}` is correct in isolation and {gate} stays green.",
+            "acceptance": _TPL["file_acceptance"].format(path=path, gate=gate),
         })
 
     impl_emitted = len(discovered)
@@ -217,12 +222,12 @@ def plan(job: Dict[str, Any], discovered: List[str],
         suffix = f" (slice {k + 1} of {n_generic})" if (n_generic > 1 or impl_emitted) else ""
         units.append({
             "id": "",
-            "deliverable": f"Implement issue #{issue}{suffix} per its acceptance criteria.",
+            "deliverable": _TPL["slice_deliverable"].format(issue=issue, suffix=suffix),
             "files": [],
             "specialization": _spec("engineer", "general software"),
             "depends_on": [],
             "phase": "implement",
-            "acceptance": f"{gate} stays green and this slice's portion of the acceptance criteria is met.",
+            "acceptance": _TPL["slice_acceptance"].format(gate=gate),
         })
 
     # Letter the impl/diagnosis units now so the verify unit can depend on them.
@@ -234,12 +239,12 @@ def plan(job: Dict[str, Any], discovered: List[str],
     verify_id = chr(ord("A") + len(units))
     units.append({
         "id": verify_id,
-        "deliverable": f"Integrate the units, run {gate}, and open the PR with `Closes #{issue}`.",
+        "deliverable": _TPL["verify_deliverable"].format(gate=gate, issue=issue),
         "files": ["scripts/smoke.sh"],
         "specialization": _spec("engineer", "QA / test automation"),
         "depends_on": impl_ids,
         "phase": "verify",
-        "acceptance": f"{gate} is green (0 FAIL); PR opened against `main`, not merged.",
+        "acceptance": _TPL["verify_acceptance"].format(gate=gate),
     })
 
     # Cap at the swarm max. Keep the integration/verify unit (the serial tail) —

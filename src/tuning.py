@@ -131,6 +131,30 @@ DEFAULTS: Dict[str, Any] = {
                 # when the slice count reaches this, or a deep-bug label is present.
                 "diagnosis_min_slices": 2,
             },
+            # Work-order UNIT TEXT templates (#144 text-templates slice). The
+            # template TEXT is data here; decompose.plan still COMPUTES the fields
+            # (issue/path/gate/focus/suffix) and fills these via str.format. A
+            # missing config falls back to these DEFAULTS (byte-identical text).
+            # Any literal brace in template text must be escaped {{ }}.
+            "templates": {
+                "diagnosis_deliverable": (
+                    "Diagnose issue #{issue}: reproduce, isolate the root cause across "
+                    "{focus}, and write down the fix plan the implementation slices follow."),
+                "diagnosis_acceptance": (
+                    "Root cause is identified and a concrete, sliceable fix plan is recorded."),
+                "file_deliverable": (
+                    "Implement the change in `{path}` per the issue's acceptance criteria."),
+                "file_acceptance": (
+                    "`{path}` is correct in isolation and {gate} stays green."),
+                "slice_deliverable": (
+                    "Implement issue #{issue}{suffix} per its acceptance criteria."),
+                "slice_acceptance": (
+                    "{gate} stays green and this slice's portion of the acceptance criteria is met."),
+                "verify_deliverable": (
+                    "Integrate the units, run {gate}, and open the PR with `Closes #{issue}`."),
+                "verify_acceptance": (
+                    "{gate} is green (0 FAIL); PR opened against `main`, not merged."),
+            },
             "specialization_rules": [
                 {"any": [{"basename_contains": "smoke"}, {"path_contains": "test"},
                          {"path_contains": "/fixtures/"}],
@@ -163,6 +187,17 @@ DEFAULTS: Dict[str, Any] = {
             "route_alias": {"gen-local": "local", "gen-default": "sonnet",
                             "gen-frontier": "opus"},
             "box_width": 70,
+            # TEST PROCEDURE block LAYOUT template (#144 text-templates slice).
+            # The label/layout TEXT is data; workorder still COMPUTES the
+            # setup/exercise/verify values and fills this via str.format. The
+            # header line (Unit id — specialist) stays in Python. Missing config
+            # falls back to this DEFAULT (byte-identical text).
+            "block": {
+                "test_procedure": (
+                    "  Setup:     {setup}\n"
+                    "  Exercise:  {exercise}\n"
+                    "  Verify:    {verify}"),
+            },
         },
         # Research-mode gap-detection (Pillar 2, E6-1). The deterministic architect
         # gap heuristic (src/architect/research.py) reads these. `enabled` is a
@@ -324,10 +359,16 @@ SWARM_MAX: int = int(_GEN["decompose"]["swarm_max"])
 # Complexity-aware decomposition knobs (#134) — read by decompose.plan to scale
 # implementation slices / emit a diagnosis phase from signals already on the item.
 DECOMPOSE_COMPLEXITY: Dict[str, Any] = dict(_GEN["decompose"]["complexity"])
+# Work-order UNIT TEXT templates (#144) — data filled by decompose.plan via
+# str.format; the classification/staffing logic stays Python.
+DECOMPOSE_TEMPLATES: Dict[str, str] = dict(_GEN["decompose"]["templates"])
 SPEC_RULES: List[Dict[str, Any]] = list(_GEN["decompose"]["specialization_rules"])
 RES_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["resources"].items()}
 ROUTE_ALIAS: Dict[str, str] = dict(_GEN["workorder"]["route_alias"])
 BOX_W: int = int(_GEN["workorder"]["box_width"])
+# Work-order block LAYOUT templates (#144) — label/layout text as data, filled
+# by workorder via str.format; the computed values stay Python.
+WORKORDER_BLOCK: Dict[str, str] = dict(_GEN["workorder"]["block"])
 
 # research-mode gap-detection (Pillar 2, E6-1) — the new generation.research block,
 # consumed by src/architect/research.py::detect_gap.
