@@ -377,6 +377,51 @@ class _CliResult:
         self.num_turns: Optional[int] = None
 
 
+def _seed_config_auth(cfg_dir: str) -> None:
+    """Seed an isolated ``CLAUDE_CONFIG_DIR`` with ONLY the subscription auth state —
+    login/onboarding (``~/.claude.json``) + the OAuth credential — so the headless
+    ``claude`` is logged in WITHOUT inheriting the operator's ``CLAUDE.md`` / memory /
+    hooks (the issue-#159 isolation goal).
+
+    Subscription auth is NOT keychain-transparent across config homes: once
+    ``CLAUDE_CONFIG_DIR`` is non-default, the CLI reads its credential from the config
+    dir, not the login keychain, so a *fresh* dir is "Not logged in · Please run
+    /login" and every engineering turn errors. The credential is therefore placed into
+    the dir explicitly — from ``~/.claude/.credentials.json`` (Linux) or, on macOS,
+    extracted from the login keychain (service ``Claude Code-credentials``). Best
+    effort: on failure the run still proceeds and surfaces the auth error as a failed
+    Invoice rather than silently mutating."""
+    import shutil as _shutil
+
+    home = os.path.expanduser("~")
+    src_json = os.path.join(home, ".claude.json")
+    if os.path.isfile(src_json):
+        try:
+            _shutil.copyfile(src_json, os.path.join(cfg_dir, ".claude.json"))
+        except OSError:
+            pass
+    dst_cred = os.path.join(cfg_dir, ".credentials.json")
+    src_cred = os.path.join(home, ".claude", ".credentials.json")
+    if os.path.isfile(src_cred):
+        try:
+            _shutil.copyfile(src_cred, dst_cred)
+            return
+        except OSError:
+            pass
+    if sys.platform == "darwin":  # credential lives in the login keychain, not a file
+        try:
+            cred = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials",
+                 "-a", os.environ.get("USER", ""), "-w"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if cred.returncode == 0 and cred.stdout.strip():
+                with open(dst_cred, "w", encoding="utf-8") as fh:
+                    fh.write(cred.stdout)
+        except Exception:  # noqa: BLE001 — best-effort; auth failure surfaces downstream
+            pass
+
+
 def run_cli(*, clone_dir: str, prompt: str, model: str, timeout: int) -> _CliResult:
     """Engineering backend via the ``claude`` CLI headless on the Claude
     SUBSCRIPTION. Used because ``claude_agent_sdk`` 0.2.x hangs under this env
@@ -385,14 +430,17 @@ def run_cli(*, clone_dir: str, prompt: str, model: str, timeout: int) -> _CliRes
     stripped). The lead agent may still fan out to per-unit engineering agents via
     its Task/Agent tool (multi-agent); the SCRIPT — never the model — owns git/gh."""
     sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    # Context isolation (issue #159): repoint the Claude config home to a clean temp
-    # dir so the OPERATOR's ~/.claude does NOT load into the engineer's session and
-    # poison the target deliverable. Subscription auth is unaffected (OS keychain,
-    # which CLAUDE_CONFIG_DIR does not namespace); the target clone's own CLAUDE.md
-    # still loads (cwd-based) — the wanted signal.
+    # Context isolation (issue #159): repoint the Claude config home to a temp dir so
+    # the OPERATOR's ~/.claude (CLAUDE.md, memory, hooks) does NOT load into the
+    # engineer's session and poison the target deliverable. The dir is seeded with the
+    # subscription auth state ONLY (login + credential) — see _seed_config_auth: a
+    # non-default config home is NOT logged in by default, so without this every turn
+    # errors "Not logged in". The target clone's own CLAUDE.md still loads (cwd-based)
+    # — the wanted signal.
     import shutil as _shutil
 
     iso_cfg = tempfile.mkdtemp(prefix="engineer-cfg-")
+    _seed_config_auth(iso_cfg)
     sub_env["CLAUDE_CONFIG_DIR"] = iso_cfg
     claude = _envc("CLAUDE_BIN", "claude")
     cmd = [
