@@ -7,11 +7,10 @@
 #
 # Ordering among ready (dispatchable) issues, in precedence:
 #   dependency depth (foundational first — a correctness constraint, not tunable)
-#     -> leaf before feature/epic
-#     -> earlier milestone
-#     -> earlier iteration
-#     -> higher label weight (below)
-#     -> lower issue number
+#     -> then the tunable `sort` precedence below (leaf-before-feature, earlier
+#        milestone, earlier iteration, lower issue number, higher label weight).
+# The dependency-depth primary key is hard-wired in ranker.priority_key; the
+# `sort` list defines everything after it.
 #
 # label_weights: maturity-ladder weight per issue label; HIGHER dispatches first.
 # Mirrors the repo label scheme (Unscheduled -> Draft -> Candidate -> Release)
@@ -30,3 +29,30 @@ label_weights:
 feature_labels:
   - epic
   - feature
+
+# sort: the TUNABLE selection precedence, as an ordered list of sort keys applied
+# AFTER the hard-wired primary key (dependency depth, foundational-first — a
+# correctness constraint, never listed here and never reorderable). priority_key
+# builds its sort tuple by walking this list top-to-bottom; earlier entries
+# dominate. The matchers/extractors stay in Python (src/intake/ranker.py); only
+# this ordering/precedence is data.
+#
+# Each entry:
+#   signal:    which Python extractor produces the value (see ranker._SIGNALS):
+#                feature_last  0=leaf, 1=feature/epic container  (leaves first)
+#                milestone     structured (year, seq) milestone key (earlier first)
+#                iteration     structured (year, seq) iteration key (earlier first)
+#                issue_number  the issue number (lower first = creation order)
+#                label_weight  max maturity-ladder label weight (higher first)
+#   direction: "asc" (smaller value sorts first) or "desc" (larger value first).
+#                Implemented by negating the extracted value for "desc".
+#
+# NOTE the order below reproduces today's exact tuple precedence: issue_number
+# precedes label_weight (label weight is the FINAL tie-break only, so the
+# earliest issue — the foundation — wins over a late high-weight leaf).
+sort:
+  - {signal: feature_last, direction: asc}   # leaves before features/epics
+  - {signal: milestone,    direction: asc}   # earlier milestone first
+  - {signal: iteration,    direction: asc}   # earlier iteration first
+  - {signal: issue_number, direction: asc}   # lower issue number (created earlier)
+  - {signal: label_weight, direction: desc}  # higher label weight (final tie-break)

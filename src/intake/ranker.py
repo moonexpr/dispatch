@@ -52,40 +52,60 @@ import tuning             # noqa: E402
 DEFAULT_MODEL = os.environ.get("RANKER_MODEL", "haiku")
 
 # --------------------------------------------------------------------------
-# Selection priority weights (deterministic ordering among ready issues)
+# Selection priority weights + sort precedence (deterministic ordering among
+# ready issues)
 # --------------------------------------------------------------------------
-# Data-driven: the weights live in app/config/selection-weights.yml (read via
-# the engine.filesys facade) so they can be retuned without touching Python
-# (override path via DISPATCH_SELECTION_WEIGHTS). A missing/corrupt file falls
-# back to these in-code defaults, mirroring the repo label scheme (Unscheduled
-# -> Draft -> Candidate -> Release) with Blocker on top.
-_WEIGHTS_DEFAULTS: Dict[str, Any] = {
-    "label_weights": {"blocker": 4, "release": 3, "candidate": 2,
-                      "draft": 1, "unscheduled": 0},
-    "feature_labels": ["epic", "feature"],
+# Data-driven: the values AND the tunable sort precedence live in
+# app/config/selection-weights.yml (read via the engine.filesys facade) so they
+# can be retuned without touching Python (override path via
+# DISPATCH_SELECTION_WEIGHTS). Per #142's pattern, the committed YAML is the
+# single source of the policy VALUES; the in-code skeleton below carries only the
+# structural SHAPE so a missing/corrupt file still yields a usable, ordering-
+# stable pipeline (fail-safe at runtime) — it deliberately does NOT duplicate the
+# values. The dependency-depth primary key (foundational-first) is a HARD
+# correctness constraint hard-wired in priority_key, never expressed in the spec.
+_WEIGHTS_SKELETON: Dict[str, Any] = {
+    # Content-free skeleton: empty label table (every label weighs 0) and no
+    # feature labels — a usable, deterministic shape, not the real policy values.
+    "label_weights": {},
+    "feature_labels": [],
+    # Minimal spec-driven precedence sufficient to keep ordering total + stable
+    # if the config is absent: issue number, then label weight (the same relative
+    # order the committed file uses, sans milestone/iteration which need no shape).
+    "sort": [
+        {"signal": "feature_last", "direction": "asc"},
+        {"signal": "milestone", "direction": "asc"},
+        {"signal": "iteration", "direction": "asc"},
+        {"signal": "issue_number", "direction": "asc"},
+        {"signal": "label_weight", "direction": "desc"},
+    ],
 }
 # Default location relative to the app dir; an absolute DISPATCH_SELECTION_WEIGHTS
 # override is honoured as-is by engine.filesys.resolve.
 _WEIGHTS_REL = "config/selection-weights.yml"
 
 
-def _load_weights() -> "tuple[Dict[str, int], frozenset]":
+def _load_weights() -> "tuple[Dict[str, int], frozenset, tuple]":
     data: Dict[str, Any] = {}
     try:                                       # missing file / no yaml / parse error
         path = os.environ.get("DISPATCH_SELECTION_WEIGHTS") or _WEIGHTS_REL
         data = _filesys.read_yaml(path)
     except Exception:
         data = {}
-    lw = dict(_WEIGHTS_DEFAULTS["label_weights"])
+    lw = dict(_WEIGHTS_SKELETON["label_weights"])
     lw.update({str(k).lower(): int(v)
                for k, v in (data.get("label_weights") or {}).items()})
     fl = frozenset(str(s).lower()
                    for s in (data.get("feature_labels")
-                             or _WEIGHTS_DEFAULTS["feature_labels"]))
-    return lw, fl
+                             or _WEIGHTS_SKELETON["feature_labels"]))
+    # Sort precedence: file spec wins; fall back to the skeleton's stable shape.
+    spec_raw = data.get("sort") or _WEIGHTS_SKELETON["sort"]
+    spec = tuple((str(e["signal"]), str(e.get("direction", "asc")).lower())
+                 for e in spec_raw)
+    return lw, fl, spec
 
 
-LABEL_WEIGHT, FEATURE_LABELS = _load_weights()
+LABEL_WEIGHT, FEATURE_LABELS, SORT_SPEC = _load_weights()
 
 
 def _label_weight(labels: List[str]) -> int:
@@ -123,25 +143,42 @@ def _seq_key(val: Optional[str]):
     return (1, 0, nums[0], val)
 
 
+# Spec-driven signal extractors. The matchers/extractors stay in Python; only the
+# ORDERING/precedence over them is data (SORT_SPEC, from selection-weights.yml).
+# Each returns a comparable value; "desc" entries are negated in priority_key.
+# Note _seq_key tuples are never negated (a tuple has no unary minus) — every
+# milestone/iteration entry is "asc", which is the only meaningful direction for
+# an earliest-first structured key.
+_SIGNALS: Dict[str, Any] = {
+    "feature_last": lambda item, n: _is_feat(item),
+    "milestone":    lambda item, n: _seq_key(item.get("milestone")),
+    "iteration":    lambda item, n: _seq_key(item.get("iteration")),
+    "issue_number": lambda item, n: n,
+    "label_weight": lambda item, n: _label_weight(item.get("labels") or []),
+}
+
+
 def priority_key(item: Dict[str, Any], graph) -> tuple:
     """Deterministic selection-priority sort key (ascending).
 
-    Order: dependency depth (foundational first — a correctness constraint),
-    then leaves before features, earlier milestone, earlier iteration, then
-    issue number (creation order = foundational-first among equals: the earliest
-    issue is the foundation, not a late leaf that happens to carry a high-weight
-    label). Label weight (Blocker > Release > Candidate > Draft > Unscheduled) is
-    the final tie-break only.
+    The PRIMARY key is dependency depth (foundational first) — a hard correctness
+    constraint, hard-wired here and never tunable. The remaining keys are built by
+    interpreting SORT_SPEC (app/config/selection-weights.yml: sort), an ordered
+    list of {signal, direction} entries; earlier entries dominate. Today's spec
+    yields: leaves before features, earlier milestone, earlier iteration, then
+    issue number (creation order = foundational-first among equals), with label
+    weight (Blocker > Release > Candidate > Draft > Unscheduled) as the final
+    tie-break only. "desc" negates the extracted value.
     """
     n = int(item["number"])
-    return (
-        graph.depth.get(n, 0),
-        _is_feat(item),
-        _seq_key(item.get("milestone")),
-        _seq_key(item.get("iteration")),
-        n,
-        -_label_weight(item.get("labels") or []),
-    )
+    keys: List[Any] = [graph.depth.get(n, 0)]   # hard-wired foundational-first primary
+    for signal, direction in SORT_SPEC:
+        extract = _SIGNALS.get(signal)
+        if extract is None:                      # unknown signal -> skip (fail-safe)
+            continue
+        val = extract(item, n)
+        keys.append(-val if direction == "desc" else val)
+    return tuple(keys)
 
 SYSTEM_PROMPT = """\
 You are a software project manager analyzing a list of GitHub issues.
