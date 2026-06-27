@@ -150,6 +150,16 @@ class ExecutionVisitor(StageVisitor):
                 "confidence": conf,
             }
         )
+        # Authoring-engine seam (Phase 2, DEFAULT OFF). When DISPATCH_ENGINE is
+        # `baseworkflow`, run a BaseWorkflow over the Job Request and fold its
+        # authored orchestration_script / work_plan back in. Fail-safe: on any
+        # error the request is returned unchanged. The default `visitor` path is
+        # byte-for-byte unchanged.
+        if common.env("DISPATCH_ENGINE", "visitor") == "baseworkflow":
+            from .baseworkflow_bridge import author_via_baseworkflow
+
+            ctx.job_request = author_via_baseworkflow(ctx.job_request)
+
         # Run-ledger: the architect emitted the work order for this issue.
         common.ledger_emit("work-order", num, "{}")
         # Stage gate (E2-2/#31): dump work order + job request under --until.

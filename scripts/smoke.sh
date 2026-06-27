@@ -1561,6 +1561,17 @@ grep -qF "pipeline.env.example" "$RB" && pass "RUNBOOK references pipeline.env.e
 # MAP at the top of the §7 region: no two §7.x sections may share a number.
 # Gaps are allowed; only duplicates fail. This guard lets parallel pillar
 # issues add §7.x sections without silently colliding.
+section "§7.29 baseworkflow seam (Phase 2): DISPATCH_ENGINE authoring bridge (offline, dry-run)"
+# Runnable, self-asserting unit module (no pytest; exit 0 = pass). Proves the
+# additive, flag-gated, fail-safe seam: enrich (dry-run, no model call), fail-safe
+# returns the original, and default (visitor) flag-off leaves the request untouched.
+if PIPELINE_DRY_RUN=1 python3 "${ROOT}/src/orchestration/test_baseworkflow_bridge.py" >/dev/null 2>&1; then
+  pass "baseworkflow_bridge unit suite green (enrich + fail-safe + default-off)"
+else
+  fail "baseworkflow_bridge unit suite failed"
+fi
+
+# ---------------------------------------------------------------------------
 section "§7 section-numbering authority — duplicate §7.x id guard (smoke-sections-v1)"
 # Duplicated values from a newline-delimited list on stdin (prints nothing if none).
 dup_ids() { sort | uniq -d; }

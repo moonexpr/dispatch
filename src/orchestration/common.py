@@ -113,6 +113,12 @@ _default("CLASSIFIER_OFFLINE", "")
 # Engineer backend (live-path requirement; empty in tests/dry-run).
 _default("ENGINEER_BIN", "")
 
+# Authoring engine for the workorder stage (Phase 2 seam). ``visitor`` (default)
+# keeps the historical visitor-built Job Request untouched; ``baseworkflow``
+# additionally runs a BaseWorkflow over it and folds the authored
+# orchestration_script / work_plan into the request. Read live at call time.
+_default("DISPATCH_ENGINE", "visitor")
+
 LEDGER_PY = os.environ.get("LEDGER_PY", str(PIPELINE_ROOT / "src" / "ledger" / "ledger.py"))
 PREP_PY = os.environ.get("PREP_PY", str(PIPELINE_ROOT / "src" / "architect" / "prep.py"))
 
