@@ -490,11 +490,14 @@ if [[ -n "$tickdir" && -f "$tickdir/job-request.json" ]]; then
   pass "job-request.json dumped"
   if python3 - "$tickdir/job-request.json" <<'PY'
 import json, sys
-REQ = {"job_id", "issue", "repo", "title", "body", "route", "scope", "confidence"}
+# The dumped Job Request is the strict v1 seam projection: the job fields + the
+# schema_version stamp (schemas/job-request.v1.json, issue #143).
+REQ = {"schema_version", "job_id", "issue", "repo", "title", "body", "route", "scope", "confidence"}
 ROUTE = {"gen-local", "gen-default", "gen-frontier"}; SCOPE = {"xs", "s", "m", "l"}
 j = json.load(open(sys.argv[1]))
 errs = []
 if set(j) != REQ: errs.append(f"keys differ: {sorted(set(j) ^ REQ)}")
+if j.get("schema_version") != 1: errs.append("schema_version must be 1")
 if not isinstance(j.get("issue"), int): errs.append("issue not int")
 if j.get("route") not in ROUTE: errs.append("route invalid")
 if j.get("scope") not in SCOPE: errs.append("scope invalid")
@@ -1596,6 +1599,18 @@ if PIPELINE_DRY_RUN=1 python3 "${ROOT}/src/orchestration/test_baseworkflow_bridg
   pass "baseworkflow_bridge unit suite green (enrich + fail-safe + visitor-fallback)"
 else
   fail "baseworkflow_bridge unit suite failed"
+fi
+
+# ---------------------------------------------------------------------------
+section "§7.30 frozen architect↔worker seam (#143): WorkOrder/Invoice v1 schemas + golden fixtures"
+# Runnable, self-asserting unit module (no pytest; exit 0 = pass). Proves the
+# v1 schemas are valid, the golden fixtures validate, job-request.v1 is a strict
+# projection of work-order.v1, and a PRODUCED Work Order + Invoice validate on the
+# live path (not just the --from replay bridge).
+if PIPELINE_DRY_RUN=1 python3 "${ROOT}/src/orchestration/test_seam.py" >/dev/null 2>&1; then
+  pass "seam unit suite green (v1 schemas + goldens + produced-artifact validation)"
+else
+  fail "seam unit suite failed"
 fi
 
 # ---------------------------------------------------------------------------
