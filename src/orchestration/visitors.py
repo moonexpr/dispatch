@@ -308,7 +308,7 @@ class ExecutionVisitor(StageVisitor):
             if pr_number:
                 common.gh_mutate(
                     "pr", "comment", pr_number, "--body",
-                    f"**Engineer invoice** (route: `{route_used}`): {summary}",
+                    common.format_invoice_comment("completed", summary, route_used=route_used),
                 )
                 # Arm auto-merge; branch protection still requires the human tap.
                 common.gh_mutate(
