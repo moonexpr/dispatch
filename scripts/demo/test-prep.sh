@@ -282,5 +282,41 @@ fi
 rm -rf "${IDA}" "${IDB}"
 
 echo
+echo "-- 8. blocked issuance rolls back the claim (#127) — no orphan label/worktree --"
+
+# On the LIVE claim path, intake claims the issue (queued -> claimed) and creates
+# the pipeline/issue-<n> worktree BEFORE prep runs. If prep then fails safe (an
+# un-provisionable harness), the rollback must reverse BOTH so a blocked issuance
+# leaves no orphan `claimed` label and no orphan worktree/branch (which a later
+# re-claim would collide with via `git worktree add`). Driven through the real
+# claim path (devtools dispatch over the queued fixture) with the bogus-harness
+# rules from §5; dry-run, so the mutations print as DRY-RUN tokens (asserted) and
+# nothing real is touched.
+RB="$(PIPELINE_FIXTURE_ISSUES="${QFIX}" DISPATCH_WORKPLAN_RULES="${TMP}/rules-bogus.yml" \
+  bash "${PIPE}" devtools dispatch 2>&1)"
+assert_contains "intake claimed #101 before prep ran (queued -> claimed)" "${RB}" \
+  "issue edit 101 --remove-label queued --add-label claimed"
+assert_contains "prep blocked issuance for the bogus harness" "${RB}" "prep blocked issuance"
+assert_contains "block triggers the rollback (claimed -> queued)" "${RB}" \
+  "rollback: claimed -> queued"
+assert_contains "rollback releases the claim label (claimed -> queued)" "${RB}" \
+  "issue edit 101 --remove-label claimed --add-label queued"
+assert_contains "rollback removes the orphan worktree" "${RB}" \
+  "worktree remove --force"
+assert_contains "rollback deletes the orphan branch" "${RB}" \
+  "branch -D pipeline/issue-101"
+assert_not_contains "blocked issuance never dispatches the engineer" "${RB}" "engineer_dispatch"
+
+# The dispatch was dry-run, so NO real worktree/branch can have leaked either —
+# the same invariant smoke.sh §7.3 asserts, here on the blocked-issuance path.
+[[ ! -d "${ROOT}/.worktrees/issue-101" ]] && ok "no real worktree leaked on a blocked issuance" \
+                                          || bad "worktree .worktrees/issue-101 leaked despite rollback"
+if git -C "${ROOT}" rev-parse --verify --quiet "pipeline/issue-101" >/dev/null 2>&1; then
+  bad "branch pipeline/issue-101 leaked despite rollback"
+else
+  ok "no real branch leaked on a blocked issuance"
+fi
+
+echo
 echo "== HARNESS PREP: ${pass} passed, ${fail} failed =="
 [[ "${fail}" -eq 0 ]]

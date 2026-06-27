@@ -331,6 +331,11 @@ def claim_issue(ctx: TickContext) -> None:
     # Prep stage (#102): fail-safe — an un-provisionable harness blocks issuance.
     if not PrepStage().accept(_visitor, ctx):
         common.log(f"#{num} prep blocked issuance — not dispatching the engineer")
+        # #127: intake already claimed the issue + created its worktree before
+        # prep ran. Roll both back so a blocked issuance leaves no orphan
+        # `claimed` label or `pipeline/issue-<n>` worktree (which a later
+        # re-claim would collide with).
+        _visitor.rollback_intake(ctx)
         return
 
     # Halt AFTER prep, before the engineer.

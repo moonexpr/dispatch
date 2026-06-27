@@ -130,6 +130,38 @@ class ExecutionVisitor(StageVisitor):
             "-b", f"pipeline/issue-{num}",
         )
 
+    def rollback_intake(self, ctx) -> None:
+        """Undo visit_intake's claim when a later stage blocks issuance (#127).
+
+        On the live path ``visit_intake`` sets ``claimed`` and creates the
+        ``pipeline/issue-<n>`` worktree *before* prep runs. If prep then fails
+        safe (un-provisionable harness -> blocked issuance) the engineer is
+        correctly not dispatched, but without this rollback the issue is left
+        ``claimed`` with an orphan worktree/branch — which a later re-claim
+        collides with (``git worktree add`` on an existing path). This reverses
+        exactly the two mutations ``visit_intake`` made, so a blocked issuance
+        leaves no orphan label or worktree behind. Dry-run-gated like the
+        forward path (the same DRY-RUN tokens are printed, not executed).
+        """
+        num = ctx.num
+        common.log(f"#{num} rollback: claimed -> queued (issuance blocked; releasing claim)")
+        # Reverse the label transition (claimed -> queued).
+        common.gh_mutate(
+            "issue", "edit", num, "--remove-label", "claimed", "--add-label", "queued"
+        )
+        # Reverse the worktree isolation: remove the orphan worktree + its branch.
+        wt = f"{os.environ['PIPELINE_WORKTREE_ROOT']}/issue-{num}"
+        common.run(
+            "git", "-C", str(common.PIPELINE_ROOT), "worktree", "remove", "--force", wt,
+        )
+        common.run(
+            "git", "-C", str(common.PIPELINE_ROOT), "branch", "-D", f"pipeline/issue-{num}",
+        )
+        # Run-ledger: record the claim release for cross-run auditability.
+        common.ledger_emit(
+            "rollback", num, _jc({"label_before": "claimed", "label_after": "queued"})
+        )
+
     # ------------------------------------------------------------- workorder
     def visit_workorder(self, stage, ctx) -> None:
         """Build the Job Request, ledger it, dump --until artifacts."""
