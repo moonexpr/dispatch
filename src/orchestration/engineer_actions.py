@@ -77,6 +77,20 @@ except Exception:  # pragma: no cover - defensive
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Seam contract version (#143): every Invoice this module builds carries it as
+# ``schema_version`` (schemas/invoice.v1.json). Sourced from the seam single source
+# of truth — importable whether this file is run as a sibling script (engineer_sdk's
+# path bootstrap) or imported as ``src.orchestration.engineer_actions``; a literal
+# fallback keeps the standalone ENGINEER_BIN path robust if the import shape differs.
+try:
+    from .seam import SEAM_SCHEMA_VERSION as _SEAM_SCHEMA_VERSION  # type: ignore
+except Exception:  # pragma: no cover - sibling/standalone import path
+    try:
+        from seam import SEAM_SCHEMA_VERSION as _SEAM_SCHEMA_VERSION  # type: ignore
+    except Exception:
+        _SEAM_SCHEMA_VERSION = 1
+
+
 # ---------------------------------------------------------------------------
 # Config / logging (mirrors claude-engineer.sh's tunables; read lazily so tests
 # and pipeline.env overrides take effect).
@@ -151,6 +165,7 @@ def build_invoice(
     if status in ("failed", "partial"):
         errors = [summary]
     invoice: Dict[str, Any] = {
+        "schema_version": _SEAM_SCHEMA_VERSION,
         "invoice_id": f"issue-{issue}-{_utc_iso8601().replace('-', '').replace(':', '')}",
         "issue": int(issue),
         "repo": repo,

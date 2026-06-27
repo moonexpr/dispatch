@@ -32,6 +32,12 @@ from pathlib import Path
 from engine import proc
 
 from . import common
+from .seam import (
+    SEAM_SCHEMA_VERSION,
+    is_valid,
+    JOB_REQUEST_SCHEMA,
+    JOB_REQUEST_FIELDS as _JOB_REQUEST_FIELDS,
+)
 
 
 def _jc(obj) -> str:
@@ -172,6 +178,9 @@ class ExecutionVisitor(StageVisitor):
             conf = ctx.confidence
         ctx.job_request = _jc(
             {
+                # schema_version freezes the architect↔worker seam on the LIVE path
+                # (schemas/job-request.v1.json), not just the --until/--from artifact.
+                "schema_version": SEAM_SCHEMA_VERSION,
                 "job_id": f"issue-{num}",
                 "issue": int(num),
                 "repo": ctx.repo,
@@ -199,6 +208,23 @@ class ExecutionVisitor(StageVisitor):
                 "engine. It is kept only as a fallback and will not be supported in "
                 "the future; migrate to the default baseworkflow engine."
             )
+
+        # Freeze the seam on the LIVE path (#143): validate the Job Request's
+        # seam projection against schemas/job-request.v1.json BEFORE it is handed to
+        # the Engineer — not just on the --until/--from artifact bridge. The
+        # baseworkflow authoring fold above may have added internal fields
+        # (orchestration_script / work_plan / plan); those are additive and the
+        # worker ignores them, so we validate the frozen seam *projection* (the v1
+        # required fields), tolerating the enriched superset. A failure is logged,
+        # never fatal — the seam observes, it does not break the tick.
+        try:
+            _req = json.loads(ctx.job_request)
+            _proj = {k: _req[k] for k in _JOB_REQUEST_FIELDS if k in _req}
+            _err = is_valid(_proj, JOB_REQUEST_SCHEMA)
+            if _err:
+                common.warn(f"#{num} job-request: seam validation failed ({_err})")
+        except (ValueError, TypeError) as _exc:  # malformed JSON — non-fatal
+            common.warn(f"#{num} job-request: seam validation skipped ({_exc})")
 
         # Run-ledger: the architect emitted the work order for this issue.
         common.ledger_emit("work-order", num, "{}")

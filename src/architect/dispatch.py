@@ -79,6 +79,11 @@ _VERIFY_CACHE: Dict[str, str] = {}
 # side-effect: gated on DISPATCH_ARTIFACTS_DIR, it never changes stdout or
 # GitHub state, and runs under PIPELINE_DRY_RUN=1 too (observability, not a
 # mutation). The DAG dump (--dag) keeps writing at the artifacts-dir top level.
+# Seam contract version (schemas/work-order.v1.json, job-request.v1.json,
+# invoice.v1.json). Every artifact the Architect emits across the architect↔worker
+# seam carries `schema_version` so the harness + worker units can build/test against
+# the frozen contract while the Architect internals evolve behind WorkOrder v1.
+SCHEMA_VERSION = 1
 _JOB_FIELDS = ("job_id", "issue", "repo", "title", "body", "route", "scope", "confidence")
 
 
@@ -112,7 +117,9 @@ def _dump_stage_artifacts(text: str, envelope: Dict[str, Any]) -> None:
         return
     with open(os.path.join(d, "workorder.txt"), "w", encoding="utf-8") as fh:
         fh.write(text if text.endswith("\n") else text + "\n")
-    job = {k: envelope[k] for k in _JOB_FIELDS}
+    # The Job Request is the strict subset/projection of the Work Order: the job
+    # fields, stamped with the same schema_version (schemas/job-request.v1.json).
+    job = {"schema_version": SCHEMA_VERSION, **{k: envelope[k] for k in _JOB_FIELDS}}
     with open(os.path.join(d, "job-request.json"), "w", encoding="utf-8") as fh:
         json.dump(job, fh, ensure_ascii=False, indent=2)
         fh.write("\n")
@@ -292,7 +299,8 @@ def _workorder_for(item: Dict[str, Any], triage: Dict[str, Any],
                              dag=dag, issue_url=issue_url,
                              mode=mode, topic=gap["topic"],
                              characteristics=chars)
-    envelope = {**job, "issue_url": issue_url, "authorization": auth.to_dict(),
+    envelope = {"schema_version": SCHEMA_VERSION, **job, "issue_url": issue_url,
+                "authorization": auth.to_dict(),
                 "units": wplan["units"], "staffing": wplan["staffing"],
                 "characteristics": chars,
                 "mode": mode, "work_order": text}
