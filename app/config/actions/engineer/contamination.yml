@@ -1,0 +1,10 @@
+# engineer:contamination — the context-sanity gate (issue #159). Scans the branch
+# diff for operator/harness terms that leaked in but are absent from the issue
+# spec; on a leak runs ONE isolated remediation pass + re-commit, then re-scans. A
+# residual leak sets a contamination note (the deliverable is later flagged
+# needs-human and the PR annotated) — contamination surfaces, never ships silently.
+# RAW + needs_ctx. Never terminal (it annotates; it does not end the run).
+token: engineer:contamination
+kind: procedure
+bind: contamination
+raw: true

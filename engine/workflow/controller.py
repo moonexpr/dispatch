@@ -34,11 +34,14 @@ from engine.actions import (
 @dataclass
 class CompiledWorkflow:
     """The product of compiling a ``WorkflowNode``: the controller name, the
-    ordered phase names, and the compiled per-phase Control bodies."""
+    ordered phase names, the compiled per-phase Control bodies, and an optional
+    compiled ``terminal_when`` predicate (the lifecycle early-completion guard;
+    the per-phase Sequences carry their own copy, set by the CompileVisitor)."""
 
     name: str
     phase_names: List[str]
     phase_controls: List[Control] = field(default_factory=list)
+    terminal_when: Optional[Any] = None
 
 
 class YamlController(Controller):
@@ -53,18 +56,23 @@ class YamlController(Controller):
         phase_names,
         phase_controls,
         shelves: Any = None,
+        terminal_when: Optional[Any] = None,
     ) -> None:
         super().__init__(factory, shelves=shelves)
         self.name = name
         self.PHASES = tuple(phase_names)
         self._phase_controls: List[Control] = list(phase_controls)
+        # Lifecycle-level early-completion guard (None -> classic run-all). The
+        # per-phase Sequences already carry the same guard; this one short-circuits
+        # *between* phases so a terminal step in phase 1 skips phases 2..N.
+        self._terminal_when = terminal_when
 
     # -- phase assembly -----------------------------------------------------
     def _phase_steps(self) -> "list[Control]":
         return list(self._phase_controls)
 
     def body(self) -> Control:
-        return Sequence(self._phase_steps(), name="lifecycle")
+        return Sequence(self._phase_steps(), name="lifecycle", terminal_when=self._terminal_when)
 
     def phase_ord(self, name: str) -> Optional[int]:
         """1-based ordinal of a phase in this workflow's phase list, or None."""
@@ -76,7 +84,8 @@ class YamlController(Controller):
         o = self.phase_ord(until) if until else None
         if o:
             steps = steps[:o]
-        return Statechart(root=compile_node(Sequence(steps, name="lifecycle"), self.name))
+        return Statechart(root=compile_node(
+            Sequence(steps, name="lifecycle", terminal_when=self._terminal_when), self.name))
 
     def run(self, payload: Any = None, ctx: Optional[Context] = None, *, until: str = "") -> Result:
         if ctx is None:

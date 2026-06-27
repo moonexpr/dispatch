@@ -1,0 +1,8 @@
+# engineer:finalize — the happy-path terminal step: build the `completed` Invoice
+# (or `needs-human` when the contamination gate left a residual note) and place it
+# on deliverables.invoice. RAW + needs_ctx. The last step of the lifecycle; its
+# Result value IS the Invoice the entrypoint emits.
+token: engineer:finalize
+kind: procedure
+bind: finalize
+raw: true

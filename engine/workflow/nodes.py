@@ -99,6 +99,11 @@ class WorkflowNode(Node):
     seed: Dict[str, Any] = field(default_factory=dict)
     budgets: Dict[str, int] = field(default_factory=dict)
     admin_spec_split: float = 0.5
+    # Optional declarative early-completion: a registered predicate name. When a
+    # step completes *successfully* and this predicate admits its Result, the whole
+    # lifecycle completes there (the Sequence ``terminal_when`` primitive). Lets a
+    # YAML workflow express conditional early-exit without a control-flow node.
+    terminal_when: Optional[str] = None
 
     def accept(self, visitor: Any) -> Any:
         return visitor.visit_workflow(self)

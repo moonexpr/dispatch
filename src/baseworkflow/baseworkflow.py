@@ -89,6 +89,7 @@ class BaseWorkflow(YamlController):
             phase_names=compiled.phase_names,
             phase_controls=compiled.phase_controls,
             shelves=shelves,
+            terminal_when=compiled.terminal_when,
         )
         self.job = dict(job)
         self.triage = dict(triage)

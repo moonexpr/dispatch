@@ -134,6 +134,7 @@ def parse_document(doc: Dict[str, Any], manifests: Dict[str, ActionManifest], *,
         seed=dict(doc.get("seed") or {}),
         budgets=dict(doc.get("budgets") or {}),
         admin_spec_split=float(doc.get("admin_spec_split", 0.5)),
+        terminal_when=(str(doc["terminal_when"]) if doc.get("terminal_when") else None),
     )
 
 

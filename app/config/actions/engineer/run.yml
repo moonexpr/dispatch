@@ -1,0 +1,11 @@
+# engineer:run — the one agentic step. An INFERENCE: under the live EngineerFactory
+# its runner drives the `claude` agent on the Claude subscription (CLI default; set
+# ENGINEER_BACKEND=sdk for the Agent SDK) against the issue prompt (input.setup),
+# in the clone; under a MockActionFactory the registered `engineer_run` oracle
+# stands in deterministically. Either way the runner records result text + token
+# usage on the shared shelf for the judge step. RAW: self-manages shelf I/O.
+token: engineer:run
+kind: inference
+bind: engineer_run
+raw: true
+fmt: text

@@ -1,0 +1,47 @@
+# engineer.yml — the SDK Engineer unit-of-work, expressed as configuration.
+#
+# One Job Request -> one Invoice, as a statechart. This is the YAML form of what
+# the old engineer_sdk.py::_live() did by hand: clone the target repo, run the
+# (agentic) engineering pass, judge + commit the result, gate it for context
+# contamination, push the branch and open ONE PR. The *structure* lives here; the
+# *implementations* are registered binds in src (engineer_actions.py), composed by
+# the namespaced tokens below. End users edit this file + the action interface
+# files — no Python. Validate with:
+#   python3 -m engine.workflow app/config/engineer.yml \
+#     --registry src.orchestration.engineer_actions:build_registry
+name: engineer
+
+uses:
+  - actions/engineer/*.yml        # #base-style include of the engineer action files
+
+inputs: [job, setup]              # seeded onto the input shelf at run time by src
+
+# Declarative early-exit: any step may complete the whole lifecycle by returning a
+# *terminal* Result (a finished Invoice). engineer_terminal is the registered
+# predicate that recognises one. This is how the four Invoice outcomes are modelled
+# without a branch node — a failed clone/branch/push, a backend error/timeout, an
+# empty diff (needs-human), or a PR-create failure (partial) ends the run with its
+# Invoice; the happy path falls through to engineer:finalize.
+terminal_when: engineer_terminal
+
+phases:
+
+  # prepare — fresh clone of the TARGET repo (never this checkout) + issue branch.
+  prepare:
+    - engineer:clone
+    - engineer:branch
+
+  # implement — the one agentic step: run the engineering backend (claude on the
+  # subscription; CLI default, SDK opt-in) against the issue, in the clone.
+  implement:
+    - engineer:run
+
+  # deliver — the SCRIPT (never the model) owns git/gh: judge + commit the work,
+  # run the context-sanity gate, push the branch, open ONE PR, and build the
+  # completed/needs-human Invoice.
+  deliver:
+    - engineer:judge
+    - engineer:contamination
+    - engineer:push
+    - engineer:open_pr
+    - engineer:finalize

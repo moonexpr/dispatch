@@ -1,0 +1,8 @@
+# engineer:open_pr — open ONE PR whose body restates the acceptance criteria and
+# carries `Closes #<n>` (GitHub auto-closes the issue on merge). RAW + needs_ctx.
+# Terminal `partial` Invoice if the branch pushed but PR creation failed (work done,
+# no PR to arm-merge). Never merges; never pushes to main (HANDOFF §5.7).
+token: engineer:open_pr
+kind: procedure
+bind: open_pr
+raw: true

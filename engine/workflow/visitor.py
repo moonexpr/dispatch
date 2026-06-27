@@ -87,18 +87,24 @@ class CompileVisitor(WorkflowVisitor):
         self.factory = factory
         self.registry = registry
         self.budgets: Dict[str, int] = {}
+        self.terminal: Optional[Callable[[Any, Any], bool]] = None
 
     def visit_workflow(self, node: Any) -> CompiledWorkflow:
         self.budgets = dict(node.budgets or {})
+        # Compile the optional declarative early-completion predicate first, so the
+        # per-phase Sequences built below can carry it (and the lifecycle too).
+        tw = getattr(node, "terminal_when", None)
+        self.terminal = compile_predicate(tw, self.registry) if tw else None
         phase_controls = [self.visit(p) for p in node.phases]
         return CompiledWorkflow(
             name=node.name,
             phase_names=[p.name for p in node.phases],
             phase_controls=phase_controls,
+            terminal_when=self.terminal,
         )
 
     def visit_phase(self, node: Any) -> Sequence:
-        return Sequence([self.visit(s) for s in node.steps], name=node.name)
+        return Sequence([self.visit(s) for s in node.steps], name=node.name, terminal_when=self.terminal)
 
     def visit_sequence(self, node: Any) -> Sequence:
         return Sequence([self.visit(s) for s in node.steps], name=node.name)
@@ -193,6 +199,17 @@ class ValidateVisitor(WorkflowVisitor):
     def visit_workflow(self, node: Any) -> List[ValidationError]:
         if not node.phases:
             self._err(node.name, "workflow has no phases")
+        tw = getattr(node, "terminal_when", None)
+        if tw and self.registry is not None:
+            try:
+                ast = parse_predicate(tw)
+            except PredicateError as exc:
+                self._err(f"{node.name}.terminal_when", f"bad predicate {tw!r}: {exc}")
+            else:
+                pv = PredicateValidator(self.registry)
+                pv.visit(ast)
+                for nm in pv.errors:
+                    self._err(f"{node.name}.terminal_when", f"unknown predicate {nm!r}")
         seen = set()
         for p in node.phases:
             if p.name in seen:

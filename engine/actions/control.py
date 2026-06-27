@@ -88,18 +88,44 @@ def _child_path(path: str, step: Step, index: int) -> str:
 @dataclass
 class Sequence(Control):
     """OR-superstate: children run one at a time, wired by ``done`` completion
-    transitions (last -> ``@done``); any child's ``error`` routes to ``@error``."""
+    transitions (last -> ``@done``); any child's ``error`` routes to ``@error``.
+
+    ``terminal_when`` is an optional early-completion predicate: when a child
+    completes *successfully* and the predicate admits its Result, the whole
+    Sequence completes there (-> ``@done``) carrying that Result, instead of
+    advancing to the next child. It compiles to a guarded ``done`` edge ranked
+    *before* the unguarded ``done -> next`` edge — the same priority-ordered
+    guarded-``EV_DONE`` technique a ``Loop`` uses for its stop edge — so a step
+    can short-circuit the sequence with a non-error *terminal* result (e.g. a
+    pipeline that has already decided its outcome and should not run later
+    steps). With ``terminal_when`` None this is the classic run-all sequence."""
 
     steps: List[Step]
     name: str = "sequence"
+    terminal_when: Optional[Predicate] = None
 
     def compile(self, path: str) -> State:
         children = [compile_node(s, _child_path(path, s, i)) for i, s in enumerate(self.steps)]
+        terminal = self.terminal_when
+
+        def terminal_guard(result: Result, ctx: Context) -> bool:
+            return bool(terminal(result, ctx)) if terminal is not None else False
+
         transitions: List[Transition] = []
         for i, st in enumerate(children):
             transitions.append(
                 Transition(source=st.id, event=EV_ERROR, target=T_ERROR, guard_name="error")
             )
+            # Ranked first among this child's ``done`` edges: an enabled terminal
+            # guard completes the sequence here. Unset (None) -> guard is always
+            # False, so the classic ``done -> next`` edge below always wins.
+            if terminal is not None:
+                transitions.append(
+                    Transition(
+                        source=st.id, event=EV_DONE, target=T_DONE,
+                        guard=terminal_guard, guard_name="terminal",
+                    )
+                )
             nxt = children[i + 1].id if i + 1 < len(children) else T_DONE
             transitions.append(
                 Transition(source=st.id, event=EV_DONE, target=nxt, guard_name="done")

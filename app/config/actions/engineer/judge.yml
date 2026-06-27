@@ -1,0 +1,9 @@
+# engineer:judge — the SCRIPT (never the model) judges the engineering pass and
+# owns the commit. Commits any leftover changes (no-op if the agent already
+# committed), then decides by commits AHEAD of the base. RAW + needs_ctx. Terminal
+# outcomes: `failed` if the backend reported an error; `needs-human` if the diff is
+# empty (vague / out-of-scope). Otherwise records shared.scope_actual and continues.
+token: engineer:judge
+kind: procedure
+bind: judge
+raw: true

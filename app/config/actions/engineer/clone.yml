@@ -1,0 +1,9 @@
+# engineer:clone — fresh, shallow clone of the TARGET repo under
+# PIPELINE_WORKTREE_ROOT (never this dispatch checkout), with retry on transient
+# network failure. RAW + needs_ctx: the body self-manages its shelf I/O (reads the
+# run parameters from input.setup, writes shared.clone_dir / shared.default_branch).
+# On a clone failure it returns a terminal `failed` Invoice (engineer_terminal).
+token: engineer:clone
+kind: procedure
+bind: clone
+raw: true

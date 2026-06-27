@@ -1,0 +1,6 @@
+# engineer:branch — create the pipeline/issue-<n> working branch in the clone.
+# RAW + needs_ctx. Terminal `failed` Invoice if the branch cannot be created.
+token: engineer:branch
+kind: procedure
+bind: branch
+raw: true

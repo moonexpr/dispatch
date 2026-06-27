@@ -110,4 +110,5 @@ def compile_workflow(src: Any, *, registry: TokenRegistry, factory: Any, shelves
         phase_names=compiled.phase_names,
         phase_controls=compiled.phase_controls,
         shelves=shelves,
+        terminal_when=compiled.terminal_when,
     )
