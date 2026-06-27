@@ -361,6 +361,12 @@ class IssueGraph:
     depth: Dict[int, int]         # number -> longest dependency chain length
     roots: List[int]              # numbers with no dependencies, ascending
     cycles: List[int]             # numbers participating in a dependency cycle
+    # number -> sorted list of referenced blockers that are NOT in this window
+    # (outside the fetch limit, in another repo, or already closed). These edges
+    # have no in-window node to point at, so they are absent from `deps`; the
+    # dispatch gate must still treat any issue with a non-empty entry here as
+    # BLOCKED rather than silently dropping the unresolved dependency.
+    external_deps: Dict[int, List[int]] = None  # type: ignore[assignment]
 
 
 _MD_EMPHASIS = re.compile(r"[*_`]+")
@@ -398,20 +404,33 @@ def build(items: List[Dict[str, Any]], *, fwd, rev) -> IssueGraph:
     # computation. Nodes are added ascending so numbers/roots/cycles come back
     # ascending — the order callers and renderers expect.
     numbers = sorted({int(i["number"]) for i in items})
+    present = set(numbers)
     builder = GraphBuilder()
     for n in numbers:
         builder.node(n)
+    # An issue may declare `depends on #r` for a blocker `r` that is NOT in this
+    # fetch window (outside the --limit, in another repo, or already closed). The
+    # generic GraphBuilder drops such an edge (no node to point at), which would
+    # leave the dependent looking foundational and let the gate dispatch it ahead
+    # of its real blocker. Record those unresolved blockers separately so the
+    # dispatch gate can treat the dependent as BLOCKED (conservative).
+    external: Dict[int, set] = {}
     for item in items:
         n = int(item["number"])
         text = f"{item.get('title', '')}\n{item.get('body', '')}"
         for r in _refs(text, fwd):   # fwd: this issue depends on #r
-            builder.edge(n, r)
+            if r in present:
+                builder.edge(n, r)
+            elif r != n:
+                external.setdefault(n, set()).add(r)
         for r in _refs(text, rev):   # rev: #r depends on this issue
             builder.edge(r, n)
     g = builder.build()             # generic graph: deps (sorted), depth, roots, cycles
 
     titles = {int(i["number"]): (i.get("title") or "") for i in items}
-    return IssueGraph(g.nodes, titles, g.deps, g.depth, g.roots, g.cycles)
+    external_deps = {n: sorted(rs) for n, rs in external.items()}
+    return IssueGraph(g.nodes, titles, g.deps, g.depth, g.roots, g.cycles,
+                      external_deps)
 
 
 # --------------------------------------------------------------------------

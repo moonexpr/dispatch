@@ -123,8 +123,16 @@ def _dispatchable(enabled: set, graph) -> set:
     Consequence: a dispatch-disabled blocker (not in `enabled`) is never in the
     surviving set, so every issue it blocks — transitively — is excluded. A
     dispatch-enabled issue blocked by a disabled one yields an empty queue.
+
+    An issue that references a blocker OUTSIDE this fetch window
+    (`graph.external_deps[n]`, e.g. a `depends on #N` whose #N is beyond the
+    --limit, in another repo, or already closed) is treated as BLOCKED: the
+    blocker is unresolved, so dispatching the dependent could bypass the very
+    ordering the gate enforces. Conservative: never dispatchable while an
+    unresolved external blocker stands.
     """
-    candidate = set(enabled)
+    external = getattr(graph, "external_deps", None) or {}
+    candidate = {n for n in enabled if not external.get(n)}
     changed = True
     while changed:
         changed = False

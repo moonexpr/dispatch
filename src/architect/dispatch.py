@@ -139,6 +139,11 @@ def _fetch(args: argparse.Namespace, gh_bin: str) -> List[Dict[str, Any]]:
         org, _, num = args.project.partition("/")
         if not org or not num:
             raise ValueError(f"--project must be ORG/NUM, got {args.project!r}")
+    # dispatch.py's --fixture is its single offline seam. It must reach the
+    # fixture argument that matches the chosen source: the project-item seam in
+    # --project mode, the repo-issue seam otherwise. Wiring it only to
+    # fixture_repo would make an offline --fixture silently dead under --project
+    # (repo is "") and fall through to a live gh fetch on a cold cache.
     items = _intake.provide_items(
         project=args.project or "",
         repo="" if args.project else repo_slug,
@@ -146,8 +151,8 @@ def _fetch(args: argparse.Namespace, gh_bin: str) -> List[Dict[str, Any]]:
         limit=args.limit,
         gh_bin=gh_bin,
         refresh=getattr(args, "refresh", False),
-        # dispatch.py's --fixture is its offline repo-array seam.
-        fixture_repo=args.fixture or "",
+        fixture_project=args.fixture or "" if args.project else "",
+        fixture_repo="" if args.project else (args.fixture or ""),
     )
     return [asdict(i) for i in items]
 
