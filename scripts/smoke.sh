@@ -117,6 +117,12 @@ section "§7.4 fix-dispatch ladder: attempt 2 -> gen-default; >3 -> operator not
 f2="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-2.json" ./pipeline devtools fix 2>&1)"
 assert_contains "attempt 2 selects gen-default" "$f2" "gen-default"
 assert_not_contains "attempt 2 does not escalate" "$f2" "needs-human"
+# #137 — the fix-ladder feeds the CI failure back as a diagnose-then-replan
+# directive (not an identical retry at a bigger tier), and the signal is no
+# longer discarded: the brief itself is surfaced for the next attempt.
+assert_contains "attempt 2 posts a rescaffold directive (#137)" "$f2" "rescaffold"
+assert_contains "attempt 2 rescaffold instructs diagnose-then-replan (#137)" "$f2" "Diagnose"
+assert_contains "attempt 2 feeds the CI failure signal back, not discarded (#137)" "$f2" "off-by-one on limit boundary"
 fc="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-over-cap.json" ./pipeline devtools fix 2>&1)"
 assert_contains "attempt >3 labels needs-human" "$fc" "needs-human"
 assert_contains "attempt >3 posts a PR comment for the operator" "$fc" "pr comment"

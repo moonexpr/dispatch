@@ -181,6 +181,11 @@ alone as in-flight work.
   issue is re-submitted to the architect for a fresh (possibly finer-grained)
   work order rather than retrying the identical order or escalating immediately;
   `needs-human` only if re-scaffolding yields no workable plan.
+- **CI fix-ladder (distinct path):** on a CI failure the fix-ladder bumps the
+  model tier **and**, per #137, posts a revised **diagnose-then-replan** directive
+  that feeds the CI failure signal back (durably on the PR thread + a run-ledger
+  `fix-rescaffold` record), so the next attempt targets the diagnosed cause rather
+  than retrying the identical work order. `fix-attempt-3 → needs-human` is the cap.
 
 Because the reaper runs first in every tick, the **manual recovery command is
 just a tick** — preview which stuck issues would be re-queued without mutating

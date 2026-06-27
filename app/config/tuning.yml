@@ -263,6 +263,7 @@ recovery:
   _engineer_failure_policy_doc: 'On engineer non-zero exit / ''failed'' status mid-tick: re-submit the
     issue to the ARCHITECT for re-scaffolding and decomposition (a fresh, possibly finer-grained work
     order) rather than retrying the identical work order or escalating immediately. Escalate to needs-human
-    only if re-scaffolding does not yield a workable plan. Distinct from the CI fix-ladder (which retries
-    CI failures) and from the reaper timeout above (which recovers silently crashed/stuck ''claimed''
-    issues).'
+    only if re-scaffolding does not yield a workable plan. Distinct from the CI fix-ladder (which, per
+    #137, now feeds the CI failure back as a revised diagnose-then-replan directive on each attempt —
+    alongside the tier escalation — rather than retrying the identical work order) and from the reaper
+    timeout above (which recovers silently crashed/stuck ''claimed'' issues).'
