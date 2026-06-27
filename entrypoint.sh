@@ -10,4 +10,8 @@ if [[ "${1:-}" == "report" ]]; then
   exec "${PYTHON_BIN:-python3}" "${ROOT}/src/reports/report.py" "$@"
 fi
 
-exec "${ROOT}/scripts/pipeline.sh" "$@"
+# Anything else: run one tick via the single Python entry. dispatch.py owns policy
+# (sets PYTHONPATH + the SDK-engineer ENGINEER_BIN default), then drives the
+# src.orchestration tick, which executes the YAML baseworkflow engine (engine/workflow).
+# Replaces the retired scripts/pipeline.sh shell launcher.
+exec "${PYTHON_BIN:-python3}" "${ROOT}/dispatch.py" "$@"
