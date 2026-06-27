@@ -148,8 +148,10 @@ for v in "${required_secrets[@]}"; do
   fi
 done
 # Reverse scan: any *_TOKEN/_KEY/_SECRET referenced in pipeline runtime files
-# must be documented. Exclude smoke.sh itself (its regex literals self-match).
-referenced="$(grep -rhoEI --exclude-dir=__pycache__ '[A-Z][A-Z0-9_]*(_TOKEN|_KEY|_SECRET)' \
+# must be documented. Exclude smoke.sh itself (its regex literals self-match)
+# and scripts/demo/rounds/ — gitignored captured run-artifacts (target output,
+# not pipeline source; e.g. a target's GEMINI_API_KEY in generated text). #126.
+referenced="$(grep -rhoEI --exclude-dir=__pycache__ --exclude-dir=rounds '[A-Z][A-Z0-9_]*(_TOKEN|_KEY|_SECRET)' \
   scripts src .github --exclude=smoke.sh 2>/dev/null | sort -u)"
 undocumented=""
 while IFS= read -r v; do
