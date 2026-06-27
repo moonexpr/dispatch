@@ -9,12 +9,13 @@ any detail this summary omits.
 
 ## Development mode (current — solo dev)
 
-While this repo is in solo development, **operator-directed (interactive) sessions
-do not open pull requests** — they commit (signed) and **merge directly to `main`**.
-The PR / branch-protection / `pipeline/issue-*` review flow is deferred until the repo
-leaves solo dev. This is an *operator-session* posture only; it does **not** relax the
-worker contract below — autonomous pipeline workers (`/implement-task`, `/fix-ci`,
-`/update-docs`) still **never merge and never push to `main`**. (Set 2026-06-16.)
+While this repo is in development, **every session works directly on `main`** —
+operator-directed *and* autonomous pipeline workers (`/implement-task`,
+`/fix-ci`, `/update-docs`) alike commit (signed) and push straight to `main`. No
+pull requests, no `pipeline/issue-*` branches, no branch protection: that
+PR-based review flow (described in **The contract** below) is **deferred until
+the repo leaves development**. Until then, `main` is the working branch.
+(Solo-dev no-PR posture set 2026-06-16; extended to all sessions 2026-06-27.)
 
 **Execution layer:** ruflo hierarchical-mesh swarm (`.claude-flow/config.yaml`,
 up to 15 agents). The coordinator picks up tasks from the ruflo memory store
@@ -23,6 +24,11 @@ Hook lifecycle events (`SubagentStart`, `SubagentStop`) drive the GitHub label
 state machine and the approval/fix-dispatch ladder.
 
 ## The contract (HANDOFF §5.7)
+
+> **Deferred during development.** The branch / PR / merge rules in this section
+> take effect only once the repo leaves development; until then, work directly on
+> `main` (see *Development mode* above). The scope, done-means, and security
+> discipline below still apply.
 
 - **One session = one issue = one branch = one PR.** Never widen scope beyond
   the issue you were handed. If the issue implies more work, note it in the PR
