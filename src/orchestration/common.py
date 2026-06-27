@@ -32,6 +32,7 @@ breaks the acceptance suite — keep them identical to the shell.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -411,6 +412,59 @@ def gh_mutate(*args: str) -> int:
     greppable dry-run line has the same token order.
     """
     return run(os.environ["GH_BIN"], *[str(a) for a in args], *gh_repo_args())
+
+
+# ------------------------- Issue / PR comment formatting -------------------
+_INVOICE_HEADER = {
+    "completed": "✅ Engineer invoice — completed",
+    "partial": "⚠️ Engineer invoice — partial",
+    "failed": "❌ Engineer invoice — failed",
+    "needs-human": "🔴 Engineer returned `needs-human`",
+}
+
+
+def format_invoice_comment(status: str, summary: str, *, route_used: str = "") -> str:
+    """A readable Markdown issue/PR comment for an engineer Invoice.
+
+    The engineer ``summary`` is the model's own (multi-paragraph) rationale; it is
+    rendered verbatim on its own lines below a status heading so its structure
+    survives — instead of being jammed onto the header line as one newline-less
+    wall of text (the old ``**…** {summary}`` form)."""
+    header = _INVOICE_HEADER.get(status, f"Engineer invoice — {status}")
+    lines = [f"### {header}", ""]
+    if route_used:
+        lines.append(f"**Route:** `{route_used}`")
+        lines.append("")
+    lines.append((summary or "").strip() or "_(no summary provided)_")
+    return "\n".join(lines)
+
+
+def format_route_comment(result_json: str) -> str:
+    """A readable routing-decision comment. Keeps the machine-findable
+    ``<!-- pipeline:route -->`` marker (so the decision stays greppable) but renders
+    the payload as a one-line summary instead of a raw JSON dump."""
+    marker = "<!-- pipeline:route -->"
+    try:
+        d = json.loads(result_json)
+    except (ValueError, TypeError):
+        return f"{marker}\nRouting decision: {result_json}"
+    if not isinstance(d, dict):
+        return f"{marker}\nRouting decision: {result_json}"
+    parts = []
+    if d.get("action"):
+        parts.append(f"`{d['action']}`")
+    if d.get("scope"):
+        parts.append(f"scope `{d['scope']}`")
+    if d.get("route"):
+        parts.append(f"route `{d['route']}`")
+    conf = d.get("confidence")
+    if conf is not None:
+        try:
+            parts.append(f"confidence {float(conf):.2f}")
+        except (TypeError, ValueError):
+            pass
+    body = " · ".join(parts) if parts else result_json
+    return f"{marker}\n**🧭 Routing decision** — {body}"
 
 
 def claude_invoke(workflow: str, args_json: str) -> int:

@@ -130,7 +130,7 @@ def intake_invoice(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
         common.log(f"#{issue}: completed — arming auto-merge")
         if pr_number:
             _mutate("pr", "comment", pr_number, "--body",
-                    f"**Engineer invoice** (route: `{route_used}`): {summary}")
+                    common.format_invoice_comment("completed", summary, route_used=route_used))
             # Arm auto-merge; branch protection still requires the human tap.
             _mutate("pr", "merge", pr_number, "--auto", "--squash",
                     "--subject", f"Closes #{issue}")
@@ -145,7 +145,7 @@ def intake_invoice(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
         _mutate("issue", "edit", issue, "--add-label", "fix-attempt-1")
         if pr_number:
             _mutate("pr", "comment", pr_number, "--body",
-                    f"**Engineer invoice ({status}):** {summary}")
+                    common.format_invoice_comment(status, summary, route_used=route_used))
         # #137 — on a failed/partial engineer result, feed the failure back as a
         # diagnose-then-replan directive (the SAME shared text the CI-failure
         # ladder posts) rather than a bare tier bump, and ledger it. attempt 1 /
@@ -163,7 +163,7 @@ def intake_invoice(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
         _mutate("issue", "edit", issue,
                 "--remove-label", "claimed", "--add-label", "needs-human")
         _mutate("issue", "comment", issue, "--body",
-                f"**Engineer returned needs-human.** {summary}")
+                common.format_invoice_comment("needs-human", summary, route_used=route_used))
     else:  # pragma: no cover — _invoice_status only emits the canonical four
         raise RuntimeError(f"intake-invoice: unknown invoice status {status!r}")
 

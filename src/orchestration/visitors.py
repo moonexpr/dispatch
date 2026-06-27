@@ -118,7 +118,7 @@ class ExecutionVisitor(StageVisitor):
         # Durable routing decision (machine-findable marker) as an issue comment.
         common.gh_mutate(
             "issue", "comment", num, "--body",
-            f"<!-- pipeline:route --> Routing decision: {ctx.result_json}",
+            common.format_route_comment(ctx.result_json),
         )
         common.gh_mutate(
             "issue", "edit", num, "--remove-label", "queued", "--add-label", "claimed"
@@ -332,7 +332,7 @@ class ExecutionVisitor(StageVisitor):
             if pr_number:
                 common.gh_mutate(
                     "pr", "comment", pr_number, "--body",
-                    f"**Engineer invoice ({status}):** {summary}",
+                    common.format_invoice_comment(status, summary),
                 )
         elif status == "needs-human":
             common.log(f"#{issue}: needs-human — escalating to operator")
@@ -342,7 +342,7 @@ class ExecutionVisitor(StageVisitor):
             )
             common.gh_mutate(
                 "issue", "comment", issue, "--body",
-                f"**Engineer returned needs-human.** {summary}",
+                common.format_invoice_comment("needs-human", summary),
             )
         else:
             print(f"architect-intake: unknown Invoice status '{status}'", file=sys.stderr)
