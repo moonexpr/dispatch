@@ -252,19 +252,28 @@ if [[ "${is_error}" == "true" ]]; then
   fail_invoice "failed" "claude reported an error on #${issue}: ${summary}"
 fi
 
-# 4) Did the model change anything?
-if [[ -z "$(git status --porcelain)" ]]; then
-  log "claude-engineer: no working-tree changes → needs-human"
-  fail_invoice "needs-human" "Engineer made no changes for #${issue} (vague or out-of-scope): ${summary}"
+# 4) Did the model change anything? Stage everything FIRST, then measure.
+#    Staging before counting is load-bearing: `git diff --numstat` (unstaged,
+#    working-tree-vs-index) does NOT include untracked new files, so an issue
+#    solved by ADDING files mis-counts as 0 lines — wrong scope, and a
+#    truly-0 count would still open an empty PR. The staged diff
+#    (`--cached`) counts newly-added files correctly.
+git add -A
+changed_lines="$(git diff --cached --numstat | awk '{a+=$1; d+=$2} END{print a+d+0}')"
+
+# No-op guard: porcelain may be non-empty for content-less changes (mode-only,
+# empty new files). Either nothing staged at all, or zero counted lines, means
+# there is no substantive work — degrade to needs-human, never an empty PR.
+if [[ -z "$(git status --porcelain)" || "${changed_lines}" -eq 0 ]]; then
+  log "claude-engineer: no substantive changes (${changed_lines} lines) → needs-human"
+  fail_invoice "needs-human" "Engineer made no substantive changes for #${issue} (vague or out-of-scope): ${summary}"
 fi
 
-changed_lines="$(git diff --numstat | awk '{a+=$1; d+=$2} END{print a+d+0}')"
 scope_actual="$(scope_from_lines "${changed_lines}")"
 
 # Commit on the worker branch. No identity override: inherit whatever git author the
 # environment configured (no synthetic 'dispatch-engineer' co-author). gpgsign off:
 # headless has no GPG TTY/pinentry.
-git add -A
 git -c commit.gpgsign=false \
     commit -q -m "$(printf 'Implement #%s: %s\n\nCloses #%s' "${issue}" "${title}" "${issue}")" \
   || fail_invoice "failed" "git commit produced no commit for #${issue}."
