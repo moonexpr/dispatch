@@ -1,0 +1,12 @@
+# A8 — bundle {work_plan, orchestration_script} and hand to the Administrator.
+# Auto-approved (a seam for a future adversarial challenge). A procedure.
+token: architect:submit
+kind: procedure
+bind: submit
+budget: architect
+interface:
+  in:
+    work_plan: deliverables.work_plan
+    orchestration_script: deliverables.orchestration_script
+  out:
+    submission: deliverables.submission

@@ -1,0 +1,11 @@
+# M6 — update online documentation on completion. A procedure; mock records the
+# doc-update note.
+token: admin:update_docs
+kind: procedure
+bind: update_docs
+budget: admin
+interface:
+  in:
+    work_plan: deliverables.work_plan
+  out:
+    docs: deliverables.docs

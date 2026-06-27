@@ -72,7 +72,7 @@ bash entrypoint.sh [OPTIONS]          # run one tick (intake → engineer → ap
   -l, --live              PIPELINE_DRY_RUN=0 — mutate GitHub (default: dry-run)
   -e, --engineer  BIN     Engineer binary (required in live mode)
   -f, --fixture   FILE    offline issue list JSON
-  -u, --until     STAGE   halt AFTER <stage> (intake|workorder|engineer|intake-invoice|closure)
+  -u, --until     STAGE   halt AFTER <stage> (intake|workorder|prep|engineer|intake-invoice|closure)
       --from      STAGE   resume AT <stage>, replaying --artifact as its input
   -a, --artifact  FILE    captured Job Request / Invoice fed to --from
   -h, --help
@@ -149,7 +149,7 @@ dispatch assembles existing engines; it builds nothing custom.
 | Session memory | ruflo hybrid memory (HNSW + file, `.claude-flow/data/`) |
 | Hook lifecycle | ruflo hooks in `.claude/settings.json` (SubagentStart/Stop, PostToolUse) |
 | Issue intake | `scripts/gh-intake.sh` → `scripts/intake-to-ruflo.sh` bridge |
-| Issue classification | Deterministic keyword classifier (`services/classifier/classify.py`) |
+| Issue classification | Deterministic keyword classifier (`src/classifier/classify.py`) |
 | Queue + state machine | GitHub Issues + labels (`scripts/bootstrap-labels.sh`) |
 | Job execution | ruflo engineer agent (or any binary speaking Job Request / Invoice JSON) |
 | CI gate | GitHub Actions (`.github/workflows/ci.yml`) |
@@ -198,7 +198,7 @@ $DISPATCH_ARTIFACTS_DIR/
 
 ```bash
 # Dump one tick's work order + job request from the offline fixture queue:
-DISPATCH_ARTIFACTS_DIR=./artifacts ./dispatch --fixture services/architect/fixtures/play-queue.json
+DISPATCH_ARTIFACTS_DIR=./artifacts ./dispatch --fixture src/architect/fixtures/play-queue.json
 ls ./artifacts/tick-*/
 ```
 
@@ -247,7 +247,7 @@ Both examples:
 ## Digest, budget & recovery
 
 Three rails make an unattended run observable and self-protecting. Each is
-local-file / offline and configured in `pipeline.env` or `services/tuning.json`;
+local-file / offline and configured in `pipeline.env` or `src/tuning.json`;
 [`RUNBOOK.md`](./RUNBOOK.md) is the operator walkthrough for all three.
 
 - **Run-ledger + digest.** Every stage transition appends one JSONL line to the
@@ -257,7 +257,7 @@ local-file / offline and configured in `pipeline.env` or `services/tuning.json`;
 - **Budget soft-cap.** The guard reconciles each tick against the Claude Code
   usage window and **auto-flips it to dry-run** past the soft-cap. Plan tier,
   the 5h window limit, and the soft-cap fraction are committed in
-  `services/tuning.json` (`budget.window`); `claude-monitor` is the usage oracle
+  `src/tuning.json` (`budget.window`); `claude-monitor` is the usage oracle
   (decision D2), and the ledger is per-job attribution.
 - **Crash reaper.** At the top of every tick the reaper re-queues issues stranded
   in `claimed` past the timeout with no open PR (`recovery.reaper_timeout_hours`,
@@ -273,13 +273,13 @@ entrypoint.sh            ← start here: a tick, or `entrypoint.sh report`
 dispatch                 ← architect work-order emitter (./dispatch --fixture …)
 RUNBOOK.md               operator guide: schedule · inspect · digest · budget · reaper
 schemas/                 invoice.json · job-request.json
-services/intake/         intake.py · pipeline.py · ranker.py · dag.py
-services/architect/      dispatch.py · resources.py (work-order generation)
-services/classifier/     classify.py (deterministic keyword triage)
-services/budget/         oracle.py · guard.py (soft-cap, claude-monitor)
-services/reports/        report.py (operator digest renderer)
-services/models/         models.py (LiteLLM / Anthropic / HF / CLI)
-services/tuning.json     selection · generation · budget.window · recovery.*
+engine/             common.py · proc.py · models.py (LiteLLM/Anthropic/HF/CLI) · dag.py (issue DAG)
+src/intake/         intake.py · pipeline.py · ranker.py
+src/architect/      dispatch.py · resources.py (work-order generation)
+src/classifier/     classify.py (deterministic keyword triage)
+src/budget/         oracle.py · guard.py (soft-cap, claude-monitor)
+src/reports/        report.py (operator digest renderer)
+src/tuning.json     selection · generation · budget.window · recovery.*
 scripts/                 gh-intake.sh · intake-to-ruflo.sh (bridge)
                          pipeline.sh · dispatch.sh · fix-dispatch.sh · closure.sh
                          architect-intake.sh · mock-engineer.sh

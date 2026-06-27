@@ -1,0 +1,58 @@
+# baseworkflow.yml — the work-unit lifecycle, expressed as configuration.
+#
+# This is the lean "population" file (Valve #base style): it composes namespaced
+# action tokens into phases. Each token is defined by its own interface-rule file
+# under actions/<namespace>/<name>.yml (pulled in by `uses:`), where the action's
+# kind, governors and I/O contract live. End users edit this file and the action
+# files — no Python. Validate with:  python -m engine.workflow app/config/baseworkflow.yml
+name: baseworkflow
+
+uses:
+  - actions/**/*.yml            # #base-style include of every action interface file
+
+inputs: [job, triage]           # provided at run time (seeded onto the input shelf)
+
+seed:                           # static input-shelf values
+  config:
+    engineering_budget: 450000
+    verify_cmd: "bash scripts/smoke.sh"
+
+budgets:                        # named budget buckets (unit = tokens, placeholder)
+  total: 1000000
+  architect: 450000
+  engineering: 450000
+  admin: 100000
+
+admin_spec_split: 0.5           # API-compat knob; does not affect the wiring
+
+phases:
+
+  # spec — the Architect's A1-A8 plus the Administrator's initial work. decompose
+  # (A3) runs before strategy (A2): the strategy resolver reads the plan.
+  spec:
+    - github:generate_work_units
+    - architect:decompose_phases
+    - architect:classify_strategy
+    - architect:select_bucket
+    - budget:compute
+    - architect:author_orchestration
+    - architect:draft_work_plan
+    - architect:submit
+    - admin:prepare_env
+    - admin:write_adversarial
+
+  # work — execute the orchestration script (a nested statechart), watched by a
+  # constrained monitor loop. The engineering budget is enforced inside the
+  # deserialized program.
+  work:
+    - loop:
+        name: M5.monitor
+        until: engineering_succeeded
+        abort_when: engineering_failed
+        max_iterations: 3
+        body: engineer:execute_orchestration
+
+  # build — the Administrator's documentation + persistence.
+  build:
+    - admin:update_docs
+    - admin:store

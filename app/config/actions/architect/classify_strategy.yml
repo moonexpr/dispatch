@@ -1,0 +1,13 @@
+# A2 — derive the A|B|C strategy (sequential | swarm | dynamic-workflow) from the
+# plan + purpose.
+token: architect:classify_strategy
+kind: inference
+bind: classify_strategy
+permission: []
+budget: architect
+interface:
+  in:
+    plan: deliverables.plan
+    purpose: deliverables.purpose
+  out:
+    strategy: deliverables.strategy

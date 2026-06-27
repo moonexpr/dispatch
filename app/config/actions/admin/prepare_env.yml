@@ -1,0 +1,14 @@
+# M1 — prepare the work environment (worktree/harness plan). A procedure; mock
+# records the deterministic prep plan (no real clone). Writes the same record to
+# deliverables.env and shared.prep.
+token: admin:prepare_env
+kind: procedure
+bind: prepare_env
+budget: admin
+interface:
+  in:
+    job: input.job
+    plan: deliverables.plan
+  out:
+    env: deliverables.env
+    prep: shared.prep

@@ -1,0 +1,15 @@
+# M4 — deserialize the orchestration script into a Program and run it (a nested
+# statechart — the depth operator). RAW + needs_factory: the body self-manages its
+# I/O and returns the program's Result (so the monitor loop sees ok/abort). The
+# permission gate (M3) sits here; the engineering budget is enforced inside the
+# deserialized program, so no budget Governor at this level.
+token: engineer:execute_orchestration
+kind: procedure
+bind: execute_orchestration
+raw: true
+permission: [Agent, Read, Edit, Bash, Write]
+interface:
+  in:
+    orchestration_script: deliverables.orchestration_script
+  out:
+    engineering_result: deliverables.engineering_result

@@ -1,0 +1,31 @@
+# models.yml — model alias/route tables (DATA; mechanism in engine/models.py).
+#
+# Maps the gen-* generation routes carried on Job Requests / Invoices to concrete
+# model ids per backend. Env vars (ANTHROPIC_*_MODEL, GEN_LOCAL_MODEL) override
+# the fallbacks at runtime — see engine/models.py:model_id_for_route. Keeping the
+# tables here lets the model lineup change without touching engine code.
+
+# gen-* route -> model alias. gen-local is intentionally absent: it is a FREE
+# VARIABLE resolved from GEN_LOCAL_MODEL (falling back to the haiku tier).
+route_to_alias:
+  gen-default:  sonnet
+  gen-frontier: opus
+
+# alias -> {env: override env var, fallback: hardcoded model id}
+anthropic:
+  haiku:  {env: ANTHROPIC_HAIKU_MODEL,    fallback: claude-haiku-4-5-20251001}
+  sonnet: {env: ANTHROPIC_DEFAULT_MODEL,  fallback: claude-sonnet-4-6}
+  opus:   {env: ANTHROPIC_FRONTIER_MODEL, fallback: claude-opus-4-8}
+
+# alias -> raw model id for the CLI --model flag
+cli_model_ids:
+  haiku:  claude-haiku-4-5-20251001
+  sonnet: claude-sonnet-4-6
+  opus:   claude-opus-4-8
+
+# alias -> LiteLLM group name (as configured in litellm.pipeline.yaml)
+litellm_aliases:
+  haiku:  haiku-tier
+  sonnet: gen-default
+  opus:   gen-frontier
+  local:  gen-local

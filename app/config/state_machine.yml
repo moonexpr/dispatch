@@ -1,0 +1,45 @@
+# state_machine.yml — the dispatch label vocabulary + lifecycle as DATA.
+#
+# The FSM *mechanism* lives in engine/structures.py; this file is the *state*
+# (HANDOFF §5.6). Keeping it here — out of the engine, out of code — lets the
+# label set and transitions change without touching Python.
+#
+# Each state carries:
+#   kind  — state (lifecycle ladder) | flag (escalation/terminal) | fix (CI ladder)
+#   color — 6-hex gh label colour          desc — gh label description
+# all_pipeline_labels() emits them ordered: kind=state, then flag, then fix.
+initial: queued
+
+states:
+  queued:              {kind: state, color: "0e8a16", desc: "Intake: ready for dispatch/classification"}
+  claimed:             {kind: state, color: "fbca04", desc: "Dispatch claimed this issue (concurrency=1 in v0)"}
+  pr-open:             {kind: state, color: "1d76db", desc: "Worker opened a PR; CI + review running"}
+  in-review:           {kind: state, color: "5319e7", desc: "Adversarial review submitted (advisory)"}
+  docs-pending:        {kind: state, color: "0052cc", desc: "Closure: docs/CHANGELOG update in progress"}
+  done:                {kind: state, color: "c2e0c6", desc: "Issue merged + closed by the pipeline"}
+  done-pending-merge:  {kind: state, color: "bfd4f2", desc: "Auto-merge armed; waiting on human approval tap"}
+  needs-human:         {kind: flag,  color: "b60205", desc: "Escalated to operator (low confidence / retry cap)"}
+  wont-do:             {kind: flag,  color: "e99695", desc: "Classifier/operator declined the work"}
+  duplicate:           {kind: flag,  color: "cccccc", desc: "Suspected duplicate; needs human confirmation"}
+  wontdo_parent_issue: {kind: flag,  color: "d4c5f9", desc: "Epic/parent container; tracks child issues, not dispatched directly"}
+  fix-attempt-1:       {kind: fix,   color: "fef2c0", desc: "CI fix attempt 1 (ladder tier: gen-local)"}
+  fix-attempt-2:       {kind: fix,   color: "fbca04", desc: "CI fix attempt 2 (ladder tier: gen-default)"}
+  fix-attempt-3:       {kind: fix,   color: "d93f0b", desc: "CI fix attempt 3 (ladder tier: gen-frontier)"}
+
+# Lifecycle edges (event-labelled). The dispatch/closure/fix stages emit the
+# label swaps directly today; this graph is the single declarative description
+# of which transitions are legal.
+transitions:
+  - {from: queued,             event: claim,     to: claimed}
+  - {from: claimed,            event: open-pr,   to: pr-open}
+  - {from: pr-open,            event: review,    to: in-review}
+  - {from: in-review,          event: docs,      to: docs-pending}
+  - {from: docs-pending,       event: close,     to: done}
+  - {from: pr-open,            event: arm-merge, to: done-pending-merge}
+  - {from: done-pending-merge, event: close,     to: done}
+  # recovery + escalation
+  - {from: claimed,            event: reap,      to: queued}
+  - {from: queued,             event: escalate,  to: needs-human}
+  - {from: queued,             event: decline,   to: wont-do}
+  - {from: queued,             event: duplicate, to: duplicate}
+  - {from: queued,             event: decompose, to: wontdo_parent_issue}

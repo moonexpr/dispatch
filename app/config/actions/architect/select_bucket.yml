@@ -1,0 +1,12 @@
+# A4 — bucket the work unit into SM(8) | MD(16) | LG(32) = K_UNITS, with rationale.
+token: architect:select_bucket
+kind: inference
+bind: select_bucket
+permission: []
+budget: architect
+interface:
+  in:
+    plan: deliverables.plan
+    triage: input.triage
+  out:
+    bucket: deliverables.bucket

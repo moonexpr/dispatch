@@ -1,0 +1,15 @@
+# A5 — DETERMINISTIC budget arithmetic: per-unit budget = ENGINEERING_BUDGET /
+# K_UNITS, plus the per-issue Authorization. A procedure (no judgment, a leaf).
+# Reads the run Context (dry-run flag) -> needs_ctx in the binding.
+token: budget:compute
+kind: procedure
+bind: compute_budget
+budget: architect
+interface:
+  in:
+    job: input.job
+    triage: input.triage
+    config: input.config
+    bucket: deliverables.bucket
+  out:
+    budget: deliverables.budget

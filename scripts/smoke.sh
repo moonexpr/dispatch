@@ -24,7 +24,7 @@ _smoke_rrdir="$(mktemp -d 2>/dev/null || mktemp -d -t smoke-rr)"
 export DISPATCH_RUN_RECORD="${_smoke_rrdir}/run-record.log"
 
 FIX="${ROOT}/scripts/fixtures"
-CLS="${ROOT}/services/classifier"
+CLS="${ROOT}/src/classifier"
 PASS=0; FAIL=0; SKIP=0
 GREEN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; DIM=$'\033[2m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
@@ -69,8 +69,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------------------
 section "§7.1 bootstrap-labels.sh idempotent (dry-run, no-op, exit 0)"
-r1="$(scripts/bootstrap-labels.sh 2>/dev/null)"; c1=$?
-r2="$(scripts/bootstrap-labels.sh 2>/dev/null)"; c2=$?
+r1="$(./pipeline devtools labels 2>/dev/null)"; c1=$?
+r2="$(./pipeline devtools labels 2>/dev/null)"; c2=$?
 [[ $c1 -eq 0 && $c2 -eq 0 ]] && pass "both runs exit 0" || fail "exit codes" "run1=$c1 run2=$c2"
 d1="$(printf '%s\n' "$r1" | grep '^DRY-RUN:')"
 d2="$(printf '%s\n' "$r2" | grep '^DRY-RUN:')"
@@ -99,7 +99,7 @@ done
 
 # ---------------------------------------------------------------------------
 section "§7.3 dry-run dispatch prints correct gh/claude calls, mutates nothing"
-disp="$(PIPELINE_FIXTURE_ISSUES="${FIX}/queued-issues.json" scripts/dispatch.sh 2>&1)"
+disp="$(PIPELINE_FIXTURE_ISSUES="${FIX}/queued-issues.json" ./pipeline devtools dispatch 2>&1)"
 assert_contains "launches engineer_dispatch for #101" "$disp" "job_id"
 assert_contains "passes the routed group (gen-default for #101)" "$disp" "gen-default"
 assert_contains "passes the issue number" "$disp" '"issue":101'
@@ -114,16 +114,16 @@ if git -C "$ROOT" rev-parse --verify --quiet "pipeline/issue-101" >/dev/null 2>&
 
 # ---------------------------------------------------------------------------
 section "§7.4 fix-dispatch ladder: attempt 2 -> gen-default; >3 -> operator notify"
-f2="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-2.json" scripts/fix-dispatch.sh 2>&1)"
+f2="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-2.json" ./pipeline devtools fix 2>&1)"
 assert_contains "attempt 2 selects gen-default" "$f2" "gen-default"
 assert_not_contains "attempt 2 does not escalate" "$f2" "needs-human"
-fc="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-over-cap.json" scripts/fix-dispatch.sh 2>&1)"
+fc="$(PIPELINE_FIXTURE_PR="${FIX}/pr-fix-attempt-over-cap.json" ./pipeline devtools fix 2>&1)"
 assert_contains "attempt >3 labels needs-human" "$fc" "needs-human"
 assert_contains "attempt >3 posts a PR comment for the operator" "$fc" "pr comment"
 assert_not_contains "attempt >3 does NOT invoke /fix-ci" "$fc" "/fix-ci"
 
 # Also exercise the label-derivation path (no explicit attempt) for robustness.
-der="$(PIPELINE_FIXTURE_PR=<(jq 'del(.attempt)' "${FIX}/pr-fix-attempt-2.json") scripts/fix-dispatch.sh 2>&1)"
+der="$(PIPELINE_FIXTURE_PR=<(jq 'del(.attempt)' "${FIX}/pr-fix-attempt-2.json") ./pipeline devtools fix 2>&1)"
 assert_contains "label-derived attempt (fix-attempt-1 -> 2) also picks gen-default" "$der" "gen-default"
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ done
 # Reverse scan: any *_TOKEN/_KEY/_SECRET referenced in pipeline runtime files
 # must be documented. Exclude smoke.sh itself (its regex literals self-match).
 referenced="$(grep -rhoE '[A-Z][A-Z0-9_]*(_TOKEN|_KEY|_SECRET)' \
-  scripts services .github --exclude=smoke.sh 2>/dev/null | sort -u)"
+  scripts src .github --exclude=smoke.sh 2>/dev/null | sort -u)"
 undocumented=""
 while IFS= read -r v; do
   [[ -z "$v" ]] && continue
@@ -155,7 +155,7 @@ done <<< "$referenced"
 
 # ---------------------------------------------------------------------------
 section "§7.6 closure.sh dry-run (success payload): auto-merge + summary"
-clo="$(PIPELINE_FIXTURE_PR="${FIX}/closure-success.json" scripts/closure.sh 2>&1)"
+clo="$(PIPELINE_FIXTURE_PR="${FIX}/closure-success.json" ./pipeline devtools closure 2>&1)"
 assert_contains "arms auto-merge (--auto)" "$clo" "--auto"
 assert_contains "squash merge" "$clo" "--squash"
 assert_contains "posts a closure summary comment" "$clo" "closure summary"
@@ -194,6 +194,11 @@ for path in sys.argv[1:]:
         errors.append(f"{name}: 'scope_actual' must be one of {SCOPE_VALUES}")
     if inv.get("route_used") not in ROUTE_VALUES:
         errors.append(f"{name}: 'route_used' must be one of {ROUTE_VALUES}")
+    # 'branch' is string-or-null (Null when no commit was made — failed/needs-human).
+    # Guards the #95 test-run finding: the schema must NOT lean on OpenAPI's
+    # `nullable`, which JSON-Schema 2020-12 ignores (so null would wrongly reject).
+    if "branch" in inv and inv["branch"] is not None and not isinstance(inv["branch"], str):
+        errors.append(f"{name}: 'branch' must be a string or null")
     cost = inv.get("cost", {})
     if not isinstance(cost, dict) or not COST_REQUIRED.issubset(cost.keys()):
         errors.append(f"{name}: 'cost' missing sub-fields {COST_REQUIRED - set(cost)}")
@@ -213,7 +218,7 @@ fi
 
 # ---------------------------------------------------------------------------
 section "§7.9 dispatch work-order emission (offline, deterministic)"
-FXQ="${ROOT}/services/architect/fixtures/play-queue.json"
+FXQ="${ROOT}/src/architect/fixtures/play-queue.json"
 wo1="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" 2>/dev/null)"; wc1=$?
 wo2="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$FXQ" 2>/dev/null)"
 [[ $wc1 -eq 0 ]] && pass "dispatch exits 0 on the fixture queue" || fail "dispatch exit" "got $wc1"
@@ -230,10 +235,10 @@ assert_contains "includes the Invoice format" "$wo1" "INVOICE FORMAT"
 assert_contains "frames issue text as untrusted data" "$wo1" "untrusted data"
 # Self-contained work order: units of work + staffing + embedded resources (the §3 enhancement).
 assert_contains "decomposes into UNITS OF WORK" "$wo1" "UNITS OF WORK"
-assert_contains "labels a unit with a <domain> <function> specialist" "$wo1" "developer tooling (shell) engineer"
+assert_contains "labels a unit with a <domain> <function> specialist" "$wo1" "backend (Python) engineer"
 assert_contains "labels the integration unit QA / test automation" "$wo1" "QA / test automation engineer"
 assert_contains "emits a STAFFING plan" "$wo1" "STAFFING"
-assert_contains "staffs one agent per unit (3 units -> 3 agents)" "$wo1" "Employ 3 agent"
+assert_contains "staffs one agent per unit (2 units -> 2 agents)" "$wo1" "Employ 2 agent"
 assert_contains "embeds resources in-band (EMBEDDED RESOURCES)" "$wo1" "EMBEDDED RESOURCES"
 assert_contains "embeds the worker contract (CLAUDE.md)" "$wo1" "Worker contract"
 assert_contains "embeds real referenced source (load_queued_issues)" "$wo1" "load_queued_issues"
@@ -260,7 +265,7 @@ assert_contains "defers low-confidence #7" "$elig" "conf 0.34"
 # into DONE CRITERIA (extract_criteria is wired into the general work-order path
 # via decompose.plan). Asserted at the extraction + render seam — no fixture-queue
 # change, so the §7.9/§7.10 ranking/root invariants above are untouched.
-ACP="${ROOT}/services/architect"
+ACP="${ROOT}/src/architect"
 dod7_9="$(python3 -c "import sys;sys.path.insert(0,'${ACP}');import decompose;print('|'.join(decompose.extract_criteria('## Definition of Done\n- ship it\n- test it\n')))")"
 [[ "$dod7_9" == "ship it|test it" ]] && pass "extract_criteria lifts a Definition of Done section" || fail "DoD extraction" "got '$dod7_9'"
 prec7_9="$(python3 -c "import sys;sys.path.insert(0,'${ACP}');import decompose;print('|'.join(decompose.extract_criteria('## Definition of Done\n- dod one\n\n## Acceptance Criteria\n- acc one\n- acc two\n')))")"
@@ -297,7 +302,7 @@ assert_contains "TEST PROCEDURE carries a Verify label" "$tp7_9" "Verify:"
 assert_contains "verify step dogfoods offline smoke" "$tp7_9" "scripts/smoke.sh"
 assert_contains "verify step is offline/dry-run" "$tp7_9" "PIPELINE_DRY_RUN=1"
 tpcount7_9="$(printf '%s\n' "$tp7_9" | grep -c 'Verify:')"
-[[ "$tpcount7_9" == "3" ]] && pass "one TEST PROCEDURE block per unit (#2 -> 3 units -> 3 blocks)" || fail "TEST PROCEDURE block count" "got $tpcount7_9"
+[[ "$tpcount7_9" == "2" ]] && pass "one TEST PROCEDURE block per unit (#2 -> 2 units -> 2 blocks)" || fail "TEST PROCEDURE block count" "got $tpcount7_9"
 # The section is gated on plan: a no-plan render omits it entirely.
 noplan7_9="$(python3 - "${ACP}" <<'PY'
 import sys
@@ -380,16 +385,16 @@ assert_contains "--issue 5 notes the unmet dependency on #2" "$i5err" "depends o
 ./dispatch --issue 999 --fixture "$FXQ" >/dev/null 2>&1; i9c=$?
 [[ $i9c -eq 3 ]] && pass "--issue with an unknown number exits 3" || fail "--issue 999 exit" "got $i9c"
 # The declarative tuning surface (the admin-editable config) is valid JSON.
-if jq -e . "${ROOT}/services/tuning.json" >/dev/null 2>&1; then
-  pass "services/tuning.json is valid JSON (the tuning surface)"
+if jq -e . "${ROOT}/src/tuning.json" >/dev/null 2>&1; then
+  pass "src/tuning.json is valid JSON (the tuning surface)"
 else
-  fail "services/tuning.json is not valid JSON"
+  fail "src/tuning.json is not valid JSON"
 fi
 rm -rf "$DAGDIR"
 
 # ---------------------------------------------------------------------------
 section "§7.11 tighten work prompt: epic decomposition + issue-derived criteria + target-aware gate (offline)"
-EPQ="${ROOT}/services/architect/fixtures/epic-queue.json"
+EPQ="${ROOT}/src/architect/fixtures/epic-queue.json"
 
 # (a) Epic decomposition: --issue <epic> emits one work order per implementable child.
 ep1="$(PIPELINE_DRY_RUN=1 ./dispatch --fixture "$EPQ" --issue 1 2>/dev/null)"; epc=$?
@@ -411,13 +416,13 @@ assert_not_contains "default selection never dispatches the [Epic] itself (no Cl
 # (c) Issue-derived DONE CRITERIA: the child's own acceptance bullets become the checklist.
 dc4="$(printf '%s\n' "$ep1" | awk '/DONE CRITERIA/{f=1;next} f&&/^# /{exit} f')"
 assert_contains "DONE CRITERIA lifts a real issue bullet, not a generic placeholder" "$dc4" "the dev server starts without errors"
-crit="$(python3 -c "import sys; sys.path.insert(0,'${ROOT}/services/architect'); import decompose; print('|'.join(decompose.extract_criteria('## Acceptance criteria\n- alpha one\n- **beta** two\n')))")"
+crit="$(python3 -c "import sys; sys.path.insert(0,'${ROOT}/src/architect'); import decompose; print('|'.join(decompose.extract_criteria('## Acceptance criteria\n- alpha one\n- **beta** two\n')))")"
 [[ "$crit" == "alpha one|beta two" ]] && pass "extract_criteria lifts bullets (markdown stripped) under an acceptance heading" || fail "extract_criteria wrong" "got '$crit'"
 
 # (d) Target-aware verify gate (verify.py): override > detection (smoke.sh / npm / make) > GENERIC.
 vout="$(python3 - "${ROOT}" <<'PY'
 import os, sys, tempfile
-sys.path.insert(0, os.path.join(sys.argv[1], "services", "architect"))
+sys.path.insert(0, os.path.join(sys.argv[1], "src", "architect"))
 import verify
 res = {}
 with tempfile.TemporaryDirectory() as d:
@@ -491,7 +496,7 @@ FXI="${FIX}/queued-issues.json"
 # (2) No-flock fallback: force flock "absent" via FLOCK_BIN; the tick must WARN
 #     (naming the missing tool) and still complete the dry-run tick unlocked.
 nf="$(FLOCK_BIN="flock-missing-shim" DISPATCH_LOCK_FILE="${LF}" \
-      bash scripts/pipeline.sh --fixture "${FXI}" 2>&1)"; nfc=$?
+      ./pipeline --fixture "${FXI}" 2>&1)"; nfc=$?
 [[ $nfc -eq 0 ]] && pass "no-flock fallback completes the tick (exit 0)" || fail "no-flock tick exit" "got $nfc"
 assert_contains "no-flock fallback WARNs, naming the missing tool" "$nf" "flock-missing-shim not on PATH"
 assert_contains "no-flock fallback still runs the dispatch body" "$nf" "pipeline: dispatch starting"
@@ -499,13 +504,13 @@ if have flock; then
   # (1) Serialization: the harness holds the lock on fd 8; a concurrent tick
   #     must skip, exit 0, and claim nothing.
   exec 8>"${LF}"; flock -n 8 || fail "harness could not acquire the test lock"
-  held="$(DISPATCH_LOCK_FILE="${LF}" bash scripts/pipeline.sh --fixture "${FXI}" 2>&1)"; hc=$?
+  held="$(DISPATCH_LOCK_FILE="${LF}" ./pipeline --fixture "${FXI}" 2>&1)"; hc=$?
   exec 8>&-   # release the test lock
   [[ $hc -eq 0 ]] && pass "contended tick exits 0 (a skipped overlap is success)" || fail "contended tick exit" "got $hc"
   assert_contains "contended tick logs the lock-held skip" "$held" "another tick holds the lock"
   assert_not_contains "contended tick claims nothing (no --add-label claimed)" "$held" "--add-label claimed"
   # (3) Clean release: the next tick acquires the lock without seeing it held.
-  freed="$(DISPATCH_LOCK_FILE="${LF}" bash scripts/pipeline.sh --fixture "${FXI}" 2>&1)"; fcd=$?
+  freed="$(DISPATCH_LOCK_FILE="${LF}" ./pipeline --fixture "${FXI}" 2>&1)"; fcd=$?
   [[ $fcd -eq 0 ]] && pass "released tick exits 0" || fail "released tick exit" "got $fcd"
   assert_not_contains "released tick does not see a held lock" "$freed" "another tick holds the lock"
   assert_contains "released tick runs the dispatch body under the lock" "$freed" "pipeline: dispatch starting"
@@ -522,7 +527,7 @@ section "§7.13 cron: crash reaper re-queues stuck 'claimed' issues past timeout
 # claiming: it re-queues issues stuck in `claimed` past DISPATCH_CLAIM_TIMEOUT_HOURS
 # with no open PR, touching only the claimed/queued pair it owns — D1 recovery only
 # (never opens, escalates, or re-dispatches in the same tick). Timeout falls back to
-# recovery.reaper_timeout_hours in services/tuning.json (operator decision #49).
+# recovery.reaper_timeout_hours in src/tuning.json (operator decision #49).
 RPD="$(mktemp -d 2>/dev/null || mktemp -d -t reap)"
 STUCK="${FIX}/claimed-stuck-issues.json"
 EMPTYQ="${RPD}/empty-queued.json"; printf '[]\n' > "${EMPTYQ}"
@@ -536,7 +541,7 @@ RPLOCK="${RPD}/tick.lock"
 reap_out="$(DISPATCH_REAPER_FIXTURE="${STUCK}" DISPATCH_NOW_OVERRIDE='2026-06-18T12:00:00Z' \
   DISPATCH_CLAIM_TIMEOUT_HOURS=4 DISPATCH_RUN_RECORD="${RPRR}" DISPATCH_ARTIFACTS_DIR="${RPD}/art" \
   DISPATCH_LOCK_FILE="${RPLOCK}" \
-  bash scripts/pipeline.sh --fixture "${EMPTYQ}" 2>&1)"; reap_rc=$?
+  ./pipeline --fixture "${EMPTYQ}" 2>&1)"; reap_rc=$?
 [[ $reap_rc -eq 0 ]] && pass "reaper tick exits 0" || fail "reaper tick exit" "got $reap_rc"
 # (1) Over-timeout, no-PR issue (#201): re-queued claimed -> queued + a provenance comment.
 assert_contains "over-timeout no-PR issue #201 is re-queued (claimed -> queued)" "$reap_out" "issue edit 201 --remove-label claimed --add-label queued"
@@ -568,7 +573,7 @@ RRFXI="${FIX}/queued-issues.json"
 # (1) A normal dry-run tick writes exactly one started + one ended record that
 #     share a tick id; the ended record names the claimed issue (#101), status 0.
 DISPATCH_RUN_RECORD="${RR}" DISPATCH_ARTIFACTS_DIR="${RRD}/art" \
-  bash scripts/pipeline.sh --fixture "${RRFXI}" >/dev/null 2>&1; trc=$?
+  ./pipeline --fixture "${RRFXI}" >/dev/null 2>&1; trc=$?
 [[ $trc -eq 0 ]] && pass "dry-run tick exits 0" || fail "dry-run tick exit" "got $trc"
 nstart="$(grep -c '^event=started ' "${RR}" 2>/dev/null || true)"; nstart="${nstart:-0}"
 nend="$(grep -c '^event=ended ' "${RR}" 2>/dev/null || true)"; nend="${nend:-0}"
@@ -586,7 +591,7 @@ assert_contains "ended record carries exit status 0" "$endline" "status=0"
 #     with NO ended record: the stuck-tick signal the E1-3 reaper / E4 ledger read.
 RR2="${RRD}/crash-record.log"
 DISPATCH_RUN_RECORD="${RR2}" DISPATCH_ARTIFACTS_DIR="${RRD}/art2" DISPATCH_CRASH_AFTER_START_TEST=1 \
-  bash scripts/pipeline.sh --fixture "${RRFXI}" >/dev/null 2>&1; ccode=$?
+  ./pipeline --fixture "${RRFXI}" >/dev/null 2>&1; ccode=$?
 [[ $ccode -ne 0 ]] && pass "crashed tick exits non-zero" || fail "crashed tick should fail" "got $ccode"
 crashrec="$(cat "${RR2}" 2>/dev/null)"
 assert_contains "crashed tick still wrote a started record" "$crashrec" "event=started"
@@ -631,19 +636,19 @@ section "§7.17 debug: --until <stage> halt-after gating in pipeline.sh (offline
 UNTILD="$(mktemp -d 2>/dev/null || mktemp -d -t until)"
 UFXI="${FIX}/queued-issues.json"
 # --until workorder: render + dump the work order, then halt before the engineer.
-ustderr="$(DISPATCH_ARTIFACTS_DIR="${UNTILD}" bash scripts/pipeline.sh --until workorder --fixture "${UFXI}" 2>&1)"; urc=$?
+ustderr="$(DISPATCH_ARTIFACTS_DIR="${UNTILD}" ./pipeline --until workorder --fixture "${UFXI}" 2>&1)"; urc=$?
 [[ $urc -eq 0 ]] && pass "--until workorder exits 0" || fail "--until workorder exit" "got $urc"
 utick="$(find "${UNTILD}" -maxdepth 1 -type d -name 'tick-*' 2>/dev/null | head -1)"
 [[ -n "$utick" && -f "$utick/workorder.txt" ]] && pass "workorder.txt dumped (workorder stage ran)" || fail "workorder.txt missing under --until workorder"
 [[ -n "$utick" && ! -f "$utick/invoice.json" ]] && pass "no invoice.json (engineer stage did NOT run — halt fired)" || fail "invoice.json present despite --until workorder"
 assert_contains "stderr logs the halt naming the workorder stage" "$ustderr" "halted after stage: workorder"
 # Negative: an unknown stage exits non-zero and lists the valid stage names.
-bogus="$(bash scripts/pipeline.sh --until bogus-stage --fixture "${UFXI}" 2>&1)"; brc=$?
+bogus="$(./pipeline --until bogus-stage --fixture "${UFXI}" 2>&1)"; brc=$?
 [[ $brc -ne 0 ]] && pass "--until bogus-stage exits non-zero" || fail "--until bogus-stage should fail" "got $brc"
-assert_contains "unknown-stage error lists the valid stages" "$bogus" "intake workorder engineer intake-invoice closure"
+assert_contains "unknown-stage error lists the valid stages" "$bogus" "intake workorder prep engineer intake-invoice closure"
 # Default (no --until) is unchanged: a plain dry-run tick runs the dispatch body
 # and does NOT emit the halt line.
-plain="$(bash scripts/pipeline.sh --fixture "${UFXI}" 2>&1)"
+plain="$(./pipeline --fixture "${UFXI}" 2>&1)"
 assert_contains "default tick still runs the dispatch body" "$plain" "pipeline: dispatch starting"
 assert_not_contains "default tick emits no halt line" "$plain" "halted after stage"
 rm -rf "${UNTILD}"
@@ -656,7 +661,7 @@ RJR="${FIX}/replay-job-request.json"
 # Canonical replay: --from engineer --artifact <job-request> --until engineer
 # runs EXACTLY the engineer stage on the captured Job Request (issue 101 maps to
 # the completed-invoice fixture), proving the artifact was the stage's input.
-rstderr="$(DISPATCH_ARTIFACTS_DIR="${RPLD}" bash scripts/pipeline.sh \
+rstderr="$(DISPATCH_ARTIFACTS_DIR="${RPLD}" ./pipeline \
   --from engineer --artifact "${RJR}" --until engineer 2>&1)"; rrc=$?
 [[ $rrc -eq 0 ]] && pass "--from engineer --until engineer exits 0" || fail "--from engineer exit" "got $rrc"
 rtick="$(find "${RPLD}" -maxdepth 1 -type d -name 'tick-*' 2>/dev/null | head -1)"
@@ -674,7 +679,7 @@ assert_contains "stderr logs the --until halt after engineer" "$rstderr" "halted
 assert_not_contains "resume skips the dispatch/intake body" "$rstderr" "dispatch starting"
 # Determinism: a second identical replay yields a byte-identical invoice dump.
 RPLD2="$(mktemp -d 2>/dev/null || mktemp -d -t replay2)"
-DISPATCH_ARTIFACTS_DIR="${RPLD2}" bash scripts/pipeline.sh --from engineer --artifact "${RJR}" --until engineer >/dev/null 2>&1
+DISPATCH_ARTIFACTS_DIR="${RPLD2}" ./pipeline --from engineer --artifact "${RJR}" --until engineer >/dev/null 2>&1
 rtick2="$(find "${RPLD2}" -maxdepth 1 -type d -name 'tick-*' 2>/dev/null | head -1)"
 if [[ -n "$rtick" && -n "$rtick2" && -f "$rtick/invoice.json" && -f "$rtick2/invoice.json" ]] \
    && diff -q "$rtick/invoice.json" "$rtick2/invoice.json" >/dev/null 2>&1; then
@@ -684,17 +689,17 @@ else
 fi
 rm -rf "${RPLD2}"
 # Negative: --from without --artifact exits non-zero and names the requirement.
-n1="$(bash scripts/pipeline.sh --from engineer 2>&1)"; n1rc=$?
+n1="$(./pipeline --from engineer 2>&1)"; n1rc=$?
 [[ $n1rc -ne 0 ]] && pass "--from without --artifact exits non-zero" || fail "--from should require --artifact" "got $n1rc"
 assert_contains "missing-artifact error names the requirement" "$n1" "requires --artifact"
 # Negative: --artifact pointing at schema-invalid JSON exits non-zero.
 BADART="${RPLD}/bad.json"
 printf '%s\n' '{"not":"a job request"}' >"${BADART}"
-n2="$(bash scripts/pipeline.sh --from engineer --artifact "${BADART}" 2>&1)"; n2rc=$?
+n2="$(./pipeline --from engineer --artifact "${BADART}" 2>&1)"; n2rc=$?
 [[ $n2rc -ne 0 ]] && pass "--from engineer with schema-invalid artifact exits non-zero" || fail "schema-invalid artifact should fail" "got $n2rc"
 assert_contains "schema-invalid error names the missing field(s)" "$n2" "missing required field"
 # Negative: unknown --from stage exits non-zero and lists the valid stages.
-n3="$(bash scripts/pipeline.sh --from bogus-stage --artifact "${RJR}" 2>&1)"; n3rc=$?
+n3="$(./pipeline --from bogus-stage --artifact "${RJR}" 2>&1)"; n3rc=$?
 [[ $n3rc -ne 0 ]] && pass "--from bogus-stage exits non-zero" || fail "--from bogus-stage should fail" "got $n3rc"
 assert_contains "unknown --from lists the valid stages" "$n3" "engineer intake-invoice closure"
 rm -rf "${RPLD}"
@@ -712,8 +717,8 @@ LINV="${ROOT}/scripts/fixtures/ledger-invoice.json"
 [[ -f "$LINV" ]] && pass "ledger-invoice.json fixture exists" || fail "ledger-invoice.json missing"
 (
   export DISPATCH_LEDGER_FILE="$LFILE" DISPATCH_TICK_ID="tick-smoke-719" PIPELINE_DRY_RUN=1
-  PIPELINE_FIXTURE_ISSUES="${FIX}/queued-issues.json" bash "${ROOT}/scripts/dispatch.sh" >/dev/null 2>&1 || true
-  bash "${ROOT}/scripts/architect-intake.sh" < "$LINV" >/dev/null 2>&1 || true
+  PIPELINE_FIXTURE_ISSUES="${FIX}/queued-issues.json" "${ROOT}/pipeline" devtools dispatch >/dev/null 2>&1 || true
+  "${ROOT}/pipeline" devtools intake-invoice < "$LINV" >/dev/null 2>&1 || true
 )
 [[ -s "$LFILE" ]] && pass "run-ledger.jsonl exists and is non-empty" || fail "run-ledger not written"
 if jq -c . "$LFILE" >/dev/null 2>&1; then pass "every ledger line is valid JSON (jq -c .)"; else fail "ledger has malformed JSONL"; fi
@@ -746,7 +751,7 @@ section "§7.20 monitoring: operator digest renderer (offline, deterministic)"
 # (§7.20 per the #51 section map — Pillar 4 monitoring range, digest-renderer
 # slot; the issue #37 body's "§7.17" predates that map, which reserves §7.17 for
 # the debug stage-gating slot. run-ledger = §7.19.)
-REP="${ROOT}/services/reports/report.py"
+REP="${ROOT}/src/reports/report.py"
 RLF="${ROOT}/scripts/fixtures/run-ledger.jsonl"
 PYR="${PYTHON_BIN:-python3}"
 dig="$("$PYR" "$REP" --ledger "$RLF" --format markdown 2>/dev/null)"; drc=$?
@@ -784,8 +789,8 @@ section "§7.21 budget: claude-monitor usage oracle (offline fixture, determinis
 # (§7.21 per the #51 section map — Pillar 3 budget range, claude-monitor slot;
 # the issue #36/#38 body's "§7.17" predates that map.) Exercised entirely via the
 # committed offline fixture — never reads ~/.claude, never invokes claude-monitor.
-ORACLE="${ROOT}/services/budget/oracle.py"
-OFX="${ROOT}/services/budget/fixtures/window-state.under-cap.json"
+ORACLE="${ROOT}/src/budget/oracle.py"
+OFX="${ROOT}/src/budget/fixtures/window-state.under-cap.json"
 [[ -f "$OFX" ]] && pass "window-state.under-cap.json fixture exists" || fail "budget oracle fixture missing"
 ostate="$(BUDGET_ORACLE_FIXTURE="$OFX" python3 "$ORACLE" 2>/dev/null)"; orc=$?
 [[ $orc -eq 0 ]] && pass "oracle exits 0 in fixture mode" || fail "oracle exit" "got $orc"
@@ -815,8 +820,8 @@ else
   skip "claude-monitor not installed — live oracle path not exercised (fixture path covered above)"
 fi
 # (6) The tuning surface carries the budget block the oracle reads.
-if jq -e '.budget.window.plan_tier and .budget.plan_limits' "${ROOT}/services/tuning.json" >/dev/null 2>&1; then
-  pass "services/tuning.json budget block carries plan_tier + plan_limits"
+if jq -e '.budget.window.plan_tier and .budget.plan_limits' "${ROOT}/src/tuning.json" >/dev/null 2>&1; then
+  pass "src/tuning.json budget block carries plan_tier + plan_limits"
 else
   fail "tuning.json budget block missing plan_tier/plan_limits"
 fi
@@ -826,8 +831,8 @@ section "§7.22 budget: per-job Invoice reconciliation (actual vs authorized, of
 # (§7.22 per the #51 section map — Pillar 3 budget range, invoice-reconcile slot;
 # the issue #39 body's "§7.18" predates that map, which reserves §7.18 for the
 # debug & harness pillar. claude-monitor oracle = §7.21, soft-cap = §7.23.)
-RECON="${ROOT}/services/budget/reconcile.py"
-LMIX="${ROOT}/services/budget/fixtures/ledger.mixed.jsonl"
+RECON="${ROOT}/src/budget/reconcile.py"
+LMIX="${ROOT}/src/budget/fixtures/ledger.mixed.jsonl"
 PYB="${PYTHON_BIN:-python3}"
 recon="$("$PYB" "$RECON" --ledger "$LMIX" 2>/dev/null)"
 # Per-job verdict: the under-budget job is not overspent; the over-budget job is.
@@ -866,9 +871,9 @@ section "§7.23 budget: pre-flight soft-cap guard throttles the tick (offline)"
 # (§7.23 per the #51 section map — Pillar 3 budget range, soft-cap slot; the
 # issue #40 body's "§7.19" predates that map. claude-monitor = §7.21, invoice
 # reconcile = §7.22.)
-GUARD="${ROOT}/services/budget/guard.py"
-OVER="${ROOT}/services/budget/fixtures/window-state.over-cap.json"
-UNDER="${ROOT}/services/budget/fixtures/window-state.under-cap.json"
+GUARD="${ROOT}/src/budget/guard.py"
+OVER="${ROOT}/src/budget/fixtures/window-state.over-cap.json"
+UNDER="${ROOT}/src/budget/fixtures/window-state.under-cap.json"
 FXQ_SC="${ROOT}/scripts/fixtures/queued-issues.json"
 PYG="${PYTHON_BIN:-python3}"
 # (1) Guard decision: over-cap -> throttle true; under-cap -> throttle false.
@@ -890,7 +895,7 @@ else fail "guard did not fail open without oracle data" "$gno"; fi
 #     safe here — nothing mutates.
 SCLEDG="${_smoke_rrdir}/throttle-ledger.jsonl"; rm -f "$SCLEDG"
 tov="$(BUDGET_ORACLE_FIXTURE="$OVER" PIPELINE_FIXTURE_ISSUES="$FXQ_SC" PIPELINE_DRY_RUN=0 \
-       DISPATCH_LEDGER_FILE="$SCLEDG" bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+       DISPATCH_LEDGER_FILE="$SCLEDG" "${ROOT}/pipeline" devtools dispatch 2>&1)"
 assert_contains "throttle: dispatch logs the soft-cap throttle (fraction + soft_cap)" "$tov" "soft-cap THROTTLE"
 assert_contains "throttle: forces PIPELINE_DRY_RUN=1 even when operator passed live" "$tov" "forcing PIPELINE_DRY_RUN=1"
 assert_not_contains "throttle: no issue is claimed (no queued->claimed transition)" "$tov" "-> claimed"
@@ -901,7 +906,7 @@ else fail "throttle ledger line missing/incomplete"; fi
 rm -f "$SCLEDG"
 # (5) Under-cap: dispatch proceeds and claims as today (reuse the §7.3 dry-run idiom).
 tun="$(BUDGET_ORACLE_FIXTURE="$UNDER" PIPELINE_FIXTURE_ISSUES="$FXQ_SC" PIPELINE_DRY_RUN=1 \
-       bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+       "${ROOT}/pipeline" devtools dispatch 2>&1)"
 assert_contains "no-throttle: under-cap tick claims normally (queued->claimed)" "$tun" "-> claimed"
 assert_not_contains "no-throttle: under-cap tick is not throttled" "$tun" "THROTTLE"
 # (6) Determinism: the guard decision is byte-identical across runs.
@@ -937,7 +942,7 @@ else
   fail "dispatch rejected snapshot"
 fi
 # Drop-in for intake.py INTAKE_FIXTURE_REPO (object labels flatten via lbl['name']).
-if INTAKE_FIXTURE_REPO="$SNAP" "${PYTHON_BIN:-python3}" "${ROOT}/services/intake/intake.py" --repo ReclaimByDesign/demo-repository 2>/dev/null | jq -e 'length>=1' >/dev/null; then
+if INTAKE_FIXTURE_REPO="$SNAP" "${PYTHON_BIN:-python3}" "${ROOT}/src/intake/intake.py" --repo ReclaimByDesign/demo-repository 2>/dev/null | jq -e 'length>=1' >/dev/null; then
   pass "snapshot is a drop-in INTAKE_FIXTURE_REPO (intake emits items)"
 else
   fail "intake rejected snapshot"
@@ -1062,7 +1067,7 @@ rm -rf "$RPD"
 # against the offline classifier's hint-token rules, not hardcoded.
 SCAT="${ROOT}/scripts/demo/scenarios"
 MUTC="${ROOT}/scripts/demo/mutate.py"
-CLSC="${ROOT}/services/classifier/classify.py"
+CLSC="${ROOT}/src/classifier/classify.py"
 PYC="${PYTHON_BIN:-python3}"
 # Resolve a scenario, classify a target issue, echo "action route".
 classify_target() {  # $1 scenario file, $2 issue number
@@ -1102,7 +1107,7 @@ section "§7.24 research-mode: architect gap-detection heuristic (offline, deter
 # predates that map, which reserves §7.19-§7.20 for monitoring. gap-detection is the
 # first research-mode slot.) detect_gap is pure/offline and returns needs_research
 # plus an enumerated reason (label / no-matching-files / low-confidence) per job.
-RGQ="${ROOT}/services/architect/fixtures/research-gap-queue.json"
+RGQ="${ROOT}/src/architect/fixtures/research-gap-queue.json"
 [[ -f "$RGQ" ]] && pass "research-gap-queue.json fixture exists" || fail "research gap fixture missing"
 # Drive detect_gap directly (mirrors how §7.2 exercises classify.py); prints one
 # "<num> <needs_research> <reason>" line per fixture issue. discover() supplies the
@@ -1110,7 +1115,7 @@ RGQ="${ROOT}/services/architect/fixtures/research-gap-queue.json"
 gap_run() {
   python3 - "$RGQ" <<'PY'
 import sys, json
-sys.path.insert(0, "services"); sys.path.insert(0, "services/architect")
+sys.path.insert(0, "src"); sys.path.insert(0, "src/architect")
 import resources, research
 for job in json.load(open(sys.argv[1])):
     v = research.detect_gap(job, resources.discover(job.get("body", ""), "."))
@@ -1130,7 +1135,7 @@ GAPTMP="$(mktemp -d 2>/dev/null || mktemp -d -t gap)"
 printf '%s\n' '{"generation":{"research":{"enabled":false}}}' > "${GAPTMP}/tuning.json"
 ks="$(DISPATCH_TUNING_FILE="${GAPTMP}/tuning.json" python3 - "$RGQ" <<'PY'
 import sys, json
-sys.path.insert(0, "services"); sys.path.insert(0, "services/architect")
+sys.path.insert(0, "src"); sys.path.insert(0, "src/architect")
 import resources, research
 q = json.load(open(sys.argv[1]))
 print("killswitch:", " ".join(str(research.detect_gap(job, resources.discover(job.get("body", ""), "."))["needs_research"]) for job in q))
@@ -1184,7 +1189,7 @@ section "§7.25 research-mode: deterministic research embed + research/impl DAG 
 # edge. So criteria 1-2 are asserted as DAG INVARIANTS (no code change to dag.py,
 # which only ever builds edges from real #<number> cross-refs), and criteria 3-6
 # (deterministic embed + gap-fill) are the implemented core.
-REQ="${ROOT}/services/architect/fixtures/research-embed-queue.json"
+REQ="${ROOT}/src/architect/fixtures/research-embed-queue.json"
 RFILE="${ROOT}/docs/research/issue-9001-research-embed-fixture-probe.md"
 [[ -f "$REQ" && -f "$RFILE" ]] && pass "research embed fixtures present (queue + committed artifact)" || fail "research embed fixtures missing"
 # Embed half (C3/C4): dispatch #9001 with research actuation ON — the committed
@@ -1204,9 +1209,9 @@ rm -rf "${RES25}"
 # Gap-fill semantics (C4) + embed (C3) at the unit level — pure, offline.
 embq="$(python3 - <<'PY'
 import sys, json
-sys.path.insert(0, "services"); sys.path.insert(0, "services/architect")
+sys.path.insert(0, "src"); sys.path.insert(0, "src/architect")
 import resources, research
-job = json.load(open("services/architect/fixtures/research-embed-queue.json"))[0]
+job = json.load(open("src/architect/fixtures/research-embed-queue.json"))[0]
 rel = "docs/research/%s.md" % research.topic_for(job)
 present = resources.has_file(".", rel)
 g = resources.gather(job, ".", research_rel=rel if present else None)
@@ -1232,8 +1237,8 @@ assert_contains "research absent  -> gap OPEN (the file is what fills it)"      
 # edge. Both are properties of dag.build over real #<number> cross-refs only.
 dagm="$(python3 - <<'PY'
 import sys
-sys.path.insert(0, "services"); sys.path.insert(0, "services/intake")
-import dag
+sys.path.insert(0, ".")
+from engine import structures as dag
 FWD = [r"depends?\s+on\s+#(\d+)", r"blocked\s+by\s+#(\d+)"]
 # (a) in-unit research = a state transition: a lone issue in research mode adds no
 #     second node and no edge (there is no second issue number to reference).
@@ -1274,7 +1279,7 @@ fi
 # (b) bootstrap-labels.sh dry-run, targeted at the demo repo via PIPELINE_REPO,
 #     would create the queued label there (the operator's live run is the same
 #     no-op-safe `--force` upsert). Network-free: PIPELINE_DRY_RUN stays on.
-seed_bl="$(PIPELINE_DRY_RUN=1 PIPELINE_REPO=ReclaimByDesign/demo-repository bash "${ROOT}/scripts/bootstrap-labels.sh" 2>&1)"
+seed_bl="$(PIPELINE_DRY_RUN=1 PIPELINE_REPO=ReclaimByDesign/demo-repository "${ROOT}/pipeline" devtools labels 2>&1)"
 assert_contains "bootstrap-labels would create the queued label" "$seed_bl" "gh label create queued"
 assert_contains "bootstrap-labels would target the demo repo" "$seed_bl" "--repo ReclaimByDesign/demo-repository"
 assert_contains "label upsert is idempotent (--force)" "$seed_bl" "--force"
@@ -1331,7 +1336,7 @@ section "§7.26 full unattended tick: lock+heartbeat+ledger+artifacts+soft-cap c
 # the issue #41 body's "§7.22" predates this map, which reserves §7.22 for the
 # Pillar-3 invoice-reconcile slot and §7.26–§7.27 for integration & runbook.)
 # This is the integration capstone (E7-1, issue #41): it drives ONE simulated cron
-# tick through the real entrypoint (scripts/pipeline.sh) over fixtures and asserts
+# tick through the real entrypoint (./pipeline) over fixtures and asserts
 # the operational (lock/heartbeat), monitoring (ledger), debug (artifact-dump) and
 # budget (soft-cap) rails COMPOSE under one shared tick id without stepping on each
 # other — and that a dry-run tick intends NO merge and NO push to main. Each rail
@@ -1346,8 +1351,8 @@ section "§7.26 full unattended tick: lock+heartbeat+ledger+artifacts+soft-cap c
 # engineer-dispatch/invoice/closure ledger lines are composed under the SAME tick
 # id via architect-intake.sh (the §7.19 idiom) — proving the full stage vocabulary
 # shares one tick without colliding, rather than faking a live engineer run.
-if [[ ! -f "${ROOT}/scripts/pipeline.sh" || ! -f "${FIX}/queued-issues.json" ]]; then
-  skip "§7.26 needs scripts/pipeline.sh + queued-issues.json fixture (an upstream rail is absent)"
+if [[ ! -f "${ROOT}/pipeline" || ! -f "${FIX}/queued-issues.json" ]]; then
+  skip "§7.26 needs ./pipeline + queued-issues.json fixture (an upstream rail is absent)"
 else
   INTD="$(mktemp -d 2>/dev/null || mktemp -d -t intg)"
   I_ART="${INTD}/art"; I_LEDG="${INTD}/run-ledger.jsonl"
@@ -1359,7 +1364,7 @@ else
   itick="$(DISPATCH_TICK_ID="${I_TID}" DISPATCH_ARTIFACTS_DIR="${I_ART}" \
            DISPATCH_LEDGER_FILE="${I_LEDG}" DISPATCH_RUN_RECORD="${I_RR}" \
            DISPATCH_LOCK_FILE="${I_LOCK}" \
-           bash "${ROOT}/scripts/pipeline.sh" --fixture "${I_FXI}" 2>&1)"; i_rc=$?
+           "${ROOT}/pipeline" --fixture "${I_FXI}" 2>&1)"; i_rc=$?
   [[ $i_rc -eq 0 ]] && pass "tick exits 0 (one full unattended tick over the fixture queue)" || fail "tick exit" "got $i_rc"
 
   # --- lock rail: acquired (the body ran under it) then released (a later tick re-acquires).
@@ -1371,7 +1376,7 @@ else
     held="$(DISPATCH_TICK_ID="${I_TID}-b" DISPATCH_LOCK_FILE="${I_LOCK}" \
             DISPATCH_ARTIFACTS_DIR="${INTD}/art-b" DISPATCH_LEDGER_FILE="${INTD}/ledger-b.jsonl" \
             DISPATCH_RUN_RECORD="${INTD}/rr-b.log" \
-            bash "${ROOT}/scripts/pipeline.sh" --fixture "${I_FXI}" 2>&1)"; hc=$?
+            "${ROOT}/pipeline" --fixture "${I_FXI}" 2>&1)"; hc=$?
     exec 8>&-
     [[ $hc -eq 0 ]] && pass "lock: contended overlapping tick exits 0 (a skipped overlap is success)" || fail "lock: contended tick exit" "got $hc"
     assert_contains "lock: overlapping tick logs the already-locked skip" "$held" "another tick holds the lock"
@@ -1379,7 +1384,7 @@ else
     freed="$(DISPATCH_TICK_ID="${I_TID}-c" DISPATCH_LOCK_FILE="${I_LOCK}" \
              DISPATCH_ARTIFACTS_DIR="${INTD}/art-c" DISPATCH_LEDGER_FILE="${INTD}/ledger-c.jsonl" \
              DISPATCH_RUN_RECORD="${INTD}/rr-c.log" \
-             bash "${ROOT}/scripts/pipeline.sh" --fixture "${I_FXI}" 2>&1)"
+             "${ROOT}/pipeline" --fixture "${I_FXI}" 2>&1)"
     assert_not_contains "lock: released after the tick (the next tick sees no held lock)" "$freed" "another tick holds the lock"
     assert_contains "lock: the released tick runs the dispatch body under the lock" "$freed" "pipeline: dispatch starting"
   else
@@ -1416,9 +1421,9 @@ else
   #     offline tick inerts the live engineer, so this composes the full stage
   #     vocabulary under one tick id without fabricating an engineer run.
   LINV="${FIX}/ledger-invoice.json"
-  if [[ -s "${I_LEDG}" && -f "${LINV}" && -f "${ROOT}/scripts/architect-intake.sh" ]]; then
+  if [[ -s "${I_LEDG}" && -f "${LINV}" && -x "${ROOT}/pipeline" ]]; then
     DISPATCH_TICK_ID="${I_TID}" DISPATCH_LEDGER_FILE="${I_LEDG}" PIPELINE_DRY_RUN=1 \
-      bash "${ROOT}/scripts/architect-intake.sh" < "${LINV}" >/dev/null 2>&1 || true
+      "${ROOT}/pipeline" devtools intake-invoice < "${LINV}" >/dev/null 2>&1 || true
     if jq -se '
         length>=3
         and all(.[]; .tick_id=="'"${I_TID}"'")
@@ -1446,7 +1451,7 @@ else
   A_ART="${INTD}/art-until"
   DISPATCH_TICK_ID="${I_TID}" DISPATCH_ARTIFACTS_DIR="${A_ART}" \
     DISPATCH_LEDGER_FILE="${INTD}/ledger-until.jsonl" DISPATCH_LOCK_FILE="${INTD}/lock-until.lock" \
-    bash "${ROOT}/scripts/pipeline.sh" --until workorder --fixture "${I_FXI}" >/dev/null 2>&1
+    "${ROOT}/pipeline" --until workorder --fixture "${I_FXI}" >/dev/null 2>&1
   A_TD="${A_ART}/${I_TID}"
   if [[ -f "${A_TD}/workorder.txt" ]]; then
     pass "artifacts: workorder.txt dumped under the tick dir"
@@ -1470,13 +1475,13 @@ else
   #     claim + records a ledger throttle event; an under-cap window proceeds + claims.
   #     The guard runs before any gh, so PIPELINE_DRY_RUN=0 on the over-cap probe is
   #     safe — it flips to dry-run before claiming (mirrors §7.23 item 3).
-  GOVER="${ROOT}/services/budget/fixtures/window-state.over-cap.json"
-  GUNDER="${ROOT}/services/budget/fixtures/window-state.under-cap.json"
+  GOVER="${ROOT}/src/budget/fixtures/window-state.over-cap.json"
+  GUNDER="${ROOT}/src/budget/fixtures/window-state.under-cap.json"
   if [[ -f "${GOVER}" && -f "${GUNDER}" ]]; then
     SC_LEDG="${INTD}/softcap-ledger.jsonl"; rm -f "${SC_LEDG}"
     sc_over="$(BUDGET_ORACLE_FIXTURE="${GOVER}" PIPELINE_FIXTURE_ISSUES="${I_FXI}" PIPELINE_DRY_RUN=0 \
                DISPATCH_TICK_ID="${I_TID}" DISPATCH_LEDGER_FILE="${SC_LEDG}" \
-               bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+               "${ROOT}/pipeline" devtools dispatch 2>&1)"
     assert_contains "soft-cap: over-cap window logs the throttle (fraction + soft_cap)" "$sc_over" "soft-cap THROTTLE"
     assert_contains "soft-cap: over-cap window forces dry-run even when operator passed live" "$sc_over" "forcing PIPELINE_DRY_RUN=1"
     assert_not_contains "soft-cap: throttled tick claims nothing (no queued->claimed)" "$sc_over" "-> claimed"
@@ -1486,7 +1491,7 @@ else
     rm -f "${SC_LEDG}"
     sc_under="$(BUDGET_ORACLE_FIXTURE="${GUNDER}" PIPELINE_FIXTURE_ISSUES="${I_FXI}" PIPELINE_DRY_RUN=1 \
                 DISPATCH_LEDGER_FILE="${INTD}/sc-under.jsonl" \
-                bash "${ROOT}/scripts/dispatch.sh" 2>&1)"
+                "${ROOT}/pipeline" devtools dispatch 2>&1)"
     assert_contains "soft-cap: under-cap window proceeds and claims normally (queued->claimed)" "$sc_under" "-> claimed"
     assert_not_contains "soft-cap: under-cap window is not throttled" "$sc_under" "THROTTLE"
   else
@@ -1541,9 +1546,9 @@ for _v in DISPATCH_ARTIFACTS_DIR DISPATCH_LEDGER_FILE DISPATCH_REAPER_ENABLED DI
     fail "env var drift (RUNBOOK vs pipeline.env.example): ${_v}"
   fi
 done
-# Plan-tier + soft-cap live in services/tuning.json (not env); the runbook must
+# Plan-tier + soft-cap live in src/tuning.json (not env); the runbook must
 # point at that surface and name the keys that set them.
-grep -qF "services/tuning.json" "$RB" && pass "RUNBOOK references services/tuning.json (tier/soft-cap surface)" || fail "RUNBOOK omits services/tuning.json"
+grep -qF "src/tuning.json" "$RB" && pass "RUNBOOK references src/tuning.json (tier/soft-cap surface)" || fail "RUNBOOK omits src/tuning.json"
 for _k in plan_tier soft_cap_fraction; do
   grep -qF "$_k" "$RB" && pass "RUNBOOK names budget key: ${_k}" || fail "RUNBOOK omits budget key: ${_k}"
 done

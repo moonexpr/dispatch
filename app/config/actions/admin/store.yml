@@ -1,0 +1,14 @@
+# M7 — persist the work plan, orchestration script, engineering result and
+# analytics. A procedure; reads the run Context (trace length) -> needs_ctx.
+token: admin:store
+kind: procedure
+bind: store
+budget: admin
+interface:
+  in:
+    work_plan: deliverables.work_plan
+    orchestration_script: deliverables.orchestration_script
+    engineering_result: deliverables.engineering_result
+    budget: deliverables.budget
+  out:
+    stored: deliverables.stored

@@ -12,7 +12,7 @@
 # (#11–#15 etc.) — satisfying #47's "seeding only adds" criterion.
 #
 # Provision the labels first (so the `queued` label exists), then seed:
-#   PIPELINE_REPO=ReclaimByDesign/demo-repository PIPELINE_DRY_RUN=0 scripts/bootstrap-labels.sh
+#   PIPELINE_REPO=ReclaimByDesign/demo-repository PIPELINE_DRY_RUN=0 ./pipeline devtools labels
 #   PIPELINE_REPO=ReclaimByDesign/demo-repository PIPELINE_DRY_RUN=0 scripts/demo/seed/seed-backlog.sh
 #
 # Dry-run is the default (§8): it prints the intended `gh issue create` calls and

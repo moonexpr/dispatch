@@ -1,0 +1,7 @@
+{
+  "_doc": "Over-cap window-state fixture for the soft-cap guard (E5-3 / #40). 80000 of an 88000-token (Max5) 5h rolling window used -> fraction 0.9091, above the operator-committed 0.80 soft cap (src/tuning.json) -> THROTTLE. Offline twin of window-state.under-cap.json; set BUDGET_ORACLE_FIXTURE to this path so the guard never reads ~/.claude or invokes claude-monitor in smoke.",
+  "plan": "max5",
+  "limit_tokens": 88000,
+  "used_tokens": 80000,
+  "window_start": "2026-06-18T15:00:00Z"
+}

@@ -9,7 +9,7 @@
 # The captured field-set is the SUPERSET both offline consumers need, so one
 # snapshot is a drop-in for both:
 #   - dispatch.sh load_queued_issues() / `./dispatch --fixture`
-#       needs number,title,body,labels                 (scripts/dispatch.sh:34)
+#       needs number,title,body,labels                 (./pipeline devtools dispatch:34)
 #   - intake.py intake_from_repo() via INTAKE_FIXTURE_REPO
 #       needs number,title,body,labels,assignees,url    (intake.py:181)
 # `labels` is preserved as the raw gh object shape ([{name,…}]) because that is

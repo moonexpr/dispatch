@@ -35,9 +35,8 @@
       "description": "completed — PR opened and CI green; failed — unrecoverable error; partial — work done but CI or tests still red; needs-human — Engineer hit an ambiguity it cannot resolve."
     },
     "branch": {
-      "type": "string",
-      "description": "Git branch the Engineer pushed work to (e.g. pipeline/issue-101). Null if no commit was made.",
-      "nullable": true
+      "type": ["string", "null"],
+      "description": "Git branch the Engineer pushed work to (e.g. pipeline/issue-101). Null if no commit was made."
     },
     "pr_number": {
       "type": ["integer", "null"],

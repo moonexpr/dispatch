@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 # and offline — it never claims, mutates, or calls a model.
 if [[ "${1:-}" == "report" ]]; then
   shift
-  exec "${PYTHON_BIN:-python3}" "${ROOT}/services/reports/report.py" "$@"
+  exec "${PYTHON_BIN:-python3}" "${ROOT}/src/reports/report.py" "$@"
 fi
 
 exec "${ROOT}/scripts/pipeline.sh" "$@"

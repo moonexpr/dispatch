@@ -14,10 +14,10 @@ command below draws on is `pipeline.env.example` (copy it to `pipeline.env`,
 which `scripts/lib/common.sh` auto-sources). Secrets live **only** in env —
 never in a command line, log, or commit.
 
-The five canonical tick stages, in execution order, are:
+The six canonical tick stages, in execution order, are:
 
 ```
-intake → workorder → engineer → intake-invoice → closure
+intake → workorder → prep → engineer → intake-invoice → closure
 ```
 
 `./entrypoint.sh [flags]` runs one tick (it forwards to `scripts/pipeline.sh`);
@@ -136,7 +136,7 @@ jq -r 'select(.stage=="closure") | "#\(.issue) \(.label_before)->\(.label_after)
 The budget guard (E5) reconciles each tick against the Claude Code usage window
 and **auto-flips the tick to dry-run** when the window is too close to the plan
 cap. The plan tier, the resolved 5-hour-window token limit, and the soft-cap
-fraction are committed in **`services/tuning.json`** under `budget.window`
+fraction are committed in **`src/tuning.json`** under `budget.window`
 (`plan_tier`, `window_token_limit`, `soft_cap_fraction`); point at a different
 file with the `DISPATCH_TUNING_FILE` env var.
 
@@ -153,7 +153,7 @@ The committed default is `max20` / `220000` / soft-cap `0.80` — i.e. a tick
 auto-throttles to dry-run once the rolling window passes 80% of 220k tokens.
 
 Per decision **D2**, the pipeline does **not** re-implement usage tracking:
-the oracle (`services/budget/oracle.py`) consumes **`claude-monitor`**
+the oracle (`src/budget/oracle.py`) consumes **`claude-monitor`**
 (`pip install claude-monitor`) as the external usage-limit truth source, while
 the dispatch run-ledger is only per-job attribution. For offline testing,
 `BUDGET_ORACLE_FIXTURE` points the oracle at a window-state JSON instead of
@@ -172,7 +172,7 @@ queued` plus a provenance comment). It is recovery only (decision **D1**): it
 never opens, escalates, or re-dispatches, and an issue with an open PR is left
 alone as in-flight work.
 
-- **Timeout:** `recovery.reaper_timeout_hours` in `services/tuning.json`
+- **Timeout:** `recovery.reaper_timeout_hours` in `src/tuning.json`
   (committed default: **4** hours). Override per-run with
   `DISPATCH_CLAIM_TIMEOUT_HOURS`.
 - **Disable:** `DISPATCH_REAPER_ENABLED=0` skips the reaper step.

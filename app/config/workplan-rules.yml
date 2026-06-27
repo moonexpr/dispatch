@@ -1,0 +1,148 @@
+# workplan-rules.yml — data-driven rules for the three work-plan characteristics
+# the Architect surfaces on every work plan (issue #95 follow-up):
+#
+#   purpose         — prototype | refactor | new-feature | research | test | …
+#                     informs the engineering HARNESS used in execution.
+#   strategy        — sequential | swarm | dynamic-workflow
+#                     informs the work-plan LAYOUT.
+#   issues_affected — the set of issue ids one plan resolves together
+#                     (purely administrative; never changes strategy/harness).
+#
+# Consumed by src/architect/purpose.py and src/architect/strategy.py.
+# Edit this file to retune classification/derivation WITHOUT touching Python.
+# Override the path with DISPATCH_WORKPLAN_RULES. A missing/corrupt file falls
+# back to equivalent in-code defaults, so the pipeline always has a usable shape.
+# All matching is case-insensitive.
+
+# ---------------------------------------------------------------------------
+# PURPOSE — what kind of work this is (drives the engineering harness).
+# ---------------------------------------------------------------------------
+purpose:
+  # Label-first: an issue label exactly matching a key here maps to that purpose.
+  # Operator-set labels always WIN over keyword inference (explicit beats implicit).
+  labels:
+    "purpose:prototype": prototype
+    "purpose:refactor": refactor
+    "purpose:new-feature": new-feature
+    "purpose:research": research
+    "purpose:test": test
+    # bare conventional labels are also honoured
+    prototype: prototype
+    refactor: refactor
+    research: research
+    test: test
+
+  # Keyword fallback: ordered; the FIRST rule with ANY matching token (searched in
+  # the lowercased "title\nbody") wins. Consulted ONLY when no purpose label is
+  # present. Keep the broad "new-feature" rule last so specific purposes win.
+  keyword_rules:
+    - purpose: research
+      any: ["investigate", "research", "spike", "explore", "prior art",
+            "feasibility", "evaluate options", "trade-off study"]
+    - purpose: test
+      any: ["add tests", "test coverage", "unit test", "smoke test",
+            "regression test", "increase coverage", "write tests", "test harness"]
+    - purpose: refactor
+      any: ["refactor", "clean up", "cleanup", "restructure", "rename",
+            "tech debt", "technical debt", "deduplicate", "simplify", "extract"]
+    - purpose: prototype
+      any: ["prototype", "proof of concept", "poc", "experiment",
+            "throwaway", "spike implementation", "mockup"]
+    - purpose: new-feature
+      any: ["add", "implement", "support", "introduce", "create", "build", "feature"]
+
+  # Fallback when neither a label nor a keyword rule matches.
+  default: new-feature
+
+  # purpose -> engineering harness (informs HOW the work runs). `harness` is the
+  # execution mode the Engineer adopts; `ref` (optional) points at the harness's
+  # source; `rationale` is rendered verbatim into the work plan's HARNESS section
+  # so the choice is always justified. `provision` (optional) names HOW the prep
+  # stage (#102) readies the harness before issuance — it MUST be one of
+  # `prep.known_provisioners` below, or the prep stage fails safe and blocks the
+  # job. When omitted it is inferred: a harness with a `setup` is `marketplace`,
+  # one without is `none` (a no-op that needs no provisioning).
+  #
+  # NEW DEVELOPMENT (new-feature + prototype) runs under the **ponytail** skill —
+  # "the lazy senior dev": write the MINIMUM code that satisfies the criteria,
+  # platform built-ins and one-liners over new deps/wrappers/components, every
+  # safety guard kept. Engage with `/plugin install ponytail@ponytail`.
+  harness:
+    new-feature:
+      harness: ponytail
+      ref: "https://github.com/DietrichGebert/ponytail"
+      setup: "/plugin marketplace add DietrichGebert/ponytail && /plugin install ponytail@ponytail"
+      provision: marketplace
+      rationale: "New development — run under the ponytail skill (the 'lazy senior dev'): write the MINIMUM code that satisfies the acceptance criteria; prefer platform built-ins and one-liners over new dependencies, wrappers, or components; keep every safety guard."
+    prototype:
+      harness: ponytail
+      ref: "https://github.com/DietrichGebert/ponytail"
+      setup: "/plugin marketplace add DietrichGebert/ponytail && /plugin install ponytail@ponytail"
+      provision: marketplace
+      rationale: "New development under uncertainty — ponytail skill: smallest viable code to learn fast; built-ins over scaffolding; mark the code provisional; keep every safety guard."
+    refactor:
+      harness: standard-guardrailed
+      provision: none
+      rationale: "Behaviour-preserving change — run the existing gate before AND after as a regression guardrail; no new behaviour."
+    research:
+      harness: research
+      provision: none
+      rationale: "No feature code — the single deliverable is a committed findings doc; the feature acceptance gate does not apply."
+    test:
+      harness: standard
+      provision: none
+      rationale: "Author tests against the existing contract — the new assertions ARE the deliverable; they must pass offline."
+
+# ---------------------------------------------------------------------------
+# STRATEGY — how the work is laid out (derived from the DAG + purpose).
+# ---------------------------------------------------------------------------
+strategy:
+  # Strategy is DERIVED, not operator-set. Resolution order (first match wins):
+  #   1. purpose in dynamic_purposes              -> dynamic-workflow
+  #   2. parallel-unit count >= swarm_min_parallel_units -> swarm
+  #   3. otherwise                                -> sequential
+  dynamic_purposes: ["research", "prototype"]
+  swarm_min_parallel_units: 2
+
+  # Per-strategy layout. `summary` is rendered into the CHARACTERISTICS block;
+  # `requires_parallelization_rationale: true` forces the work plan to carry an
+  # explicit justification for fanning out (the swarm guardrail).
+  layouts:
+    sequential:
+      summary: "One agent, ordered phases. Units (if any) run back-to-back; no parallel fan-out."
+      requires_parallelization_rationale: false
+    swarm:
+      summary: "Multiple agents in parallel — one per independent unit — with a final integration agent."
+      requires_parallelization_rationale: true
+    dynamic-workflow:
+      summary: "Adaptive: a probe step first, then replan the remaining units from what it learns. Gate each replan."
+      requires_parallelization_rationale: false
+
+# ---------------------------------------------------------------------------
+# ISSUES AFFECTED — administrative traceability only.
+# ---------------------------------------------------------------------------
+issues_affected:
+  # When true, the plan lists DAG neighbours (blocked_by / blocks) alongside the
+  # set of issues it resolves, for traceability. Never affects strategy/harness.
+  include_dag_neighbours: true
+
+# ---------------------------------------------------------------------------
+# PREP — the harness-prep stage (#102): provision the declared harness BEFORE
+# the job is issued to the Engineer (intake -> workorder -> [prep] -> engineer).
+# Consumed by src/architect/prep.py + scripts/lib/common.sh::prep_stage.
+# ---------------------------------------------------------------------------
+prep:
+  # The provisioner kinds the prep stage knows how to ready. A harness whose
+  # `provision` (above, explicit or inferred) is NOT in this list is treated as
+  # un-provisionable: the prep stage FAILS SAFE and blocks issuance rather than
+  # half-prepping a harness the Engineer can't run under.
+  #   none        — no-op; the harness needs no setup (standard / research).
+  #   marketplace — install a Claude Code plugin/skill via `/plugin …` (ponytail).
+  #   skill       — reserved for a future skill-pack provisioner.
+  known_provisioners: [none, marketplace, skill]
+
+  # Branch / worktree conventions the prep stage readies for a job. The branch
+  # matches dispatch.sh's claim-time worktree (`pipeline/issue-<n>`); a
+  # multi-issue aggregate resolves several issues on this one branch.
+  branch_prefix: "pipeline/issue-"
+  worktree_root: ".worktrees"

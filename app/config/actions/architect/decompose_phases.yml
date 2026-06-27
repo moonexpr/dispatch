@@ -1,0 +1,14 @@
+# A3 — decompose the issue into units of work + staffing. Runs before strategy
+# because the strategy resolver is conditioned on the plan's parallelism.
+token: architect:decompose_phases
+kind: inference
+bind: decompose_phases
+permission: []
+budget: architect
+interface:
+  in:
+    job: input.job
+    config: input.config
+  out:
+    plan: deliverables.plan
+    discovered: deliverables.discovered

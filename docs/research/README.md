@@ -3,7 +3,7 @@
 Committed findings from **research-mode work orders** (Pillar 2, E6-1/E6-2).
 
 When the architect's gap-detection heuristic
-(`services/architect/research.py::detect_gap`) decides a job lacks grounded
+(`src/architect/research.py::detect_gap`) decides a job lacks grounded
 information to plan well, it emits a *research* work order instead of an
 implementation order (decision **D3**: the architect itself never does live
 research — it only chooses the mode). The research worker investigates the gap
@@ -22,5 +22,5 @@ proceed. The research worker opens one PR against `main` (never merged by the
 worker) and does **not** implement the feature.
 
 Dispatch-path actuation is gated by `generation.research.dispatch_enabled` in
-`services/tuning.json` (default off until repo-file discovery is target-repo
+`src/tuning.json` (default off until repo-file discovery is target-repo
 aware); the gap heuristic itself is governed by `generation.research.enabled`.

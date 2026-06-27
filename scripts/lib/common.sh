@@ -81,7 +81,7 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 # no PR. Strictly recovery (D1): it only moves stuck issues claimed -> queued,
 # never opens, escalates, or re-dispatches. DISPATCH_REAPER_ENABLED toggles it
 # (default on); DISPATCH_CLAIM_TIMEOUT_HOURS is the stuck threshold (empty here =>
-# fall back to recovery.reaper_timeout_hours in services/tuning.json — the
+# fall back to recovery.reaper_timeout_hours in src/tuning.json — the
 # operator decision for #49 — then to 4h). DISPATCH_NOW_OVERRIDE (clock) and
 # DISPATCH_REAPER_FIXTURE (claimed-issue source) are deterministic test seams,
 # never set in production.
@@ -115,11 +115,17 @@ export PIPELINE_DRY_RUN PIPELINE_REPO PIPELINE_CONFIDENCE_THRESHOLD \
        DISPATCH_REAPER_FIXTURE
 
 # ------------------------------- Logging -----------------------------------
+# Every line is tagged with the SUBSYSTEM issuing it, so interleaved output from
+# dispatch.sh / pipeline.sh / architect-intake.sh / the engineer is attributable.
+# The subsystem defaults to the invoking script's basename (minus .sh) and is
+# overridable per-component with DISPATCH_SUBSYS (export it before sourcing, or
+# set it at any call site). Format: `[time] subsys: msg`.
 _ts() { date -u +%H:%M:%SZ 2>/dev/null || echo "--:--:--Z"; }
 _iso8601() { date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "1970-01-01T00:00:00Z"; }
-log()  { printf '[%s] %s\n'      "$(_ts)" "$*" >&2; }
-warn() { printf '[%s] WARN: %s\n' "$(_ts)" "$*" >&2; }
-err()  { printf '[%s] ERROR: %s\n' "$(_ts)" "$*" >&2; }
+_subsys() { local s="${DISPATCH_SUBSYS:-${0##*/}}"; echo "${s%.sh}"; }
+log()  { printf '[%s] %s: %s\n'        "$(_ts)" "$(_subsys)" "$*" >&2; }
+warn() { printf '[%s] %s: WARN: %s\n'  "$(_ts)" "$(_subsys)" "$*" >&2; }
+err()  { printf '[%s] %s: ERROR: %s\n' "$(_ts)" "$(_subsys)" "$*" >&2; }
 die()  { err "$*"; exit 1; }
 
 # --------------------------- Dry-run plumbing ------------------------------
@@ -283,7 +289,7 @@ reaper_timeout_hours() {
     printf '%s' "${DISPATCH_CLAIM_TIMEOUT_HOURS}"; return 0
   fi
   local v
-  v="$(PYTHONPATH="${PIPELINE_ROOT}/services" "${PYTHON_BIN}" -c \
+  v="$(PYTHONPATH="${PIPELINE_ROOT}/src" "${PYTHON_BIN}" -c \
       'import tuning; v=tuning.RECOVERY_REAPER_TIMEOUT_HOURS; print(int(v) if float(v).is_integer() else v)' \
       2>/dev/null)" || v=""
   [[ -n "${v}" ]] && printf '%s' "${v}" || printf '4'
@@ -291,7 +297,7 @@ reaper_timeout_hours() {
 
 # ------------------------------ Run-ledger (E4 / #36) ----------------------
 # ledger_emit STAGE [ISSUE] [FIELDS_JSON]: append one stage-transition line to
-# the append-only JSONL run-ledger via services/ledger/ledger.py. STAGE is one
+# the append-only JSONL run-ledger via src/ledger/ledger.py. STAGE is one
 # of the canonical transition stages (claimed | work-order | engineer-dispatch |
 # invoice | closure). FIELDS_JSON is an optional JSON object carrying
 # label_before/label_after, explicit cost values, or an `invoice` path whose
@@ -303,7 +309,7 @@ reaper_timeout_hours() {
 # tick (errors are swallowed so observability can't break the pipeline). The
 # ledger path is DISPATCH_LEDGER_FILE (read by ledger.py from the environment),
 # else ${DISPATCH_ARTIFACTS_DIR:-./.artifacts}/run-ledger.jsonl.
-: "${LEDGER_PY:=${PIPELINE_ROOT}/services/ledger/ledger.py}"
+: "${LEDGER_PY:=${PIPELINE_ROOT}/src/ledger/ledger.py}"
 ledger_emit() {
   local stage="$1" issue="${2:-}" fields="${3:-}" dry=true
   [[ -n "${fields}" ]] || fields='{}'
@@ -314,17 +320,101 @@ ledger_emit() {
 }
 
 # ----------------------- Debug stage vocabulary (E2/#31) -------------------
-# The canonical five tick stages, in execution order. `--until <stage>` (E2-2)
-# halts the tick after the named stage; `--from <stage>` (E2-3) resumes from it.
+# The canonical tick stages, in execution order. `--until <stage>` (E2-2) halts
+# the tick after the named stage; `--from <stage>` (E2-3) resumes from it.
 # stage_ord echoes a stage's 1-based ordinal so call sites can compare positions
 # without hard-coding numbers; it fails (non-zero, no output) on an unknown name.
-DISPATCH_STAGES=(intake workorder engineer intake-invoice closure)
+# `prep` (#102) sits between workorder and engineer: it provisions the work
+# plan's declared harness before the job is issued. Call sites MUST use stage_ord
+# (never literal ordinals) so inserting a stage here never silently shifts a gate.
+DISPATCH_STAGES=(intake workorder prep engineer intake-invoice closure)
 stage_ord() {
   local s="$1" i
   for i in "${!DISPATCH_STAGES[@]}"; do
     [[ "${DISPATCH_STAGES[$i]}" == "${s}" ]] && { echo $((i + 1)); return 0; }
   done
   return 1
+}
+
+# ------------------------- Prep stage (#102) -------------------------------
+# prep_stage <job-request-json> [labels-csv] [plan-json-file]: PROVISION the work
+# plan's *declared* harness before the job is issued to the Engineer (the stage
+# between workorder and engineer). It is the single seam both dispatch.sh
+# (claim_issue) and pipeline.sh (--from prep replay) call, so the behaviour is
+# identical on the live path and on replay.
+#
+# What it does, in order:
+#   1. Compute the deterministic PREP PLAN (src/architect/prep.py) from the
+#      Job Request (+ optional labels / decomposition plan). The planner executes
+#      nothing — it only derives harness+setup, orchestration, and branch/worktree.
+#   2. Record the `prep` transition to the run-ledger (local file; never gh).
+#   3. Under --until, dump prep.json beside the tick's other artifacts.
+#   4. FAIL-SAFE: if the plan is un-provisionable (unknown provisioner) — or the
+#      planner itself failed — return NON-ZERO so the caller blocks issuance. A
+#      half-prepped harness must never reach the Engineer.
+#   5. DRY-RUN (is_dry_run): print the intended steps and provision NOTHING.
+#      LIVE: the worktree/branch is readied at claim time and the harness `setup`
+#      (e.g. `/plugin install`) is carried in the work order for the Engineer, so
+#      v0 (single-agent per issue) has no further host-side step here — log ready.
+# Returns 0 to PROCEED (issue the job), non-zero to BLOCK. Idempotent and
+# side-effect-free except for the local-file ledger/artifact writes.
+: "${PREP_PY:=${PIPELINE_ROOT}/src/architect/prep.py}"
+prep_stage() {
+  local args="$1" labels="${2:-}" plan_file="${3:-}"
+  local num; num="$(jq -r '.issue // "?"' <<<"${args}" 2>/dev/null || echo '?')"
+
+  # 1. Deterministic prep plan from the Job Request.
+  local jt; jt="$(mktemp)"
+  printf '%s' "${args}" >"${jt}"
+  local pa=(--job-json "${jt}")
+  [[ -n "${labels}" ]] && pa+=(--labels "${labels}")
+  [[ -n "${plan_file}" && -f "${plan_file}" ]] && pa+=(--plan-json "${plan_file}")
+  local prep_json rc=0
+  prep_json="$("${PYTHON_BIN}" "${PREP_PY}" "${pa[@]}" 2>/dev/null)" || rc=$?
+  rm -f "${jt}"
+  if [[ "${rc}" -ne 0 || -z "${prep_json}" ]]; then
+    err "#${num} prep: planner failed (rc=${rc}) — blocking issuance (fail-safe)"
+    ledger_emit prep "${num}" '{"provisionable":false,"reason":"planner-error"}'
+    return 1
+  fi
+
+  local harness strategy provisioner provisionable reason
+  harness="$(jq -r '.harness // "standard"'        <<<"${prep_json}")"
+  strategy="$(jq -r '.strategy // "sequential"'     <<<"${prep_json}")"
+  provisioner="$(jq -r '.provisioner // "none"'     <<<"${prep_json}")"
+  provisionable="$(jq -r '.provisionable // false'  <<<"${prep_json}")"
+  reason="$(jq -r '.block_reason // ""'             <<<"${prep_json}")"
+
+  # 2. Run-ledger: record the prep stage transition (swallowed on error).
+  ledger_emit prep "${num}" "$(jq -nc \
+    --arg h "${harness}" --arg s "${strategy}" --argjson p "${provisionable}" \
+    '{harness:$h, strategy:$s, provisionable:$p}')"
+
+  # 3. Dump the prep artifact under --until (local-file, dry-run-safe).
+  if [[ -n "${DISPATCH_UNTIL_STAGE:-}" && -n "${DISPATCH_ARTIFACTS_DIR:-}" ]]; then
+    local _td="${DISPATCH_ARTIFACTS_DIR}/${DISPATCH_TICK_ID:-tick-unknown}"
+    mkdir -p "${_td}"
+    printf '%s\n' "${prep_json}" >"${_td}/prep.json"
+  fi
+
+  # 4. Fail-safe: an un-provisionable harness blocks issuance.
+  if [[ "${provisionable}" != "true" ]]; then
+    err "#${num} prep: harness '${harness}' is not provisionable — ${reason:-unknown reason}; blocking issuance"
+    return 1
+  fi
+
+  # 5. Dry-run prints intended steps and provisions nothing; live logs readiness.
+  if is_dry_run; then
+    log "#${num} prep DRY-RUN: would provision harness '${harness}' (strategy ${strategy}); provisions nothing:"
+    while IFS= read -r _step; do
+      [[ -n "${_step}" ]] && log "#${num} prep   • ${_step}"
+    done < <(jq -r '.steps[]?' <<<"${prep_json}" 2>/dev/null)
+  elif [[ "${provisioner}" == "none" && "${strategy}" == "sequential" ]]; then
+    log "#${num} prep: harness '${harness}' is a no-op; sequential orchestration — nothing to provision"
+  else
+    log "#${num} prep: harness '${harness}' ready (${provisioner}); '${strategy}' orchestration armed"
+  fi
+  return 0
 }
 
 # ------------------------- Engine call wrappers ----------------------------

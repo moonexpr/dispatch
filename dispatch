@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # dispatch — emit a finished work order for the queue's foundational job.
 #
-# Thin wrapper over services/architect/dispatch.py. One invocation runs the
+# Thin wrapper over src/architect/dispatch.py. One invocation runs the
 # full ARCHITECT pipeline (intake -> rank -> classify -> approve -> issue) and
 # prints a finished work order to stdout. PLAY.md is the skeleton; the design
 # is in .claude/plans/2026Jun16_dispatch-prototype.md.
 #
-#   ./dispatch --fixture services/architect/fixtures/play-queue.json
+#   ./dispatch --fixture src/architect/fixtures/play-queue.json
 #   ./dispatch --repo owner/repo
 #   ./dispatch --project ReclaimByDesign/5 --all --json
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${PYTHON_BIN:-python3}" "${ROOT}/services/architect/dispatch.py" "$@"
+exec "${PYTHON_BIN:-python3}" "${ROOT}/src/architect/dispatch.py" "$@"

@@ -1,0 +1,32 @@
+# selection-weights.yml — data-driven priority weights for issue selection.
+#
+# Consumed by src/intake/ranker.py (priority_key). Edit this file to retune
+# selection ordering without touching Python. Override the path with the env var
+# DISPATCH_SELECTION_WEIGHTS. A missing/corrupt file falls back to these same
+# defaults in code, so the pipeline always has a usable shape.
+#
+# Ordering among ready (dispatchable) issues, in precedence:
+#   dependency depth (foundational first — a correctness constraint, not tunable)
+#     -> leaf before feature/epic
+#     -> earlier milestone
+#     -> earlier iteration
+#     -> higher label weight (below)
+#     -> lower issue number
+#
+# label_weights: maturity-ladder weight per issue label; HIGHER dispatches first.
+# Mirrors the repo label scheme (Unscheduled -> Draft -> Candidate -> Release)
+# with Blocker as the top overlay. An issue's weight is the max over its labels;
+# labels not listed here weigh 0. Matching is case-insensitive.
+label_weights:
+  blocker: 4
+  release: 3
+  candidate: 2
+  draft: 1
+  unscheduled: 0
+
+# feature_labels: labels that mark an issue as a container (feature/epic) rather
+# than a unit of work; containers sort AFTER leaves. Title "[Epic] ..." also
+# counts. Case-insensitive.
+feature_labels:
+  - epic
+  - feature

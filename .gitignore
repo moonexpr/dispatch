@@ -14,8 +14,8 @@ tokens.txt
 .claude/artifacts/
 # Demo harness per-round output (E8-3 replay.sh); snapshots/scenarios/seed ARE committed, only rounds/ is transient.
 scripts/demo/rounds/
-# Stray ruflo runtime state under services/ (NOT the tracked root .claude-flow/ config).
-services/.claude-flow/
+# Stray ruflo runtime state under src/ (NOT the tracked root .claude-flow/ config).
+src/.claude-flow/
 
 # Python / tooling noise
 __pycache__/
@@ -36,3 +36,9 @@ PROJECT.md
 WORKPLAN.md
 .claude/agents/
 CLAUDE.local.md
+
+# ruflo per-run state (the rest of .claude-flow/ config is tracked)
+.claude-flow/agents.json
+.claude-flow/hive-mind/
+# local test-run finding drafts (the GitHub issue comments are the durable record)
+scripts/demo/testrun-findings/

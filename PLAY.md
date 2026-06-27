@@ -31,7 +31,7 @@ last commit f6c7e22. ADMIN calls `gh issue list` and reads what returns.]*
 The queue.
 
 Three open issues, no queued label on any of them yet. Untracked work
-in the tree: `scripts/gh-intake.sh`, `services/intake/`, `.claude/commands/`,
+in the tree: `scripts/gh-intake.sh`, `src/intake/`, `.claude/commands/`,
 `.claude/skills/`. I am reading all of it. Five jobs present themselves.
 
 *[ADMIN assembles the intake brief. Reads slowly. One job at a time.]*
@@ -80,7 +80,7 @@ to handle after this session closes.
 ---
 
 **JOB OPTION D — Untracked: intake subsystem**
-*Title:* Wire `gh-intake.sh` and `services/intake/` into the pipeline
+*Title:* Wire `gh-intake.sh` and `src/intake/` into the pipeline
 *Body:* Files exist on disk, uncommitted, incomplete. The intake layer converts
 raw GitHub project items into queued issues dispatch can act on.
 *Scope:* m · Confidence: 0.81
@@ -170,7 +170,7 @@ My recommendation:
 Budget for Option D, carrying Option E:
 
 *Read phase:* eight thousand tokens.
-Inspect `gh-intake.sh`, `services/intake/`, the `load_queued_issues()`
+Inspect `gh-intake.sh`, `src/intake/`, the `load_queued_issues()`
 function in `dispatch.sh`, the queued-issues fixture schema,
 and the full current CLAUDE.md.
 
@@ -191,7 +191,7 @@ That leaves twenty-eight thousand in reserve
 for ENGINEER's contingencies.
 I recommend holding the reserve, not pre-spending it.
 
-One risk to name: the state of `services/intake/` is unknown
+One risk to name: the state of `src/intake/` is unknown
 until ENGINEER reads it. If it is further along than the tree suggests,
 scope shrinks. If it is a stub, scope expands slightly.
 I have padded the generate phase accordingly.
@@ -222,7 +222,7 @@ the intake layer is a data sourcing boundary.
 It converts GitHub project items to queued issues and stops there.
 It does not classify. It does not route. It does not dispatch.
 Classification stays in `dispatch.sh`.
-If `services/intake/` has overreach, ENGINEER trims it back
+If `src/intake/` has overreach, ENGINEER trims it back
 to the intake boundary — that is not a judgment call,
 it is the authorized scope of this session.
 
@@ -282,14 +282,14 @@ Drafting.
 ```
 
 **Scope:**
-Wire `gh-intake.sh` and `services/intake/` as the pipeline's data
+Wire `gh-intake.sh` and `src/intake/` as the pipeline's data
 sourcing layer. Add `PIPELINE_INTAKE_BIN` as a third path in
 `load_queued_issues()`. Update CLAUDE.md to reflect the stripped
 architecture. Open a PR. Stop.
 
 **Done criteria — restate as a checklist in the PR body:**
 - [ ] `gh-intake.sh` is committed, executable, and documented in the header
-- [ ] `services/intake/` is committed and contains no classification logic
+- [ ] `src/intake/` is committed and contains no classification logic
 - [ ] `dispatch.sh` `load_queued_issues()` accepts `PIPELINE_INTAKE_BIN`
 - [ ] `scripts/lib/common.sh` exports `PIPELINE_INTAKE_BIN`
 - [ ] `bash scripts/smoke.sh` exits 0 with 0 FAIL
@@ -310,7 +310,7 @@ Where does it write output? Does it contain any logic
 beyond fetching and formatting? Flag any classification,
 routing, or dispatch logic for removal in Phase 2.
 
-**1.2** List all files in `services/intake/`, then read each one.
+**1.2** List all files in `src/intake/`, then read each one.
 Map the boundary: what comes in, what goes out, what schema.
 Flag any logic that exceeds data sourcing.
 
@@ -330,7 +330,7 @@ List every reference to systems that no longer exist:
 You will rewrite these in Phase 2D.
 
 After reading, produce a brief internal assessment:
-- Is `services/intake/` a stub, partial, or near-complete?
+- Is `src/intake/` a stub, partial, or near-complete?
 - Does `gh-intake.sh` have any scope violations? (classify / route / dispatch)
 - What is the exact seam between intake output and dispatch input?
 
@@ -362,18 +362,18 @@ Remove without exception:
 - Any call to `dispatch.sh`, `classify.py`, or `engineer_dispatch`
 - Any logic that is not fetching or normalizing data
 
-**Task 2B — Finalize `services/intake/`**
+**Task 2B — Finalize `src/intake/`**
 
 Apply the same boundary: intake converts external data to internal queue format.
 
-If any file in `services/intake/` contains:
-- Classification logic → move to `services/classifier/` or remove
+If any file in `src/intake/` contains:
+- Classification logic → move to `src/classifier/` or remove
 - Dispatch logic → move to `dispatch.sh` or remove
 - Label-writing → remove
 - Anything that is not fetch + normalize + emit → remove or relocate
 
 After trimming, ensure the service emits the same schema as Task 2A.
-If `services/intake/` and `gh-intake.sh` are redundant, consolidate.
+If `src/intake/` and `gh-intake.sh` are redundant, consolidate.
 One intake path is cleaner than two. Prefer whichever is more complete;
 delete the other and document the decision in the PR body.
 
@@ -481,7 +481,7 @@ feat(intake): wire data sourcing layer; update worker contract
 
 Adds PIPELINE_INTAKE_BIN as a third path in load_queued_issues(),
 between the fixture-file test seam and the live gh-issue-list fallback.
-The intake layer (gh-intake.sh / services/intake/) converts GitHub
+The intake layer (gh-intake.sh / src/intake/) converts GitHub
 project items to queued-issue JSON; classification stays in dispatch.sh.
 
 Updates CLAUDE.md to remove stale references to OpenClaw, Ruflo,
@@ -547,7 +547,7 @@ One constraint from ADMIN that is not negotiable:
 the intake layer is a data sourcing boundary.
 It does not classify. It does not route. It does not dispatch.
 If you find classification logic anywhere in `gh-intake.sh`
-or `services/intake/`, you remove it.
+or `src/intake/`, you remove it.
 That is the authorized scope. There is no adjacent scope.
 
 Begin.

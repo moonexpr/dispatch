@@ -1,0 +1,13 @@
+# A6 — emit the SERIALIZED Program: an orchestration script (a serialized
+# statechart fragment), one phase per plan unit, each carrying its budget share.
+token: architect:author_orchestration
+kind: inference
+bind: author_orchestration
+permission: []
+budget: architect
+interface:
+  in:
+    plan: deliverables.plan
+    budget: deliverables.budget
+  out:
+    orchestration_script: deliverables.orchestration_script
