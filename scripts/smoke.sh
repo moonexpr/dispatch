@@ -384,11 +384,11 @@ assert_contains "--issue 5 notes the unmet dependency on #2" "$i5err" "depends o
 # An unknown issue number is rejected (no eligible job).
 ./dispatch --issue 999 --fixture "$FXQ" >/dev/null 2>&1; i9c=$?
 [[ $i9c -eq 3 ]] && pass "--issue with an unknown number exits 3" || fail "--issue 999 exit" "got $i9c"
-# The declarative tuning surface (the admin-editable config) is valid JSON.
-if jq -e . "${ROOT}/src/tuning.json" >/dev/null 2>&1; then
-  pass "src/tuning.json is valid JSON (the tuning surface)"
+# The declarative tuning surface (the admin-editable config) is valid YAML.
+if python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' "${ROOT}/app/config/tuning.yml" >/dev/null 2>&1; then
+  pass "app/config/tuning.yml is valid YAML (the tuning surface)"
 else
-  fail "src/tuning.json is not valid JSON"
+  fail "app/config/tuning.yml is not valid YAML"
 fi
 rm -rf "$DAGDIR"
 
@@ -527,7 +527,7 @@ section "§7.13 cron: crash reaper re-queues stuck 'claimed' issues past timeout
 # claiming: it re-queues issues stuck in `claimed` past DISPATCH_CLAIM_TIMEOUT_HOURS
 # with no open PR, touching only the claimed/queued pair it owns — D1 recovery only
 # (never opens, escalates, or re-dispatches in the same tick). Timeout falls back to
-# recovery.reaper_timeout_hours in src/tuning.json (operator decision #49).
+# recovery.reaper_timeout_hours in app/config/tuning.yml (operator decision #49).
 RPD="$(mktemp -d 2>/dev/null || mktemp -d -t reap)"
 STUCK="${FIX}/claimed-stuck-issues.json"
 EMPTYQ="${RPD}/empty-queued.json"; printf '[]\n' > "${EMPTYQ}"
@@ -820,10 +820,10 @@ else
   skip "claude-monitor not installed — live oracle path not exercised (fixture path covered above)"
 fi
 # (6) The tuning surface carries the budget block the oracle reads.
-if jq -e '.budget.window.plan_tier and .budget.plan_limits' "${ROOT}/src/tuning.json" >/dev/null 2>&1; then
-  pass "src/tuning.json budget block carries plan_tier + plan_limits"
+if python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; b=d.get("budget",{}); sys.exit(0 if (b.get("window",{}).get("plan_tier") and b.get("plan_limits")) else 1)' "${ROOT}/app/config/tuning.yml" >/dev/null 2>&1; then
+  pass "app/config/tuning.yml budget block carries plan_tier + plan_limits"
 else
-  fail "tuning.json budget block missing plan_tier/plan_limits"
+  fail "tuning.yml budget block missing plan_tier/plan_limits"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1546,9 +1546,9 @@ for _v in DISPATCH_ARTIFACTS_DIR DISPATCH_LEDGER_FILE DISPATCH_REAPER_ENABLED DI
     fail "env var drift (RUNBOOK vs pipeline.env.example): ${_v}"
   fi
 done
-# Plan-tier + soft-cap live in src/tuning.json (not env); the runbook must
+# Plan-tier + soft-cap live in app/config/tuning.yml (not env); the runbook must
 # point at that surface and name the keys that set them.
-grep -qF "src/tuning.json" "$RB" && pass "RUNBOOK references src/tuning.json (tier/soft-cap surface)" || fail "RUNBOOK omits src/tuning.json"
+grep -qF "app/config/tuning.yml" "$RB" && pass "RUNBOOK references app/config/tuning.yml (tier/soft-cap surface)" || fail "RUNBOOK omits app/config/tuning.yml"
 for _k in plan_tier soft_cap_fraction; do
   grep -qF "$_k" "$RB" && pass "RUNBOOK names budget key: ${_k}" || fail "RUNBOOK omits budget key: ${_k}"
 done

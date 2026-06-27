@@ -22,5 +22,5 @@ proceed. The research worker opens one PR against `main` (never merged by the
 worker) and does **not** implement the feature.
 
 Dispatch-path actuation is gated by `generation.research.dispatch_enabled` in
-`src/tuning.json` (default off until repo-file discovery is target-repo
+`app/config/tuning.yml` (default off until repo-file discovery is target-repo
 aware); the gap heuristic itself is governed by `generation.research.enabled`.

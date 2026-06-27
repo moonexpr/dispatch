@@ -50,7 +50,7 @@ SCOPES = ("xs", "s", "m", "l")
 ROUTES = ("gen-local", "gen-default", "gen-frontier")
 
 # scope -> route map (mirrors scripts/lib/common.sh route_for_scope).
-# Tunable via src/tuning.json (selection.classify.scope_route).
+# Tunable via app/config/tuning.yml (selection.classify.scope_route).
 _SCOPE_ROUTE = tuning.SCOPE_ROUTE
 
 
@@ -72,7 +72,7 @@ class TriageResult:
 # --- Deterministic classifier -----------------------------------------------
 # Keyword signals are intentionally simple and fully deterministic: identical
 # (title, body) always yields identical output (HANDOFF §7.2). The signal lists
-# are tunable via src/tuning.json (selection.classify.hints).
+# are tunable via app/config/tuning.yml (selection.classify.hints).
 _XS_HINTS = tuning.CLASSIFY_HINTS["xs"]
 _S_HINTS = tuning.CLASSIFY_HINTS["s"]
 _L_HINTS = tuning.CLASSIFY_HINTS["l"]
@@ -125,7 +125,7 @@ def classify(title: str, body: str) -> TriageResult:
         action = "implement"
 
     # Confidence: start from a base and add/subtract deterministic signals.
-    # Weights/thresholds are tunable via src/tuning.json
+    # Weights/thresholds are tunable via app/config/tuning.yml
     # (selection.classify.conf).
     c = tuning.CONF
     vague = has(_VAGUE_HINTS)

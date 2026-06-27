@@ -31,7 +31,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 import tuning  # noqa: E402
 
-# Rendering knobs — tunable via src/tuning.json (generation.workorder).
+# Rendering knobs — tunable via app/config/tuning.yml (generation.workorder).
 _ROUTE_ALIAS = tuning.ROUTE_ALIAS
 _BOX_W = tuning.BOX_W
 

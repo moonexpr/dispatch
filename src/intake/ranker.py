@@ -204,7 +204,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
 # Mirrors the CLASSIFIER_OFFLINE seam: identical input always yields identical
 # order. The dependency graph itself is built by dag.build() (shared with the
 # static --dag artifact); the cross-reference patterns are tunable via
-# src/tuning.json (selection.ranker). Here we just order the items
+# app/config/tuning.yml (selection.ranker). Here we just order the items
 # foundational -> dependent, tie-breaking by lower issue number.
 # --------------------------------------------------------------------------
 def _rank_offline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -294,7 +294,7 @@ Both examples:
 ## Digest, budget & recovery
 
 Three rails make an unattended run observable and self-protecting. Each is
-local-file / offline and configured in `pipeline.env` or `src/tuning.json`;
+local-file / offline and configured in `pipeline.env` or `app/config/tuning.yml`;
 [`RUNBOOK.md`](./RUNBOOK.md) is the operator walkthrough for all three.
 
 - **Run-ledger + digest.** Every stage transition appends one JSONL line to the
@@ -304,7 +304,7 @@ local-file / offline and configured in `pipeline.env` or `src/tuning.json`;
 - **Budget soft-cap.** The guard reconciles each tick against the Claude Code
   usage window and **auto-flips it to dry-run** past the soft-cap. Plan tier,
   the 5h window limit, and the soft-cap fraction are committed in
-  `src/tuning.json` (`budget.window`); `claude-monitor` is the usage oracle
+  `app/config/tuning.yml` (`budget.window`); `claude-monitor` is the usage oracle
   (decision D2), and the ledger is per-job attribution.
 - **Crash reaper.** At the top of every tick the reaper re-queues issues stranded
   in `claimed` past the timeout with no open PR (`recovery.reaper_timeout_hours`,

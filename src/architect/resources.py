@@ -29,7 +29,7 @@ _FILE_RE = re.compile(r'\b[\w-]+\.(?:sh|py|json|md|ya?ml)\b')
 # Referenced function names, e.g. load_queued_issues()
 _FUNC_RE = re.compile(r'\b([a-z_][a-z0-9_]+)\(\)')
 
-# Embedding caps — tunable via src/tuning.json (generation.resources).
+# Embedding caps — tunable via app/config/tuning.yml (generation.resources).
 _MAX_FILES = tuning.RES_CAPS["max_files"]   # cap embedded referenced files (logged when exceeded)
 _CAP_BYTES = tuning.RES_CAPS["cap_bytes"]   # cap bytes per embedded file (logged when truncated)
 

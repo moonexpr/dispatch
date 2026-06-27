@@ -20,12 +20,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tuning  # noqa: E402
 
 # scope -> total token budget ADMIN authorizes for the job.
-# Tunable via src/tuning.json (generation.approval.scope_budget).
+# Tunable via app/config/tuning.yml (generation.approval.scope_budget).
 _SCOPE_BUDGET = tuning.SCOPE_BUDGET
 
 # Fraction of the budget allocated per phase. The remainder (~0.20) is held as
 # contingency reserve — PLAY.md Act II: "hold the reserve, do not pre-spend it."
-# Tunable via src/tuning.json (generation.approval.phase_split).
+# Tunable via app/config/tuning.yml (generation.approval.phase_split).
 _PHASE_SPLIT = tuning.PHASE_SPLIT
 
 

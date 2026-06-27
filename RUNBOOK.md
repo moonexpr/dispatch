@@ -136,7 +136,7 @@ jq -r 'select(.stage=="closure") | "#\(.issue) \(.label_before)->\(.label_after)
 The budget guard (E5) reconciles each tick against the Claude Code usage window
 and **auto-flips the tick to dry-run** when the window is too close to the plan
 cap. The plan tier, the resolved 5-hour-window token limit, and the soft-cap
-fraction are committed in **`src/tuning.json`** under `budget.window`
+fraction are committed in **`app/config/tuning.yml`** under `budget.window`
 (`plan_tier`, `window_token_limit`, `soft_cap_fraction`); point at a different
 file with the `DISPATCH_TUNING_FILE` env var.
 
@@ -172,7 +172,7 @@ queued` plus a provenance comment). It is recovery only (decision **D1**): it
 never opens, escalates, or re-dispatches, and an issue with an open PR is left
 alone as in-flight work.
 
-- **Timeout:** `recovery.reaper_timeout_hours` in `src/tuning.json`
+- **Timeout:** `recovery.reaper_timeout_hours` in `app/config/tuning.yml`
   (committed default: **4** hours). Override per-run with
   `DISPATCH_CLAIM_TIMEOUT_HOURS`.
 - **Disable:** `DISPATCH_REAPER_ENABLED=0` skips the reaper step.

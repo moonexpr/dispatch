@@ -2,27 +2,38 @@
 """tuning.py — single, declarative tuning surface for the dispatch pipeline.
 
 The values that govern WORK SELECTION (which issue is picked) and PROMPT
-GENERATION (how the work order reads) used to be hardcoded constants scattered
-across six modules. They now live in one editable JSON file (``tuning.json``,
-next to this module) so they can be fine-tuned without touching Python.
+GENERATION (how the work order reads) live in one editable YAML file,
+``app/config/tuning.yml`` (reached via the ``engine.filesys`` facade — #142),
+so they can be fine-tuned without touching Python.
 
 This loader reads that file and deep-merges it over the in-code ``DEFAULTS``
-below, so a missing or partial file still works and reproduces current
-behavior (the committed ``tuning.json`` is identical to ``DEFAULTS``; the file
-is the admin's editable override). Override the path with ``DISPATCH_TUNING_FILE``.
+below. An **absent** file degrades to ``DEFAULTS`` (fail-safe: the committed
+YAML mirrors ``DEFAULTS``, so today's behaviour is reproduced). A file that is
+**present but malformed** — unparseable YAML or an unknown/typo'd key — fails
+**loud** with ``ConfigError`` instead of silently reverting (#156, #130). The
+parsed result is mtime-memoized so repeated calls don't re-parse. Override the
+path with ``DISPATCH_TUNING_FILE``.
 
-Deliberately exec-free — imports only ``json`` and ``os`` — so the classifier
-(a quarantine reader, HANDOFF §8) can import it without gaining any capability.
-Deterministic: identical config always yields identical constants.
+Capability-safe: YAML is read through ``engine.filesys`` (``yaml.safe_load``,
+which never executes tags), so the classifier (a quarantine reader, HANDOFF §8)
+gains no capability. Deterministic: identical config always yields identical
+constants.
 """
 from __future__ import annotations
 
-import json
 import os
+import sys
 from typing import Any, Dict, List, Tuple
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_DEFAULT_PATH = os.path.join(_HERE, "tuning.json")
+# The tuning surface, relative to the app dir (engine.filesys resolves it).
+_TUNING_REL = "config/tuning.yml"
+
+# Repo root on sys.path so ``from engine import filesys`` resolves regardless of
+# how this module was imported (consumers put only ``src/`` on PYTHONPATH). This
+# is path-only — no import side effects — mirroring workplan_config's seam.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # In-code defaults — the canonical fallback. The committed tuning.json mirrors
 # these values and is the surface an admin edits; the file overrides these.
@@ -174,20 +185,78 @@ def _merge(base: Any, ovr: Any) -> Any:
     return ovr
 
 
+class ConfigError(ValueError):
+    """A *present* tuning file is unparseable or carries an unknown/mis-shaped key.
+
+    Raised so a typo'd or half-saved config fails loud at load instead of being
+    silently swallowed back to DEFAULTS (#156)."""
+
+
+def _validate(data: Any, ref: Any, trail: str = "") -> None:
+    """Raise ``ConfigError`` if ``data`` (the override file) carries a key absent
+    from ``ref`` (the DEFAULTS skeleton) or flips its mapping/scalar shape.
+
+    Only KEY STRUCTURE is checked — scalar and list *values* are the admin's to
+    set freely. ``_``-prefixed (documentation) keys are ignored. Lists are
+    opaque: their elements are data (e.g. ``specialization_rules`` rule dicts,
+    ``phase_split`` pairs), not config keys, so they are never recursed into."""
+    if not isinstance(data, dict):
+        return
+    for k, v in data.items():
+        if isinstance(k, str) and k.startswith("_"):
+            continue
+        where = f"{trail}.{k}" if trail else str(k)
+        if k not in ref:
+            raise ConfigError(f"unknown tuning key: {where}")
+        if isinstance(ref[k], dict) != isinstance(v, dict):
+            raise ConfigError(f"tuning key {where}: mapping/scalar shape mismatch")
+        if isinstance(ref[k], dict):
+            _validate(v, ref[k], where)
+
+
 def _config_path() -> str:
-    return os.environ.get("DISPATCH_TUNING_FILE") or _DEFAULT_PATH
+    return os.environ.get("DISPATCH_TUNING_FILE") or _TUNING_REL
+
+
+# mtime-memoized parse results, keyed by absolute path → (mtime, merged config).
+_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
 
 def load(path: str = "") -> Dict[str, Any]:
-    """Return the merged config (file over DEFAULTS). Missing/corrupt file -> DEFAULTS."""
-    path = path or _config_path()
-    data: Dict[str, Any] = {}
+    """Return the merged tuning config (file deep-merged over ``DEFAULTS``).
+
+    Resolution: explicit ``path`` arg > ``$DISPATCH_TUNING_FILE`` >
+    ``app/config/tuning.yml``. An **absent** file degrades to ``DEFAULTS``
+    (fail-safe). A **present** file that is unparseable or carries an unknown
+    key raises ``ConfigError`` (fail-loud, #156). Results are mtime-memoized."""
+    relpath = path or _config_path()
     try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):           # ValueError covers JSONDecodeError
-        data = {}
-    return _merge(DEFAULTS, data)
+        from engine import filesys  # lazy: keep import-time dependency-light
+        abspath = filesys.resolve(relpath)
+    except Exception:
+        return _merge(DEFAULTS, {})         # engine/PyYAML unavailable -> DEFAULTS
+    try:
+        mtime = os.path.getmtime(abspath)
+    except OSError:
+        return _merge(DEFAULTS, {})         # absent file -> fail-safe DEFAULTS
+    cached = _CACHE.get(abspath)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        data = filesys.read_yaml(relpath)
+    except FileNotFoundError:
+        return _merge(DEFAULTS, {})
+    except Exception as exc:                # malformed YAML -> loud
+        raise ConfigError(f"tuning file {abspath} is unparseable: {exc}") from exc
+    if not data:                            # empty document -> DEFAULTS
+        merged = _merge(DEFAULTS, {})
+    else:
+        if not isinstance(data, dict):
+            raise ConfigError(f"tuning file {abspath} is not a mapping")
+        _validate(data, DEFAULTS)           # typo'd/unknown key -> loud
+        merged = _merge(DEFAULTS, data)
+    _CACHE[abspath] = (mtime, merged)
+    return merged
 
 
 # --------------------------------------------------------------------------

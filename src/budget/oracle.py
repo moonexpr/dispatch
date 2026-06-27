@@ -22,7 +22,7 @@ Two sources, chosen by the ``BUDGET_ORACLE_FIXTURE`` env var:
     as ``approval.py``). This is the offline/smoke path.
   * **claude-monitor** (no fixture) — consume claude-monitor for the live
     global usage window; ``source == "claude-monitor"``. Plan/limit come from the
-    operator-committed ``budget.window`` block in ``src/tuning.json``. Not
+    operator-committed ``budget.window`` block in ``app/config/tuning.yml``. Not
     exercised in smoke (no monitor installed there).
 
 This adapter does NO reconciliation, overspend math, or P90 re-implementation

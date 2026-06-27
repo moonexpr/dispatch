@@ -23,7 +23,7 @@ import tuning  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # architect dir (verify)
 import verify  # noqa: E402
 
-# Hard cap on agents (= number of units). Tunable via src/tuning.json
+# Hard cap on agents (= number of units). Tunable via app/config/tuning.yml
 # (generation.decompose.swarm_max).
 _SWARM_MAX = tuning.SWARM_MAX
 
@@ -31,7 +31,7 @@ _SWARM_MAX = tuning.SWARM_MAX
 def _spec_for(path: str):
     """Map a file/area to a (function, domain) specialization.
 
-    The ordered match rules live in src/tuning.json
+    The ordered match rules live in app/config/tuning.yml
     (generation.decompose.specialization_rules) and are evaluated by
     tuning.spec_for — edit the config to retune staffing labels.
     """

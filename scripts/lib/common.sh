@@ -81,7 +81,7 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 # no PR. Strictly recovery (D1): it only moves stuck issues claimed -> queued,
 # never opens, escalates, or re-dispatches. DISPATCH_REAPER_ENABLED toggles it
 # (default on); DISPATCH_CLAIM_TIMEOUT_HOURS is the stuck threshold (empty here =>
-# fall back to recovery.reaper_timeout_hours in src/tuning.json — the
+# fall back to recovery.reaper_timeout_hours in app/config/tuning.yml — the
 # operator decision for #49 — then to 4h). DISPATCH_NOW_OVERRIDE (clock) and
 # DISPATCH_REAPER_FIXTURE (claimed-issue source) are deterministic test seams,
 # never set in production.
