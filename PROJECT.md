@@ -4,6 +4,19 @@ Project-specific conventions established during spec phase. Fill in each section
 
 ---
 
+## Development Status
+
+**`Development Status: development`** (solo dev).
+
+This line is the authoritative signal for the push policy in [`CLAUDE.md`](./CLAUDE.md)
+→ "Development mode": while it reads `development`, operator *and* pipeline sessions may
+commit (signed) and **push directly to `main` without per-push confirmation** — no PRs,
+no branches, no branch protection. Change it to `released` (or otherwise
+non-`development`) when the repo leaves solo dev; that re-arms the PR / branch-protection
+/ review flow and the push pre-authorization lapses.
+
+---
+
 ## Running a live engine tick test
 
 The pipeline is pure Python; the unit-of-work lifecycle is the YAML **BaseWorkflow**
@@ -99,8 +112,8 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 > What commit message convention should be used?
 > Are PRs preferred over direct pushes to main?
 
-- **Commit convention**: <!-- e.g. conventional commits, free-form -->
-- **Branch strategy**: <!-- feature branches + PR / push directly to main -->
+- **Commit convention**: conventional commits (signed)
+- **Branch strategy**: push directly to `main` while `Development Status: development` (see **Development Status** above) — no feature branches / PRs in dev mode
 
 ---
 

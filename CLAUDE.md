@@ -11,13 +11,18 @@ any detail this summary omits.
 
 ## Development mode (current — solo dev)
 
-While this repo is in development, **every session works directly on `main`** —
-operator-directed *and* autonomous pipeline workers (`/implement-task`,
-`/fix-ci`, `/update-docs`) alike commit (signed) and push straight to `main`. No
-pull requests, no `pipeline/issue-*` branches, no branch protection: that
-PR-based review flow (described in **The contract** below) is **deferred until
-the repo leaves development**. Until then, `main` is the working branch.
-(Solo-dev no-PR posture set 2026-06-16; extended to all sessions 2026-06-27.)
+While this repo is in development — as declared by **`Development Status: development`**
+in [`PROJECT.md`](./PROJECT.md), the authoritative signal — **every session works
+directly on `main`** — operator-directed *and* autonomous pipeline workers
+(`/implement-task`, `/fix-ci`, `/update-docs`) alike commit (signed) and push straight
+to `main`. **Pushing is pre-authorized: agents do not need to ask before pushing `main`**
+while PROJECT.md declares development (this overrides the default "commit/push only when
+asked" posture). No pull requests, no `pipeline/issue-*` branches, no branch protection:
+that PR-based review flow (described in **The contract** below) is **deferred until the
+repo leaves development** — i.e. until PROJECT.md's `Development Status` changes. Until
+then, `main` is the working branch.
+(Solo-dev no-PR posture set 2026-06-16; extended to all sessions 2026-06-27;
+PROJECT.md-gated push pre-authorization 2026-06-27.)
 
 **Execution layer:** dispatch's own workflow engine (`engine/` + `app/config/`).
 A `BaseWorkflow` Controller drives Actions across `spec → work → build`: the
