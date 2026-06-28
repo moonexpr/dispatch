@@ -31,8 +31,17 @@ _HERE = os.path.dirname(os.path.abspath(__file__))            # src/baseworkflow
 _BW = os.path.dirname(_HERE)                                  # src/baseworkflow
 _SRC = os.path.dirname(_BW)                                   # src
 _ROOT = os.path.dirname(_SRC)                                 # repo root
-for _p in (_ROOT, _SRC, os.path.join(_SRC, "architect"), os.path.join(_SRC, "budget"),
-           os.path.join(_SRC, "orchestration"), _BW):
+# The non-workflow subsystems (architect/budget/orchestration/ledger/…) were
+# consolidated under src/visitor/ (see src/visitor/__init__.py). The workflow
+# bind layer is unchanged; only these bootstrap paths track the relocation so the
+# bare-name sibling imports (``import common`` / ``import strategy`` / …) and the
+# package-qualified ones (``from architect import approval``,
+# ``from ledger.ledger import emit``) still resolve. ``src/tuning.py`` stays at
+# src/ (shared by both lineages), reached via _SRC.
+_VISITOR = os.path.join(_SRC, "visitor")                      # src/visitor
+for _p in (_ROOT, _SRC, _VISITOR,
+           os.path.join(_VISITOR, "architect"), os.path.join(_VISITOR, "budget"),
+           os.path.join(_VISITOR, "orchestration"), _BW):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
