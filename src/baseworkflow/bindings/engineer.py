@@ -61,7 +61,7 @@ import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from engine import models
+from engine import agent_sdk, models
 from engine.actions import (
     AbstractActionFactory,
     Action,
@@ -225,11 +225,13 @@ def _spec_label(spec: Any) -> str:
     return "general software"
 
 
-def _agent_definitions(units: List[Dict[str, Any]], AgentDefinition) -> Dict[str, Any]:
-    """One AgentDefinition per unit. description = specialization; prompt =
-    deliverable + acceptance + files, with the zero-shared-state note the
-    Architect's own author_orchestration uses."""
-    agents: Dict[str, Any] = {}
+def _agent_definitions(units: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """One sub-agent spec per unit, in the agent-agnostic ``{name: {description,
+    prompt, tools}}`` shape ``engine.agent_sdk`` turns into ``AgentDefinition``
+    objects (so this module never imports ``claude_agent_sdk``). description =
+    specialization; prompt = deliverable + acceptance + files, with the
+    zero-shared-state note the Architect's own author_orchestration uses."""
+    agents: Dict[str, Dict[str, Any]] = {}
     for i, u in enumerate(units):
         uid = str(u.get("id") or f"u{i + 1}")
         label = _spec_label(u.get("specialization") or u.get("domain"))
@@ -247,11 +249,11 @@ def _agent_definitions(units: List[Dict[str, Any]], AgentDefinition) -> Dict[str
         )
         # Sanitize the key to a safe agent name.
         name = "unit-" + "".join(c if (c.isalnum() or c in "-_") else "-" for c in uid)[:48]
-        agents[name] = AgentDefinition(
-            description=f"engineer:{label}",
-            prompt=prompt,
-            tools=["Read", "Edit", "Write", "Bash"],
-        )
+        agents[name] = {
+            "description": f"engineer:{label}",
+            "prompt": prompt,
+            "tools": ["Read", "Edit", "Write", "Bash"],
+        }
     return agents
 
 
@@ -311,28 +313,6 @@ def _build_task_prompt(
 
 
 # ---------------------------------------------------------------------------
-# Token / cost extraction from a usage block. Field names vary across SDK / CLI
-# versions, so probe several (parity with the shell's defensive jq).
-# ---------------------------------------------------------------------------
-def _usage_tokens(usage: Optional[Dict[str, Any]]) -> Tuple[int, int]:
-    if not isinstance(usage, dict):
-        return 0, 0
-
-    def _pick(*keys: str) -> int:
-        for k in keys:
-            v = usage.get(k)
-            if isinstance(v, (int, float)):
-                return int(v)
-        return 0
-
-    tin = _pick("input_tokens", "inputTokens", "prompt_tokens")
-    if tin == 0:
-        tin = _pick("cache_read_input_tokens") + _pick("cache_creation_input_tokens")
-    tout = _pick("output_tokens", "outputTokens", "completion_tokens")
-    return tin, tout
-
-
-# ---------------------------------------------------------------------------
 # Context-sanity gate (issue #159).
 # ---------------------------------------------------------------------------
 def _forbidden_terms() -> List[str]:
@@ -382,159 +362,12 @@ def offline_invoice(job: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# git helper + agentic backends (CLI default; SDK opt-in). Unchanged logic.
+# git helper. The agentic backends (CLI default; SDK opt-in) now live in the
+# generic, agent-agnostic ``engine.agent_sdk`` — reached via its make_runner()
+# factory so the architect (or any agent) drives the same runners.
 # ---------------------------------------------------------------------------
 def _git(clone_dir: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=clone_dir, capture_output=True, text=True)
-
-
-class _CliResult:
-    """A ResultMessage-shaped shim so the backends read uniformly
-    (.result/.usage/.total_cost_usd/.is_error)."""
-
-    def __init__(self) -> None:
-        self.result = ""
-        self.usage: Dict[str, Any] = {}
-        self.total_cost_usd: Optional[float] = None
-        self.is_error = False
-        self.num_turns: Optional[int] = None
-
-
-def _seed_config_auth(cfg_dir: str) -> None:
-    """Seed an isolated ``CLAUDE_CONFIG_DIR`` with ONLY the subscription auth state —
-    login/onboarding (``~/.claude.json``) + the OAuth credential — so the headless
-    ``claude`` is logged in WITHOUT inheriting the operator's ``CLAUDE.md`` / memory /
-    hooks (the issue-#159 isolation goal).
-
-    Subscription auth is NOT keychain-transparent across config homes: once
-    ``CLAUDE_CONFIG_DIR`` is non-default, the CLI reads its credential from the config
-    dir, not the login keychain, so a *fresh* dir is "Not logged in · Please run
-    /login" and every engineering turn errors. The credential is therefore placed into
-    the dir explicitly — from ``~/.claude/.credentials.json`` (Linux) or, on macOS,
-    extracted from the login keychain (service ``Claude Code-credentials``). Best
-    effort: on failure the run still proceeds and surfaces the auth error as a failed
-    Invoice rather than silently mutating."""
-    import shutil as _shutil
-
-    home = os.path.expanduser("~")
-    src_json = os.path.join(home, ".claude.json")
-    if os.path.isfile(src_json):
-        try:
-            _shutil.copyfile(src_json, os.path.join(cfg_dir, ".claude.json"))
-        except OSError:
-            pass
-    dst_cred = os.path.join(cfg_dir, ".credentials.json")
-    src_cred = os.path.join(home, ".claude", ".credentials.json")
-    if os.path.isfile(src_cred):
-        try:
-            _shutil.copyfile(src_cred, dst_cred)
-            return
-        except OSError:
-            pass
-    if sys.platform == "darwin":  # credential lives in the login keychain, not a file
-        try:
-            cred = subprocess.run(
-                ["security", "find-generic-password", "-s", "Claude Code-credentials",
-                 "-a", os.environ.get("USER", ""), "-w"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if cred.returncode == 0 and cred.stdout.strip():
-                with open(dst_cred, "w", encoding="utf-8") as fh:
-                    fh.write(cred.stdout)
-        except Exception:  # noqa: BLE001 — best-effort; auth failure surfaces downstream
-            pass
-
-
-def run_cli(*, clone_dir: str, prompt: str, model: str, timeout: int) -> _CliResult:
-    """Engineering backend via the ``claude`` CLI headless on the Claude
-    SUBSCRIPTION. Used because ``claude_agent_sdk`` 0.2.x hangs under this env
-    (CLI 2.1.x / Python 3.14: anyio stream stalls after the system-init messages),
-    while the CLI itself runs fine. Same subscription auth (ANTHROPIC_API_KEY
-    stripped). The lead agent may still fan out to per-unit engineering agents via
-    its Task/Agent tool (multi-agent); the SCRIPT — never the model — owns git/gh."""
-    sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    # Context isolation (issue #159): repoint the Claude config home to a temp dir so
-    # the OPERATOR's ~/.claude (CLAUDE.md, memory, hooks) does NOT load into the
-    # engineer's session and poison the target deliverable. The dir is seeded with the
-    # subscription auth state ONLY (login + credential) — see _seed_config_auth: a
-    # non-default config home is NOT logged in by default, so without this every turn
-    # errors "Not logged in". The target clone's own CLAUDE.md still loads (cwd-based)
-    # — the wanted signal.
-    import shutil as _shutil
-
-    iso_cfg = tempfile.mkdtemp(prefix="engineer-cfg-")
-    _seed_config_auth(iso_cfg)
-    sub_env["CLAUDE_CONFIG_DIR"] = iso_cfg
-    claude = _envc("CLAUDE_BIN", "claude")
-    cmd = [
-        claude, "-p", prompt,
-        "--output-format", "json",
-        "--permission-mode", "bypassPermissions",
-        "--model", model,
-        "--add-dir", clone_dir,
-    ]
-    try:
-        proc = subprocess.run(
-            cmd, cwd=clone_dir, env=sub_env, capture_output=True, text=True, timeout=timeout
-        )
-    finally:
-        _shutil.rmtree(iso_cfg, ignore_errors=True)
-    res = _CliResult()
-    res.is_error = proc.returncode != 0
-    out = (proc.stdout or "").strip()
-    try:
-        obj = json.loads(out)
-        if isinstance(obj, dict):
-            res.result = str(obj.get("result") or "")
-            res.usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else {}
-            res.total_cost_usd = obj.get("total_cost_usd")
-            res.is_error = bool(obj.get("is_error", res.is_error))
-            res.num_turns = obj.get("num_turns")
-    except (ValueError, TypeError):
-        res.result = out  # non-JSON stdout: treat as the result text
-    if res.is_error and not res.result:
-        res.result = (proc.stderr or "").strip()[:500]
-    return res
-
-
-def run_sdk(*, clone_dir: str, prompt: str, model: str, units: List[Dict[str, Any]], timeout: int):
-    """Drive claude_agent_sdk.query over asyncio; return the terminal
-    ResultMessage (or None if none arrived). Subscription auth: options.env is a
-    copy of os.environ with ANTHROPIC_API_KEY removed so the spawned CLI uses the
-    logged-in subscription, not API billing."""
-    import asyncio
-
-    from claude_agent_sdk import (  # imported lazily so OFFLINE never needs it
-        AgentDefinition,
-        ClaudeAgentOptions,
-        ResultMessage,
-        query,
-    )
-
-    sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-
-    allowed_tools = ["Read", "Edit", "Write", "Bash", "Agent", "Task"]
-    opts_kwargs: Dict[str, Any] = dict(
-        cwd=clone_dir,
-        add_dirs=[clone_dir],
-        permission_mode="bypassPermissions",  # disposable target; §skip-perms posture
-        model=model,
-        allowed_tools=allowed_tools,
-        env=sub_env,
-    )
-    if units:
-        opts_kwargs["agents"] = _agent_definitions(units, AgentDefinition)
-
-    options = ClaudeAgentOptions(**opts_kwargs)
-
-    async def _drive():
-        result = None
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, ResultMessage):
-                result = message
-        return result
-
-    return asyncio.run(asyncio.wait_for(_drive(), timeout=timeout))
 
 
 # ===========================================================================
@@ -657,14 +490,14 @@ def _engineer_runner(spec: InferenceSpec, payload: Any, ctx: Context) -> Output:
     clone_dir = _sh(ctx).get("clone_dir")
     prompt, model, units, timeout = s["prompt"], s["model"], s["units"], s["timeout"]
     backend = _envc("ENGINEER_BACKEND", "cli").lower()
-    _log(f"running engineer backend={backend} (model {model}, timeout {timeout}s, subscription auth)")
+    runner = agent_sdk.make_runner(backend)
+    _log(f"running engineer backend={runner.name} (model {model}, timeout {timeout}s, subscription auth)")
+    run_spec = agent_sdk.AgentRunSpec(
+        cwd=clone_dir, prompt=prompt, model=model, timeout=timeout,
+        subagents=_agent_definitions(units) if units else None,
+    )
     try:
-        if backend == "sdk":
-            result = run_sdk(
-                clone_dir=clone_dir, prompt=prompt, model=model, units=units, timeout=timeout
-            )
-        else:
-            result = run_cli(clone_dir=clone_dir, prompt=prompt, model=model, timeout=timeout)
+        result = runner.run(run_spec)
     except subprocess.TimeoutExpired:
         _sh(ctx).update({"is_error": True, "result_text": "",
                          "summary": f"Engineer session timed out after {timeout}s on #{s['issue']}."})
@@ -682,7 +515,7 @@ def _engineer_runner(spec: InferenceSpec, payload: Any, ctx: Context) -> Output:
     result_text = ""
     is_error = False
     if result is not None:
-        tokens_in, tokens_out = _usage_tokens(getattr(result, "usage", None))
+        tokens_in, tokens_out = agent_sdk.usage_tokens(getattr(result, "usage", None))
         result_text = (getattr(result, "result", None) or "").strip()
         is_error = bool(getattr(result, "is_error", False))
         if getattr(result, "total_cost_usd", None) is not None:
@@ -779,7 +612,8 @@ def act_contamination(_inputs: Any, ctx: Context) -> Any:
             "this repository's own files. Edit the files; do not commit."
         )
         try:
-            run_cli(clone_dir=clone_dir, prompt=scrub, model=s["model"], timeout=min(s["timeout"], 300))
+            agent_sdk.make_runner("cli").run(agent_sdk.AgentRunSpec(
+                cwd=clone_dir, prompt=scrub, model=s["model"], timeout=min(s["timeout"], 300)))
         except Exception as exc:  # noqa: BLE001 — remediation is best-effort
             _log(f"context-sanity: remediation pass error: {exc}")
         if _git(clone_dir, "status", "--porcelain").stdout.strip():
