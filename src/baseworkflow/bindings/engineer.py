@@ -550,9 +550,13 @@ def act_judge_and_commit(_inputs: Any, ctx: Context) -> Any:
         _git(clone_dir, "add", "-A")
         commit = _git(
             clone_dir,
-            "-c", "user.name=dispatch-engineer",
-            "-c", "user.email=dispatch-engineer@reclaimbydesign.local",
-            "-c", "commit.gpgsign=false",  # bot commit; headless has no GPG TTY/pinentry
+            # No identity override: inherit whatever git author the environment
+            # configured (the operator's global user.name/user.email), matching
+            # claude-engineer.sh. A synthetic 'dispatch-engineer' author leaks to
+            # the remote on paths that push the local commit directly (oneshot) and
+            # breaks downstream author attribution (e.g. Vercel). gpgsign off:
+            # headless has no GPG TTY/pinentry.
+            "-c", "commit.gpgsign=false",
             "commit", "-q", "-m", f"Implement #{s['issue']}: {s['title']}\n\nCloses #{s['issue']}",
         )  # may be a no-op when the model already committed
         if commit.returncode != 0:
@@ -624,8 +628,7 @@ def act_contamination(_inputs: Any, ctx: Context) -> Any:
             _git(clone_dir, "add", "-A")
             _git(
                 clone_dir,
-                "-c", "user.name=dispatch-engineer",
-                "-c", "user.email=dispatch-engineer@reclaimbydesign.local",
+                # Inherit the operator's global git identity (no synthetic author).
                 "-c", "commit.gpgsign=false",
                 "commit", "-q", "-m", f"Scrub leaked harness terms ({', '.join(leaked)}) from #{s['issue']}",
             )
