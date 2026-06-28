@@ -1,0 +1,18 @@
+# web:scaffold_foundation — finalizes the foundation SPEC deliverable
+# {framework, dir_layout, key_files} against the engineering result. Added into the
+# `work` phase after the engineer loop (via the scaffold-foundation `add` overlay).
+# A deterministic spec procedure; the live engineer does the real codegen, admin
+# opens the PR.
+token: web:scaffold_foundation
+kind: procedure
+bind: scaffold_foundation
+permission: []                  # deny-by-default: this body only writes a shelf spec
+budget: architect
+interface:
+  in:
+    foundation_spec: deliverables.foundation_spec
+    strategy: deliverables.strategy
+    job: input.job
+    triage: input.triage
+  out:
+    foundation_spec: deliverables.foundation_spec

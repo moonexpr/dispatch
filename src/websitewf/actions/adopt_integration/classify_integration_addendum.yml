@@ -1,0 +1,16 @@
+# web:classify_integration_addendum — augments architect:classify_strategy (via the
+# websitewf-adopt-integration `extend ... mode: after` overlay). The base strategy
+# classifier still runs; this reads its result + the job and plans the adoption,
+# tagging the integration target onto the strategy and writing it back.
+token: web:classify_integration_addendum
+kind: procedure
+bind: classify_integration_addendum
+interface:
+  in:
+    strategy: deliverables.strategy
+    job: input.job
+  out:
+    strategy: deliverables.strategy
+    # Author the adoption spec early (spec phase) so the engineer proxy can source
+    # its orchestration_script from deliverables.integration_spec upstream.
+    integration_spec: deliverables.integration_spec

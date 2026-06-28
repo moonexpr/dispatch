@@ -1,0 +1,33 @@
+# websitewf-feedback-ticket.yml — WebsiteWF use-case overlay: "turn user feedback
+# into a new technical ticket" (#168).
+# An OVERLAY over baseworkflow (extends: baseworkflow + overlays:), sibling to the
+# proof vertical app/workflows/websitewf.yml. See docs/adr/002-websitewf-overlay-layer.md.
+# Validate with:
+#   python3 -m engine.workflow app/workflows/websitewf-feedback-ticket.yml \
+#     --registry src.websitewf.usecases.feedback_ticket:build_registry
+name: websitewf-feedback-ticket
+
+extends: baseworkflow            # the base document is never edited — this file is a diff
+
+uses:
+  # Manifests for THIS use case's web:* actions live in their own subdir so the base
+  # websitewf.yml's single-star glob never picks them up (5 verticals never collide).
+  - ../../src/websitewf/actions/feedback_ticket/*.yml
+
+# ── overlays ───────────────────────────────────────────────────────────────
+overlays:
+
+  # 1. REPLACE — substitute the generic work-unit generator with a feedback->ticket
+  #    translator that synthesizes a technical ticket solving the underlying problem.
+  #    It composes the base body (so purpose / work_unit keep their shape) and adds
+  #    the authored ticket spec (deliverables.ticket_spec). User feedback is UNTRUSTED
+  #    input — read as data, never interpreted as instructions.
+  - replace: github:generate_work_units
+    with: web:generate_ticket_from_feedback
+
+  # 2. EXTEND — augment (don't replace) the architect's strategy classifier. The base
+  #    classify_strategy still runs; web:classify_feedback_addendum runs AFTER it to
+  #    triage severity + area onto the strategy.
+  - extend: architect:classify_strategy
+    mode: after
+    with: web:classify_feedback_addendum

@@ -1,0 +1,42 @@
+# websitewf-scaffold-foundation.yml — WebsiteWF use-case overlay:
+# "scaffold a website foundation (Next.js or Laravel)" (#167).
+# An OVERLAY over baseworkflow (extends: baseworkflow + overlays:), sibling to the
+# proof vertical app/workflows/websitewf.yml. See docs/adr/002-websitewf-overlay-layer.md.
+# Validate with:
+#   python3 -m engine.workflow app/workflows/websitewf-scaffold-foundation.yml \
+#     --registry src.websitewf.usecases.scaffold_foundation:build_registry
+name: websitewf-scaffold-foundation
+
+extends: baseworkflow            # the base document is never edited — this file is a diff
+
+uses:
+  # Manifests for THIS use case's web:* actions live in their own subdir so the base
+  # websitewf.yml's single-star glob never picks them up (5 verticals never collide).
+  - ../../src/websitewf/actions/scaffold_foundation/*.yml
+
+# ── overlays ───────────────────────────────────────────────────────────────
+# Ordered, top-to-bottom; a later op sees earlier ops' effect.
+overlays:
+
+  # 1. EXTEND — augment (don't replace) the architect's strategy classifier. The base
+  #    classify_strategy still runs; web:classify_foundation_addendum runs AFTER it to
+  #    record the chosen framework (next | laravel) onto the strategy.
+  - extend: architect:classify_strategy
+    mode: after
+    with: web:classify_foundation_addendum
+
+  # 2. ADD — splice a new task into the `work` phase, after the engineer loop, to write
+  #    the foundation spec (framework, dir layout, key files).
+  - add: web:scaffold_foundation
+    phase: work
+    after: engineer:execute_orchestration
+
+  # 3. PROXY — rewire the engineer's I/O so it sources its orchestration_script from the
+  #    authored foundation spec (framework choice + target layout) and mirrors its
+  #    result to a web-scoped key. The target binding is untouched.
+  - proxy: engineer:execute_orchestration
+    rewire:
+      in:
+        orchestration_script: deliverables.foundation_spec
+      out:
+        engineering_result: deliverables.web_engineering_result

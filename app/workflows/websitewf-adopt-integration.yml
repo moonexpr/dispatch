@@ -1,0 +1,42 @@
+# websitewf-adopt-integration.yml — WebsiteWF use-case overlay:
+# "adopt existing / third-party technology (e.g. Stripe) into an application" (#170).
+# An OVERLAY over baseworkflow (extends: baseworkflow + overlays:), sibling to the
+# proof vertical app/workflows/websitewf.yml. See docs/adr/002-websitewf-overlay-layer.md.
+# Validate with:
+#   python3 -m engine.workflow app/workflows/websitewf-adopt-integration.yml \
+#     --registry src.websitewf.usecases.adopt_integration:build_registry
+name: websitewf-adopt-integration
+
+extends: baseworkflow            # the base document is never edited — this file is a diff
+
+uses:
+  # Manifests for THIS use case's web:* actions live in their own subdir so the base
+  # websitewf.yml's single-star glob never picks them up (the 5 verticals never collide).
+  - ../../src/websitewf/actions/adopt_integration/*.yml
+
+# ── overlays ───────────────────────────────────────────────────────────────
+# Ordered, top-to-bottom; a later op sees earlier ops' effect.
+overlays:
+
+  # 1. EXTEND — augment (don't replace) the architect's strategy classifier. The base
+  #    classify_strategy still runs; web:classify_integration_addendum runs AFTER it to
+  #    plan the adoption (tag the integration target onto the strategy).
+  - extend: architect:classify_strategy
+    mode: after
+    with: web:classify_integration_addendum
+
+  # 2. ADD — splice a new task into the `work` phase, after the engineer loop, to
+  #    author the adoption spec (SDK/library choice, config, env-var NAMES, glue points).
+  - add: web:adopt_integration
+    phase: work
+    after: engineer:execute_orchestration
+
+  # 3. PROXY — rewire the engineer's I/O via a proxy action. The target binding is
+  #    untouched; the proxy sources the engineer's orchestration_script from the
+  #    authored integration spec, and mirrors its result to a web-scoped key.
+  - proxy: engineer:execute_orchestration
+    rewire:
+      in:
+        orchestration_script: deliverables.integration_spec
+      out:
+        engineering_result: deliverables.web_engineering_result

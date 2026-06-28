@@ -1,0 +1,15 @@
+# web:adopt_integration — authors the adoption SPEC for bringing a third-party
+# technology (e.g. Stripe) into the app. Added into the `work` phase after the
+# engineer loop (via the websitewf-adopt-integration `add` overlay). Reads the job
+# and emits an integration spec: SDK/library choice, config, env-var NAMES, glue
+# points. SECURITY: env_var_names are NAMES ONLY — never secret values.
+token: web:adopt_integration
+kind: procedure
+bind: adopt_integration
+permission: []                  # deny-by-default; this body only writes a shelf spec
+budget: architect
+interface:
+  in:
+    job: input.job
+  out:
+    integration_spec: deliverables.integration_spec

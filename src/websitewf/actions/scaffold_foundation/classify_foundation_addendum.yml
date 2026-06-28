@@ -1,0 +1,19 @@
+# web:classify_foundation_addendum — augments architect:classify_strategy (via the
+# scaffold-foundation `extend ... mode: after` overlay). The base strategy classifier
+# still runs; this reads its result + job/triage, records the chosen framework
+# (next | laravel) onto the strategy, AND authors the foundation_spec in the spec
+# phase so the proxy can feed it to the engineer. Matches the base token's strategy
+# I/O contract (in strategy: deliverables.strategy, out the same), plus foundation_spec.
+token: web:classify_foundation_addendum
+kind: procedure
+bind: classify_foundation_addendum
+permission: []
+budget: architect
+interface:
+  in:
+    strategy: deliverables.strategy
+    job: input.job
+    triage: input.triage
+  out:
+    strategy: deliverables.strategy
+    foundation_spec: deliverables.foundation_spec

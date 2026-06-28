@@ -1,0 +1,34 @@
+# websitewf-ux-loop-issues.yml — WebsiteWF use-case overlay: "create new GitHub
+# issues from UX loops / website use cases" (#166).
+# An OVERLAY over baseworkflow (extends: baseworkflow + overlays:), sibling to the
+# proof vertical app/workflows/websitewf.yml. See docs/adr/002-websitewf-overlay-layer.md.
+# Validate with:
+#   python3 -m engine.workflow app/workflows/websitewf-ux-loop-issues.yml \
+#     --registry src.websitewf.usecases.ux_loop_issues:build_registry
+name: websitewf-ux-loop-issues
+
+extends: baseworkflow            # the base document is never edited — this file is a diff
+
+uses:
+  # Manifests for THIS use case's web:* actions live in their own subdir so the base
+  # websitewf.yml's single-star glob never picks them up (5 verticals never collide).
+  - ../../src/websitewf/actions/ux_loop_issues/*.yml
+
+# ── overlays ───────────────────────────────────────────────────────────────
+overlays:
+
+  # 1. REPLACE — substitute the generic work-unit author with a web-aware author that
+  #    emits well-formed proposed GitHub ISSUES (work-order shape: title/body/
+  #    acceptance/labels) as DATA. It composes the base body so purpose / work_unit
+  #    keep the exact shape downstream base actions expect, and adds proposed_issues.
+  #    The deliverable is DATA only — it never calls `gh`.
+  - replace: github:generate_work_units
+    with: web:generate_issue_work_units
+
+  # 2. EXTEND — augment (don't replace) the architect's strategy classifier so it
+  #    recognizes UX-loop / use-case inputs. The base classify_strategy still runs;
+  #    web:classify_uxloop_addendum runs AFTER it to tag the use-case signal onto
+  #    the strategy (reads + writes deliverables.strategy, matching the base I/O).
+  - extend: architect:classify_strategy
+    mode: after
+    with: web:classify_uxloop_addendum

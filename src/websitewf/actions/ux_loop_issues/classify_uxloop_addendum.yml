@@ -1,0 +1,16 @@
+# web:classify_uxloop_addendum — augments architect:classify_strategy (via the
+# ux-loop-issues `extend ... mode: after` overlay). The base strategy classifier
+# still runs; this reads its result + the job/proposed issues and tags the UX-loop /
+# use-case signal onto the strategy, writing the augmented strategy back (matching
+# the base I/O so the merged data-flow validates).
+token: web:classify_uxloop_addendum
+kind: procedure
+bind: classify_uxloop_addendum
+permission: []                  # deny-by-default
+budget: architect
+interface:
+  in:
+    strategy: deliverables.strategy
+    proposed_issues: deliverables.proposed_issues
+  out:
+    strategy: deliverables.strategy

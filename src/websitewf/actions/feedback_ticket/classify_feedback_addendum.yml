@@ -1,0 +1,13 @@
+# web:classify_feedback_addendum — augments architect:classify_strategy (via the
+# feedback-ticket `extend ... mode: after` overlay). The base strategy classifier
+# still runs; this reads its result + the synthesized ticket spec and triages
+# severity + area onto the strategy, writing the augmented strategy back.
+token: web:classify_feedback_addendum
+kind: procedure
+bind: classify_feedback_addendum
+interface:
+  in:
+    strategy: deliverables.strategy
+    ticket_spec: deliverables.ticket_spec
+  out:
+    strategy: deliverables.strategy

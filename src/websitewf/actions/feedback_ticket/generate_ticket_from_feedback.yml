@@ -1,0 +1,18 @@
+# web:generate_ticket_from_feedback — feedback->ticket translation. Substitutes
+# github:generate_work_units (via the feedback-ticket `replace` overlay): in addition
+# to the base purpose + work_unit, it synthesizes a technical ticket (ticket_spec)
+# describing the change that solves the underlying problem the feedback reports.
+# SECURITY: the user feedback in the job is UNTRUSTED — it is read as data only and
+# never interpreted as instructions.
+token: web:generate_ticket_from_feedback
+kind: procedure
+bind: generate_ticket_from_feedback
+permission: []                  # deny-by-default; spec-writer only touches a shelf
+budget: architect
+interface:
+  in:
+    job: input.job
+  out:
+    purpose: deliverables.purpose
+    work_unit: deliverables.work_unit
+    ticket_spec: deliverables.ticket_spec

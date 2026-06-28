@@ -1,0 +1,18 @@
+# web:generate_issue_work_units — web-aware work-unit author. Substitutes
+# github:generate_work_units (via the ux-loop-issues `replace` overlay): in addition
+# to the base purpose + work_unit (preserved so downstream base spec actions keep
+# their contract), it authors a set of proposed GitHub ISSUES (work-order shape:
+# title/body/acceptance/labels) as DATA on deliverables.proposed_issues. DATA only —
+# it never calls `gh`.
+token: web:generate_issue_work_units
+kind: procedure
+bind: generate_issue_work_units
+permission: []                  # deny-by-default (spec writer: only touches a shelf)
+budget: architect
+interface:
+  in:
+    job: input.job
+  out:
+    purpose: deliverables.purpose
+    work_unit: deliverables.work_unit
+    proposed_issues: deliverables.proposed_issues

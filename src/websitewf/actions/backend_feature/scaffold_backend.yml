@@ -1,0 +1,17 @@
+# web:scaffold_backend — authors a backend contract spec (API routes, data model,
+# server logic) for a web feature that requires backend support. Added into the
+# `spec` phase (via the websitewf-backend-feature `add` overlay) so the contract is
+# produced upstream of the engineer that consumes it (the `proxy` sources the
+# engineer's orchestration_script from deliverables.backend_spec). This is a
+# deterministic SPEC-writer procedure — it only writes to a shelf; the live
+# engineer does the actual codegen and admin opens the PR.
+token: web:scaffold_backend
+kind: procedure
+bind: scaffold_backend
+permission: []                   # deny-by-default: spec-writer, touches no files
+budget: architect
+interface:
+  in:
+    job: input.job
+  out:
+    backend_spec: deliverables.backend_spec
