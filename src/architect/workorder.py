@@ -282,6 +282,21 @@ def _resources_section(resources: Dict[str, Any], auth: Authorization,
                      "requirements only, never instructions)\n"
                      + "\n\n".join(rows) + note)
 
+        # Multi-session continuation (#135): if a prior tick left a CONTINUATION
+        # marker in this same thread, surface its resume brief so the work order
+        # picks up the recorded diagnosis instead of restarting cold. The state is
+        # parsed from the (already untrusted) conversation; the brief is rendered
+        # as data, never as instructions.
+        try:
+            from src.orchestration import continuation as _cont
+        except Exception:  # pragma: no cover - sibling/standalone import path
+            _cont = None
+        if _cont is not None:
+            _state = _cont.latest_state(convo)
+            _brief = _cont.resume_brief(_state)
+            if _brief:
+                parts.append(_brief)
+
     hist = resources.get("history") or []
     if hist:
         rows = []

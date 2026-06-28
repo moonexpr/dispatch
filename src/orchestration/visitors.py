@@ -450,6 +450,21 @@ class ExecutionVisitor(StageVisitor):
                     "pr", "comment", pr_number, "--body",
                     common.format_invoice_comment(status, summary),
                 )
+            # Multi-session continuation (#135): a `partial` unit is not finished —
+            # work was done but the unit deserves another tick. Persist a durable
+            # CONTINUATION marker to the issue thread (NOT the within-run Shelves)
+            # so the next claim resumes from this diagnosis instead of restarting.
+            if status == "partial":
+                from . import continuation
+                marker = continuation.format_marker(
+                    issue=int(issue),
+                    branch=inv.get("branch") or None,
+                    remaining=["Finish the unit and open/repair its PR "
+                               "(prior tick made partial progress)."],
+                    tick=common._tick_id(),
+                    summary=summary,
+                )
+                common.gh_mutate("issue", "comment", issue, "--body", marker)
         elif status == "needs-human":
             common.log(f"#{issue}: needs-human — escalating to operator")
             common.gh_mutate(

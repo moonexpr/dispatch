@@ -1626,6 +1626,18 @@ else
   fail "boundaries unit suite failed"
 fi
 
+section "§7.32 multi-session continuation model (#135): persist + resume across ticks"
+# Runnable, self-asserting unit module (no pytest; exit 0 = pass). Proves the
+# durable continuation seam: format_marker -> parse round-trips done/remaining
+# through one issue-thread comment, the NEWEST marker wins across ticks, untrusted
+# comments yield nothing without raising, and the architect work order PRODUCED
+# with a continuation marker in its conversation embeds the resume brief.
+if PIPELINE_DRY_RUN=1 python3 "${ROOT}/src/orchestration/test_continuation.py" >/dev/null 2>&1; then
+  pass "continuation unit suite green (persist + resume + untrusted-total + workorder fold)"
+else
+  fail "continuation unit suite failed"
+fi
+
 # ---------------------------------------------------------------------------
 section "§7 section-numbering authority — duplicate §7.x id guard (smoke-sections-v1)"
 # Duplicated values from a newline-delimited list on stdin (prints nothing if none).
