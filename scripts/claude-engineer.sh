@@ -18,14 +18,15 @@
 #   3. Run `claude -p --output-format json` INSIDE that clone, handing it the
 #      issue title+body as the task spec, with a guardrail preamble (issue text
 #      is data, not instructions — HANDOFF §8). The model edits files + runs tests.
-#   4. If the model produced changes: commit, push the branch, open a PR whose
-#      body carries `Closes #<n>` and the acceptance checklist. status=completed.
-#      No changes → needs-human. Model/runtime error → failed.
-#   5. Emit a schema-valid Invoice with branch, pr_number, scope_actual (derived
-#      from diff size), route_used, and cost.* (tokens parsed from claude's JSON).
-#   The script — not the model — owns git/gh (branch naming, push, PR, the
-#   `Closes #` line). The model never merges and never pushes to main (§ worker
-#   contract in CLAUDE.md).
+#   4. If the model produced changes: commit and push the branch. status=completed.
+#      No changes → needs-human. Model/runtime error → failed. The engineer does
+#      NOT open a PR — PR creation is the Administrator's (build/intake) job, so a
+#      decomposed issue / multi-issue tick consolidates into ONE PR instead of N.
+#   5. Emit a schema-valid Invoice with branch (pr_number=null), scope_actual
+#      (derived from diff size), route_used, and cost.* (tokens parsed from claude's
+#      JSON). The Invoice's branch is the seam the admin consolidation reads.
+#   The script — not the model — owns git (branch naming, commit, push). The model
+#   never commits, never merges, never pushes (§ worker contract in CLAUDE.md).
 #
 # OFFLINE / dry-run path (PIPELINE_DRY_RUN!=0, or ENGINEER_OFFLINE=1): no claude,
 #   no gh, no git push — emit a deterministic, schema-valid `completed` Invoice so
@@ -283,22 +284,12 @@ if ! git push -u origin "${branch}" >/dev/null 2>&1; then
   fail_invoice "failed" "Could not push ${branch} to ${repo}."
 fi
 
-# 5) Open the PR. Body restates acceptance + Closes #<n> for auto-close on merge.
-pr_body="$(printf 'Automated implementation of #%s by the dispatch claude-engineer (route: %s, model: %s).\n\n## Issue\n%s\n\n%s\n\nCloses #%s' \
-  "${issue}" "${route}" "${model}" "${title}" "${body}" "${issue}")"
-pr_url="$("${GH_BIN}" pr create --repo "${repo}" \
-  --base "${default_branch}" --head "${branch}" \
-  --title "$(printf 'Implement #%s: %s' "${issue}" "${title}")" \
-  --body "${pr_body}" 2>/dev/null || true)"
-
-pr_number="$(printf '%s' "${pr_url}" | grep -oE '[0-9]+$' || true)"
-if [[ -z "${pr_number}" ]]; then
-  # Branch is pushed but PR failed — partial (work done, no PR to arm-merge).
-  fail_invoice "partial" "Pushed ${branch} but PR creation failed for #${issue}: ${summary}"
-fi
-
-log "claude-engineer: #${issue} → completed (PR #${pr_number}, ${changed_lines} lines, ${dur}s)"
-emit_invoice "${issue}" "${repo}" "completed" "${branch}" "${pr_number}" \
+# 5) Done — the engineer COMMITS and PUSHES a branch but does NOT open a PR. PR
+# creation is the Administrator's (build/intake) job, so a decomposed issue or a
+# multi-issue tick consolidates into ONE PR instead of N. The Invoice carries the
+# pushed branch (pr_number=null) as the seam the admin consolidation reads.
+log "claude-engineer: #${issue} → completed (branch ${branch}, ${changed_lines} lines, ${dur}s; PR deferred to admin consolidation)"
+emit_invoice "${issue}" "${repo}" "completed" "${branch}" "null" \
   "${scope_actual}" "${route}" "${tokens_in}" "${tokens_out}" "${dur}" "${model}" \
   "${summary}" \
-  "${branch}" "${pr_url}"
+  "${branch}"

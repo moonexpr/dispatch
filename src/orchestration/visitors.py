@@ -328,6 +328,37 @@ class ExecutionVisitor(StageVisitor):
     def visit_engineer(self, stage, ctx) -> int:
         return common.engineer_dispatch(ctx.job_request)
 
+    # ------------------------------------------------ admin: PR consolidation
+    def _open_consolidated_pr(self, issue: str, branch: str, summary: str) -> str:
+        """Open ONE PR for the engineer's pushed branch. PR creation is the
+        Administrator's job now, not the engineer's (the engineer commits + pushes a
+        branch, pr_number=null), so a decomposed issue lands as a single PR. Dry-run
+        records the intended ``gh pr create`` (greppable) and returns ``""`` (no PR
+        to arm); live captures the new PR number. Body carries ``Closes #<n>`` for
+        auto-close on (squash-)merge. Base: ``PIPELINE_DEFAULT_BRANCH`` (default
+        ``main``)."""
+        base = os.environ.get("PIPELINE_DEFAULT_BRANCH", "main")
+        pr_title = f"Implement #{issue}"
+        pr_body = (
+            f"Consolidated implementation of #{issue} by the dispatch pipeline: the "
+            f"engineer committed to `{branch}`; the Administrator opened this PR.\n\n"
+            f"{summary}\n\nCloses #{issue}"
+        )
+        args = ["pr", "create", "--base", base, "--head", branch,
+                "--title", pr_title, "--body", pr_body]
+        if common.is_dry_run():
+            common.gh_mutate(*args)  # records the intended call; no network
+            return ""
+        cmd = [os.environ["GH_BIN"], *args, *common.gh_repo_args()]
+        res = proc.run(cmd, capture=True)
+        url = (res.stdout or "").strip()
+        tail = url.rstrip("/").rsplit("/", 1)[-1] if url else ""
+        if res.returncode == 0 and tail.isdigit():
+            common.log(f"#{issue}: admin opened consolidated PR #{tail} for {branch}")
+            return tail
+        common.log(f"#{issue}: admin PR creation failed for {branch} (rc={res.returncode})")
+        return ""
+
     # -------------------------------------------------------- intake-invoice
     def visit_intake_invoice(self, stage, ctx) -> None:
         """Handle the Invoice returned by the Engineer (was architect-intake.sh)."""
@@ -367,6 +398,15 @@ class ExecutionVisitor(StageVisitor):
         common.ledger_emit("invoice", issue, cost_fields)
 
         if status == "completed":
+            # The engineer commits + pushes a branch but does NOT open a PR — admin
+            # owns PR creation (so a decomposed issue / multi-issue tick consolidates
+            # into ONE PR). If the Invoice carries no PR, open the consolidated PR
+            # for its branch now, then arm auto-merge on it. (Fixtures that already
+            # carry a pr_number skip this and arm directly — back-compat.)
+            if not pr_number:
+                branch = inv.get("branch") or ""
+                if branch:
+                    pr_number = self._open_consolidated_pr(issue, branch, summary)
             common.log(f"#{issue}: completed — arming auto-merge")
             if pr_number:
                 common.gh_mutate(
