@@ -2,7 +2,7 @@
 # abort conditions, issues affected, bucket, UML for B|C, authorization). Emitted
 # as JSON (fmt), so the inference carries a JSON adapter.
 token: architect:draft_work_plan
-kind: inference
+kind: procedure
 fmt: json
 bind: draft_work_plan
 permission: []

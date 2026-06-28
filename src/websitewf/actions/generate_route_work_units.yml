@@ -4,7 +4,7 @@
 # the page/route to add (framework + path), consumed downstream by the proxy and
 # the scaffold task.
 token: web:generate_route_work_units
-kind: inference
+kind: procedure
 bind: generate_route_work_units
 permission: []                  # deny-by-default
 budget: architect

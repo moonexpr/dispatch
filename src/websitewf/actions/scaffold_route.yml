@@ -2,7 +2,7 @@
 # `work` phase after the engineer loop (via the websitewf `add` overlay). Reads the
 # authored route spec + the engineering result and emits a scaffold result.
 token: web:scaffold_route
-kind: inference
+kind: procedure
 bind: scaffold_route
 permission: [Read, Write, Edit, Bash]
 budget: engineering

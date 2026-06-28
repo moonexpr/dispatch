@@ -1,7 +1,7 @@
 # A2 — derive the A|B|C strategy (sequential | swarm | dynamic-workflow) from the
 # plan + purpose.
 token: architect:classify_strategy
-kind: inference
+kind: procedure
 bind: classify_strategy
 permission: []
 budget: architect

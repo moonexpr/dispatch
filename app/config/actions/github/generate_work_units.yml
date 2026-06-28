@@ -1,7 +1,7 @@
 # A1 — read the work unit from the issue and classify its purpose (drives the
 # engineering harness). A judgment, so an inference (oracle-backed under mock).
 token: github:generate_work_units
-kind: inference
+kind: procedure
 bind: generate_work_units
 permission: []                  # deny-by-default
 budget: architect

@@ -130,6 +130,9 @@ class Context:
 InferenceRunner = Callable[[Any, Any, Context], Any]
 
 
+# TODO(John): add a 'lifetime' to actions in the future — an explicit notion of how
+# long an action (and any agent it spawns) lives / when it is (re)evaluated, so the
+# mock-vs-live and agent fan-out semantics are first-class rather than implied by kind.
 class Action(ABC):
     """Uniform execution atom. Subclasses implement ``_invoke``; ``run`` is the
     shared, final entry point that normalises results, traps exceptions into

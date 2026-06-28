@@ -1,7 +1,7 @@
 # M2 — author adversarial tests against the work plan's acceptance criteria. A
 # judgment, so an inference; mock yields a deterministic test outline per criterion.
 token: admin:write_adversarial
-kind: inference
+kind: procedure
 bind: write_adversarial
 permission: []
 budget: admin
