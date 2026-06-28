@@ -102,6 +102,25 @@ Dry-run is fully green end-to-end (all 4 overlay verbs, 2-agent decomposition, f
    convenient — operator: "no visitor orchestration, that's dead code; router code goes in
    dispatch.py directly."
 
+7. **(BLOCKER for #6) The baseworkflow ACTION BINDINGS still depend on visitor-lineage code —
+   refactor needed.** The workflow engine's binding modules are thin wrappers; the real
+   subsystem logic lives in `src/visitor/` (the dead lineage), so the engine is NOT
+   self-contained and the visitor lineage can't be retired until this is moved out. Operator
+   flagged `src/baseworkflow/bindings/github.py` as an example. Full list (flat imports resolved
+   via `bindings/__init__` sys.path manipulation — comments say `src/architect/*` &
+   `src/orchestration/*` but those now live under `src/visitor/`):
+   - `bindings/github.py` → `import purpose`  (`src/visitor/architect/purpose.py`)
+   - `bindings/architect.py` → `import decompose, resources, strategy`  (`src/visitor/architect/*`)
+   - `bindings/budget.py` → `import approval`  (`src/visitor/architect/approval.py`)
+   - `bindings/admin.py` → `import prep, rescaffold, common`  (`src/visitor/architect/{prep,rescaffold}.py`,
+     `src/visitor/orchestration/common.py` — the dry-run-aware **gh wrapper** + run-ledger)
+   - `bindings/engineer.py` → `from seam import SEAM_SCHEMA_VERSION`  (`src/visitor/orchestration/seam.py`)
+   **Refactor:** lift these subsystems (decompose / strategy / purpose / approval / resources /
+   prep / rescaffold, and `common`'s gh/dry-run/ledger helpers + `seam`) into the engine or
+   `src/baseworkflow/` so the workflow engine owns its logic and `src/visitor/` can be deleted.
+   The deterministic-body→`procedure` flip (commit `e0d49a0`) only retargeted the *kinds*; the
+   bodies still call into `src/visitor/`.
+
 ## Gotchas
 - **Shell is `fish`**, not bash — `for f in $files` does NOT word-split a string var. Pass
   multiple files to one command, or use `bash -c`.
