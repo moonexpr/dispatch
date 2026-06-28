@@ -99,19 +99,26 @@ def run_mock(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
 
 
 def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = True) -> Dict[str, Any]:
-    """Run WebsiteWF against the RealActionFactory (same summary shape as run_mock).
+    """Run WebsiteWF against the ArchitectFactory (same summary shape as run_mock).
     Under ``dry_run=True`` the inference runner emits a deterministic placeholder
     instead of calling a model."""
     import shutil
     import tempfile
 
-    from engine.actions import RealActionFactory
+    # ArchitectFactory is a RealActionFactory whose only override is the live
+    # architect:draft_work_plan inference — it computes the deterministic baseline
+    # work plan and FAILS SAFE to it on any model/parse error (e.g. an empty SDK
+    # response), instead of letting the generic inference runner raise on a json.loads
+    # of empty output. WebsiteWF inherits the same single inference, so it needs the
+    # same fail-safe factory baseworkflow.run_live uses (not the plain
+    # RealActionFactory, which has no architect fallback).
+    from src.baseworkflow.bindings.architect import ArchitectFactory
 
     # Per-run isolated shelf root (see baseworkflow.run_live): a fresh temp root per
     # tick, torn down after, so concurrent / sequential ticks can't read each other's
     # stale shelf state (shelves are within-run only — CLAUDE.md).
     shelf_root = tempfile.mkdtemp(prefix="dispatch-shelves-")
     try:
-        return _run(RealActionFactory(shelf_root=shelf_root), job, triage, dry_run=dry_run)
+        return _run(ArchitectFactory(shelf_root=shelf_root), job, triage, dry_run=dry_run)
     finally:
         shutil.rmtree(shelf_root, ignore_errors=True)
