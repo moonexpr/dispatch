@@ -54,6 +54,11 @@ phases:
         abort_when: engineering_failed
         max_iterations: 3
         body: engineer:execute_orchestration
+    # M5.5 — pre-flight the repo's CI gate against the engineer's LOCAL branch
+    # before any PR is opened. A gate failure downgrades engineering_result to
+    # `failed`, so the build phase skips the PR and runs the fix ladder instead of
+    # shipping a branch CI would reject. No-op under dry-run / in-process.
+    - admin:verify_ci
 
   # build — the Administrator's documentation + persistence, then the squash-
   # consolidation (open ONE PR for the engineering branch — engineers commit, the
@@ -63,6 +68,7 @@ phases:
   # stored record + the consolidated PR number are all available.
   build:
     - admin:update_docs
+    - admin:publish
     - admin:store
     - admin:consolidate_pr
     - admin:intake_invoice

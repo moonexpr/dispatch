@@ -1,0 +1,30 @@
+# M5.5 — verify the engineer's local changes against the repo's CI gate BEFORE a
+# PR is opened. The work phase leaves the engineer's commits on a LOCAL branch in
+# a clone (engineering_result.meta.clone_dir); the build phase pushes them and
+# opens ONE PR, where GitHub's CI actually runs. This action runs that same gate
+# LOCALLY first — the pre-flight "would CI accept this?" check — so a result that
+# fails the gate is downgraded to `failed` here: admin:consolidate_pr then skips
+# the PR and admin:intake_invoice drives the fix ladder, instead of shipping a red
+# branch.
+#
+# A `procedure`: deterministic, GitHub-read-only (it runs a command in the clone,
+# makes no gh write), and a no-op under dry-run / in-process (no clone to test).
+# The gate command is operator config (the seeded config.verify_cmd, or the target
+# repo's auto-detected gate) — trusted, never untrusted issue text.
+token: admin:verify_ci
+kind: procedure
+bind: verify_ci
+budget: admin
+
+interface:
+  in:
+    engineering_result: deliverables.engineering_result
+    config: input.config
+    job: input.job
+  out:
+    # The CI verdict record (consumed by no later stage today; durable on the shelf
+    # for audit), plus the engineering result written back — unchanged on a pass /
+    # skip, status-downgraded to `failed` on a gate failure so the build phase reads
+    # the gated verdict.
+    ci: deliverables.ci
+    engineering_result: deliverables.engineering_result

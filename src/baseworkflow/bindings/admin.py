@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from typing import Any, Dict, Optional
 
 import prep  # src/baseworkflow/subsystems/prep.py
 import rescaffold  # src/baseworkflow/subsystems/rescaffold.py — the shared #137 directive
+import verify  # src/baseworkflow/subsystems/verify.py — CI-gate resolver
 
 # common carries the dry-run-aware gh wrapper + run-ledger (orchestration policy).
 # bindings/__init__ puts src/orchestration on sys.path, so this is a flat import.
@@ -48,6 +50,87 @@ def update_docs(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "sections": ["work plan", "orchestration script", "acceptance criteria"],
     }
     return {"docs": docs}
+
+
+# --------------------------------------------------------------------------- #
+# M6.5 — publish the delivered app to its hosting providers.                    #
+#                                                                               #
+# Runs in the build phase immediately after admin:update_docs: once a unit is   #
+# delivered and its docs are refreshed, ship the running app. Two providers:    #
+#   * Supabase — push the database schema / migrations (`supabase db push`);    #
+#   * Vercel   — deploy the frontend to production (`vercel deploy --prod`).     #
+#                                                                               #
+# Only a `completed` engineering result ships — partial/failed/needs-human has   #
+# nothing deployable, so we record a skip and let intake_invoice drive the       #
+# fix-ladder / escalation. Like consolidate_pr / intake_invoice this is a        #
+# network-MUTATING action: every deploy is gated on ``ctx.dry_run``. Under       #
+# dry-run the action records the intended commands (greppable DRY-RUN lines) and #
+# makes no network call. Binaries are overridable (VERCEL_BIN / SUPABASE_BIN);   #
+# the deploy runs from the engineer's local clone when one is present, else the  #
+# pipeline root.                                                                 #
+# --------------------------------------------------------------------------- #
+def _publish_commands(project_dir: Optional[str]) -> list:
+    """The provider deploy command vectors, in ship order (DB first, then frontend
+    so the deployed app meets an up-to-date backend). ``-C <dir>`` / ``--workdir``
+    target the engineer's clone when present."""
+    vercel = os.environ.get("VERCEL_BIN", "vercel")
+    supabase = os.environ.get("SUPABASE_BIN", "supabase")
+    supabase_cmd = [supabase, "db", "push"]
+    vercel_cmd = [vercel, "deploy", "--prod", "--yes"]
+    if project_dir:
+        supabase_cmd += ["--workdir", project_dir]
+        vercel_cmd += ["--cwd", project_dir]
+    return [
+        {"provider": "supabase", "args": supabase_cmd},
+        {"provider": "vercel", "args": vercel_cmd},
+    ]
+
+
+def publish(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+    """M6.5 — push Supabase + deploy Vercel for a completed unit (or record a skip).
+
+    Network-mutating, so every deploy is gated on ``ctx.dry_run``: under dry-run
+    the intended provider commands are recorded only (greppable DRY-RUN lines), no
+    network call. Writes ``published`` to the deliverables shelf."""
+    engineering_result = inputs.get("engineering_result") or {}
+    job = inputs.get("job") or {}
+    issue = job.get("issue")
+    issue = "" if issue is None else str(issue)
+    status = _invoice_status(engineering_result)
+    dry = bool(getattr(ctx, "dry_run", True))
+
+    if status != "completed":
+        common.log(f"publish: issue=#{issue} status={status} — nothing to publish (skip)")
+        return {"published": {
+            "issue": issue, "status": status, "skipped": True, "dry_run": dry,
+            "deployments": [], "mutations": [],
+        }}
+
+    project_dir = _clone_dir(engineering_result)
+    commands = _publish_commands(project_dir)
+    mutations = [[str(a) for a in c["args"]] for c in commands]
+    common.log(f"publish: issue=#{issue} providers=supabase,vercel "
+               f"dir={project_dir or '<root>'} dry_run={dry}")
+
+    deployments = []
+    for cmd in commands:
+        provider = cmd["provider"]
+        # common.run is dry-run aware (PIPELINE_DRY_RUN): under dry-run it prints the
+        # greppable ``DRY-RUN: <tokens>`` line and returns 0 without a network call.
+        rc = common.run(*cmd["args"])
+        ok = rc == 0
+        deployments.append({"provider": provider, "ok": ok, "returncode": rc})
+        if not ok and not dry:
+            common.log(f"publish: {provider} deploy failed for #{issue} (rc={rc})")
+
+    return {"published": {
+        "issue": issue,
+        "status": status,
+        "skipped": False,
+        "dry_run": dry,
+        "deployments": deployments,
+        "mutations": mutations,
+    }}
 
 
 def store(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
@@ -376,10 +459,105 @@ def intake_invoice(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     }}
 
 
+# --------------------------------------------------------------------------- #
+# M5.5 — verify the engineer's local changes against the repo's CI gate.         #
+#                                                                               #
+# The work phase leaves the engineer's commits on a LOCAL branch in a clone      #
+# (``engineering_result.meta.clone_dir``); the build phase pushes them and opens  #
+# ONE PR, where GitHub's CI actually runs. This action runs that same gate        #
+# LOCALLY first — the pre-flight "would CI accept this?" check — so a result that #
+# fails the gate is downgraded to ``failed`` BEFORE a PR is opened:               #
+# ``consolidate_pr`` then skips (nothing shippable) and ``intake_invoice`` drives #
+# the fix ladder, instead of opening a red PR.                                    #
+#                                                                               #
+# GitHub-read-only (it runs a command in the clone, no gh write) and a no-op      #
+# under dry-run / in-process (there is no clone to test). The gate command is     #
+# operator config — the target repo's auto-detected gate, else the seeded         #
+# ``config.verify_cmd`` — trusted, never untrusted issue text.                    #
+# --------------------------------------------------------------------------- #
+def _resolve_gate(clone_dir: str, config: Dict[str, Any]) -> str:
+    """The CI gate to run in the clone. The TARGET repo's auto-detected gate wins
+    (so a Next.js target runs ``npm test``, not the dispatch seed); fall back to the
+    seeded ``config.verify_cmd``. Empty string when nothing runnable is known."""
+    detected = verify.resolve_verify_cmd(repo_root=clone_dir)
+    if detected and detected != verify.GENERIC:
+        return detected
+    return str((config or {}).get("verify_cmd") or "").strip()
+
+
+def verify_ci(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+    """M5.5 — run the repo's CI gate against the engineer's local branch and, on
+    failure, downgrade the engineering result so the build phase opens no PR.
+
+    Returns ``ci`` (the verdict record) and ``engineering_result`` (passed through
+    untouched on a pass / skip, status-downgraded to ``failed`` on a gate failure)."""
+    engineering_result = inputs.get("engineering_result") or {}
+    config = inputs.get("config") or {}
+    job = inputs.get("job") or {}
+    issue = job.get("issue")
+    issue = "" if issue is None else str(issue)
+    dry = bool(getattr(ctx, "dry_run", True))
+    status = _invoice_status(engineering_result)
+    clone_dir = _clone_dir(engineering_result)
+    gate = _resolve_gate(clone_dir, config) if clone_dir else ""
+
+    # Only a shippable result with a local clone and a runnable gate can be
+    # verified. Anything else (dry-run / in-process — no clone; a non-completed
+    # result — nothing to ship; no detectable gate) records a skip and passes the
+    # engineering result through untouched.
+    if status != "completed" or dry or not clone_dir or not gate:
+        reason = (
+            "dry-run / in-process (no clone)" if (dry or not clone_dir)
+            else f"status={status}" if status != "completed"
+            else "no runnable gate detected"
+        )
+        common.log(f"verify-ci: issue=#{issue} skipped ({reason})")
+        return {
+            "ci": {"issue": issue, "verified": False, "skipped": True,
+                   "reason": reason, "gate": gate or None, "dry_run": dry},
+            "engineering_result": engineering_result,
+        }
+
+    timeout = int(os.environ.get("DISPATCH_VERIFY_TIMEOUT") or "600")
+    common.log(f"verify-ci: issue=#{issue} running gate {gate!r} in {clone_dir} (timeout {timeout}s)")
+    cmd = ["bash", "-c", f"cd {shlex.quote(clone_dir)} && {gate}"]
+    try:
+        res = proc.run(cmd, capture=True, timeout=timeout)
+        rc = res.returncode
+        tail = (res.stderr or res.stdout or "").strip()
+    except proc.ProcError as exc:  # launch failure / timeout — treat as a red gate
+        rc = 1
+        tail = str(exc)
+    passed = rc == 0
+    tail = tail[-800:].strip()
+
+    ci = {"issue": issue, "gate": gate, "verified": passed, "skipped": False,
+          "returncode": rc, "dry_run": dry, "detail": "" if passed else tail}
+
+    if passed:
+        common.log(f"verify-ci: issue=#{issue} gate PASSED — clear to ship")
+        return {"ci": ci, "engineering_result": engineering_result}
+
+    # Gate failed: downgrade so consolidate_pr skips the PR and intake_invoice drives
+    # the fix ladder rather than shipping a branch CI will reject.
+    common.log(f"verify-ci: issue=#{issue} gate FAILED (rc={rc}) — downgrading completed -> failed")
+    meta = dict(engineering_result.get("meta") or {})
+    prior = str(meta.get("summary") or "")
+    meta["status"] = "failed"
+    meta["summary"] = (
+        prior + ("\n\n" if prior else "")
+        + f"CI gate `{gate}` failed locally (rc={rc}) before PR open:\n{tail}"
+    ).strip()
+    downgraded = {**engineering_result, "ok": False, "meta": meta}
+    return {"ci": ci, "engineering_result": downgraded}
+
+
 def register(reg: Any) -> None:
     reg.register_action("prepare_env", prepare_env)
     reg.register_action("write_adversarial", write_adversarial)
     reg.register_action("update_docs", update_docs)
+    reg.register_action("publish", publish, needs_ctx=True)
     reg.register_action("store", store, needs_ctx=True)
+    reg.register_action("verify_ci", verify_ci, needs_ctx=True)
     reg.register_action("consolidate_pr", consolidate_pr, needs_ctx=True)
     reg.register_action("intake_invoice", intake_invoice, needs_ctx=True)
