@@ -211,8 +211,8 @@ under `app/config/`.
 |---------|-------|
 | Workflow / controller runtime | `engine/workflow/` (controller · loader · visitor · registry) |
 | Actions, governors, interpreter | `engine/actions/` (action · control · governor · interpreter · shelf · statechart) |
-| Workflow definition | `app/config/baseworkflow.yml` + `app/config/actions/**` (one file per Action) |
-| Agent definitions | `app/config/agents/*.yaml` (architect · coder · reviewer · tester · security-architect) |
+| Workflow definitions | `app/workflows/*.yml` (`baseworkflow.yml`, `websitewf.yml`, `engineer.yml`) + `app/config/actions/**` (one file per Action) |
+| Agent definitions | `app/agents/*.yaml` (architect · coder · reviewer · tester · security-architect) |
 | Model routing | `engine/models.py` + `app/config/models.yml` (LiteLLM · Anthropic · HF · CLI) |
 | Issue classification | deterministic keyword classifier (`src/classifier/classify.py`) |
 | Queue + state machine | GitHub Issues + labels |
@@ -360,8 +360,10 @@ engine/                  the dispatch workflow engine
   workflow/              controller · loader · visitor · registry
   actions/               action · control · governor · interpreter · shelf · statechart
   models.py · proc.py · filesys.py · runtime.py
-app/config/              baseworkflow.yml · actions/** · agents/*.yaml · models.yml · state_machine.yml
-src/baseworkflow/        baseworkflow.py — loads app/config into a Controller · bindings/  [WORKFLOW]
+app/workflows/           baseworkflow.yml · websitewf.yml · engineer.yml  (workflow definitions)
+app/agents/              architect · coder · reviewer · tester · security-architect (*.yaml)
+app/config/              actions/** · models.yml · state_machine.yml · tuning.yml · adversary.yml …
+src/baseworkflow/        baseworkflow.py — loads app/workflows into a Controller · bindings/  [WORKFLOW]
 src/tuning.py            shared tuning surface (used by both the engine and the visitor lineage)
 src/visitor/             the legacy visitor-pattern lineage (non-workflow), consolidated:  [VISITOR]
   orchestration/         StageVisitor tick driver (visitors · stages · statemachine · pipeline …)

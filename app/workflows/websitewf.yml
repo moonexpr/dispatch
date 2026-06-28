@@ -19,8 +19,11 @@ extends: baseworkflow            # inherit baseworkflow's full WorkflowNode (the
                                  # document is never edited — this file is a diff)
 
 uses:
-  - actions/web/**/*.yml         # the new web:* action interface manifests, incl. the
-                                 # kind: proxy ones (see the manifest sketches below)
+  # Action manifests stay under app/config/actions/; this workflow lives in
+  # app/workflows/, so includes reach back into config/ (resolved relative to
+  # this file's directory).
+  - ../config/actions/web/**/*.yml   # the new web:* action interface manifests, incl.
+                                     # the kind: proxy ones (see the sketches below)
 
 # ── overlays ───────────────────────────────────────────────────────────────
 # Ordered, top-to-bottom. A later op observes earlier ops' effect. Conflicting

@@ -270,7 +270,7 @@ def test_yaml_workflow() -> None:
     from engine.workflow import load_workflow
 
     reg = bindings.build_registry()
-    doc = load_workflow("config/baseworkflow.yml")
+    doc = load_workflow("workflows/baseworkflow.yml")
 
     # shipped YAML validates clean (structure + data-flow + tokens)
     errors = validate(doc, reg)

@@ -10,8 +10,8 @@ against the loaded manifests) or a single-key mapping naming a structural token
 a located path so the "format test" points at the exact spot.
 
 The workflow path resolves through ``engine.filesys`` (app-dir rooted, with an
-absolute / existing-path escape hatch) so ``app/config/baseworkflow.yml`` is found
-the same way the other config YAMLs are.
+absolute / existing-path escape hatch) so ``app/workflows/baseworkflow.yml`` is found
+the same way the other app YAMLs are.
 
 Leaf module: stdlib + in-function PyYAML + ``engine.filesys`` + sibling leaves.
 """

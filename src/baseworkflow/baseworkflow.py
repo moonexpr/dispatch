@@ -3,7 +3,7 @@
 
 The workflow's technical details — which actions run in spec/work/build, their
 kind, governors, budgets, and the monitor loop — now live in
-``app/config/baseworkflow.yml`` plus one interface file per action under
+``app/workflows/baseworkflow.yml`` plus one interface file per action under
 ``app/config/actions/``. This module is the small adapter that:
 
   * loads + compiles that YAML into an ``engine.workflow.YamlController`` (the
@@ -51,8 +51,8 @@ from engine.workflow.controller import YamlController  # noqa: E402
 import bindings  # noqa: E402  (src/baseworkflow/bindings package)
 
 # The workflow definition, parsed once. Path is app-dir-relative (resolved via
-# engine.filesys): app/config/baseworkflow.yml.
-WORKFLOW_PATH = "config/baseworkflow.yml"
+# engine.filesys): app/workflows/baseworkflow.yml.
+WORKFLOW_PATH = "workflows/baseworkflow.yml"
 _DOC = load_workflow(WORKFLOW_PATH)
 
 # -- budget constants, read FROM the YAML (single source of truth) ----------

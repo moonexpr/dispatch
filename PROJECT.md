@@ -20,7 +20,7 @@ non-`development`) when the repo leaves solo dev; that re-arms the PR / branch-p
 ## Running a live engine tick test
 
 The pipeline is pure Python; the unit-of-work lifecycle is the YAML **BaseWorkflow**
-(`app/config/baseworkflow.yml`, engine in `engine/workflow/`), driven through the
+(`app/workflows/baseworkflow.yml`, engine in `engine/workflow/`), driven through the
 orchestration tick in `src/orchestration/`. Entry points:
 
 - `python3 dispatch.py [FLAGS]` — canonical entry; defaults the Engineer to the Claude
@@ -39,7 +39,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 
 1. **Validate the workflow YAML** — offline, instant:
    ```bash
-   python3 -m engine.workflow app/config/baseworkflow.yml \
+   python3 -m engine.workflow app/workflows/baseworkflow.yml \
      --registry src.baseworkflow.bindings:build_registry
    ```
    Expect `[PASS] … (structure + data-flow + tokens; 3 phases)`.

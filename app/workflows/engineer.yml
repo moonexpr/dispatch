@@ -7,12 +7,15 @@
 # *implementations* are registered binds in src (engineer_actions.py), composed by
 # the namespaced tokens below. End users edit this file + the action interface
 # files — no Python. Validate with:
-#   python3 -m engine.workflow app/config/engineer.yml \
+#   python3 -m engine.workflow app/workflows/engineer.yml \
 #     --registry src.baseworkflow.bindings.engineer:build_registry
 name: engineer
 
 uses:
-  - actions/engineer/*.yml        # #base-style include of the engineer action files
+  # Action manifests stay under app/config/actions/; this workflow lives in
+  # app/workflows/, so the include reaches back into config/ (resolved relative
+  # to this file's directory).
+  - ../config/actions/engineer/*.yml   # #base-style include of the engineer action files
 
 inputs: [job, setup]              # seeded onto the input shelf at run time by src
 

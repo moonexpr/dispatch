@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """roundabout-baseworkflow.py — run the YAML-driven BaseWorkflow over a live issue.
 
-Drives the new ``engine.workflow`` engine (app/config/baseworkflow.yml + the action
+Drives the new ``engine.workflow`` engine (app/workflows/baseworkflow.yml + the action
 interface files) through the full spec -> work -> build lifecycle on real GitHub
 issue data, deterministically (MockActionFactory: the architect/admin subsystem
 bodies run as oracles — real logic, no model, no network, no side effects). Prints

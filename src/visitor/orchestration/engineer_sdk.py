@@ -3,7 +3,7 @@
 
 This is the thin shell around the YAML-expressed engineer unit-of-work. The
 lifecycle itself — clone, run the (agentic) engineering pass, judge + commit, the
-context-sanity gate, push, open ONE PR — lives in ``app/config/engineer.yml`` (the
+context-sanity gate, push, open ONE PR — lives in ``app/workflows/engineer.yml`` (the
 mutable composition) and its per-action interface files, compiled by
 ``engine.workflow``; the implemented step bodies live in
 ``src/baseworkflow/bindings/engineer.py`` (the bind layer). This file only does the

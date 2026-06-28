@@ -3,13 +3,13 @@
 
 Two related-but-distinct workflows bind their ``engineer:`` tokens here:
 
-  * **the engineer unit-of-work** (``app/config/engineer.yml``) — the SDK Engineer
+  * **the engineer unit-of-work** (``app/workflows/engineer.yml``) — the SDK Engineer
     that turns one Job Request into one Invoice, compiled by ``engine.workflow``
     into a statechart. Its action bodies + the ``engineer_terminal`` predicate are
     registered by :func:`register_unit` / :func:`build_registry`; :func:`run_live`
     compiles + runs it. ``engineer_sdk.py`` is the thin ``ENGINEER_BIN`` shell that
     reads the request, calls :func:`run_live`, and emits the Invoice on stdout.
-  * **the baseworkflow ``work`` phase** (``app/config/baseworkflow.yml``) — the
+  * **the baseworkflow ``work`` phase** (``app/workflows/baseworkflow.yml``) — the
     ``engineer:execute_orchestration`` recursion seam + its two monitor predicates,
     registered by :func:`register` (the function ``bindings/__init__`` aggregates).
 
@@ -910,7 +910,7 @@ def register_unit(reg: TokenRegistry) -> None:
 
 def build_registry() -> TokenRegistry:
     """A fully-populated registry for engineer.yml. Also the CLI validator hook:
-    ``python3 -m engine.workflow app/config/engineer.yml \\
+    ``python3 -m engine.workflow app/workflows/engineer.yml \\
     --registry src.baseworkflow.bindings.engineer:build_registry``."""
     reg = TokenRegistry()
     register_unit(reg)
@@ -921,7 +921,7 @@ def build_registry() -> TokenRegistry:
 # Run entrypoint used by engineer_sdk.py — compile engineer.yml against the live
 # EngineerFactory, seed the run parameters, run it, return the Invoice dict.
 # ---------------------------------------------------------------------------
-WORKFLOW_PATH = "config/engineer.yml"
+WORKFLOW_PATH = "workflows/engineer.yml"
 _DOC = None  # parsed once, lazily (keeps import side-effect-free for the offline path)
 
 

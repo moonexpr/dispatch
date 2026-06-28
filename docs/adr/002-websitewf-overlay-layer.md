@@ -4,7 +4,7 @@
 **Date:** 2026-06-27
 **Deciders:** JC (architecture owner)
 **Supersedes:** —
-**Related:** [`ADR-001`](./001-hfsm-automata.md) (HFSM engine); `app/config/baseworkflow.yml`; `engine/workflow/loader.py`; `engine/actions/action.py`; the `WORKFLOW` runtime selector
+**Related:** [`ADR-001`](./001-hfsm-automata.md) (HFSM engine); `app/workflows/baseworkflow.yml`; `engine/workflow/loader.py`; `engine/actions/action.py`; the `WORKFLOW` runtime selector
 
 ---
 
@@ -14,7 +14,7 @@ Dispatch already has three architectural layers of instruction: the **three phas
 (`spec → work → build`), the **three agents** (Architect / Engineer / Admin), and the
 **BaseWorkflow** that wires them into a YAML-driven Harel statechart (ADR-001). The
 engine (`engine/`) is deliberately domain-agnostic mechanism; everything web-, app-,
-or task-specific is *configuration* (`app/config/baseworkflow.yml` + the per-action
+or task-specific is *configuration* (`app/workflows/baseworkflow.yml` + the per-action
 interface manifests under `app/config/actions/`) and *bindings*
 (`src/baseworkflow/bindings/`).
 
@@ -99,11 +99,11 @@ separable.
 
 ### 4. WebsiteWF as a thin Python + config layer
 
-- `app/config/websitewf.yml` — the overlay document (`extends: baseworkflow`).
+- `app/workflows/websitewf.yml` — the overlay document (`extends: baseworkflow`).
 - `app/config/actions/web/*.yml` — the new `web:*` action interface manifests
   (including the `kind: proxy` ones).
 - `src/websitewf/` — a `WebsiteWF` controller mirroring `BaseWorkflow` (loads
-  `config/websitewf.yml`) and a `bindings/` package whose `build_registry()` **reuses the
+  `workflows/websitewf.yml`) and a `bindings/` package whose `build_registry()` **reuses the
   base bindings** and registers the `web:*` bodies on top. BaseWorkflow gains only a small
   optional `_bindings_module` hook so it stays reusable; no base behavior changes.
 
@@ -250,7 +250,7 @@ the coupling ADR-001 externalized; scoping it to I/O keeps it safe.
    I/O-rewire wrapper + manifest schema (`target:`, `rewire:`); validator support.
 3. [ ] **`WORKFLOW` selector:** make the authoring bridge workflow-agnostic; default
    `baseworkflow`; document in PROJECT.md's flag table.
-4. [ ] **WebsiteWF skeleton:** `app/config/websitewf.yml` (this spec), `app/config/actions/web/`,
+4. [ ] **WebsiteWF skeleton:** `app/workflows/websitewf.yml` (this spec), `app/config/actions/web/`,
    `src/websitewf/` (controller + bindings reusing base via `build_registry`); add the
    `_bindings_module` hook to `BaseWorkflow`.
 5. [ ] **Proof vertical "add a page/route":** the four `web:*` bindings + manifests; a
