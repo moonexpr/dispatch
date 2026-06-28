@@ -42,6 +42,22 @@ class Verdict:
         self.scope = data.get("scope")
         self.route = data.get("route")
         self.confidence = data.get("confidence")
+        self._validate_boundary(data)
+
+    @staticmethod
+    def _validate_boundary(data: dict) -> None:
+        """Fail-soft classification.v1 boundary guard (#145).
+
+        classify.py is a quarantine reader (no exec-capable imports), so the
+        contract is validated here at the consumer-side reader. Best-effort;
+        never raises into the dispatch loop. Validates a stamped copy additively.
+        """
+        try:
+            from . import boundaries
+            boundaries.warn_if_invalid(dict(data), boundaries.CLASSIFICATION_SCHEMA,
+                                       label="classification")
+        except Exception:
+            pass
 
 
 class Classifier:

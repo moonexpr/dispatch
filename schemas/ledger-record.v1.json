@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ledger-record.v1",
+  "title": "Ledger Record (v1)",
+  "description": "One append-only JSONL run-ledger record (#36) — the producer↔consumer pair this locks is src/ledger/ledger.py build_record (producer) ↔ src/budget/reconcile.py (consumer). reconcile depends on the EXACT cost.* field names (cost.tokens_in, cost.tokens_out, cost.duration_seconds, cost.model), so they are pinned here as a required, fixed-shape nested object whose keys are always present (null when unknown — the file stays uniformly jq-aggregatable). The stage vocabulary is fixed (extend only as the transition seam requires). NOTE the v0 ledger line is the SAME object minus `schema_version`; v1 stamps it additively so existing run-ledger files still parse. Versioning discipline mirrors work-order.v1.",
+  "type": "object",
+  "required": [
+    "schema_version", "tick_id", "issue", "stage", "cost",
+    "label_before", "label_after", "timestamp", "dry_run"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the Ledger Record contract."
+    },
+    "tick_id": { "type": "string", "description": "Tick identifier (default 'tick-unknown')." },
+    "issue": { "type": ["integer", "null"], "description": "Issue number, or null." },
+    "stage": {
+      "type": "string",
+      "enum": ["claimed", "work-order", "engineer-dispatch", "invoice", "closure"],
+      "description": "Tick transition stage (fixed vocabulary)."
+    },
+    "cost": {
+      "type": "object",
+      "description": "Cost block — reconcile.py reads these EXACT field names. Keys always present; null when unknown.",
+      "required": ["tokens_in", "tokens_out", "duration_seconds", "model"],
+      "additionalProperties": true,
+      "properties": {
+        "tokens_in": { "type": ["integer", "null"] },
+        "tokens_out": { "type": ["integer", "null"] },
+        "duration_seconds": { "type": ["number", "null"] },
+        "model": { "type": ["string", "null"] }
+      }
+    },
+    "label_before": { "type": ["string", "null"], "description": "Label state before the transition." },
+    "label_after": { "type": ["string", "null"], "description": "Label state after the transition." },
+    "timestamp": { "type": "string", "description": "ISO-8601 UTC timestamp." },
+    "dry_run": { "type": "boolean", "description": "Whether the tick was a dry run." }
+  }
+}

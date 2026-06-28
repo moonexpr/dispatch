@@ -379,11 +379,35 @@ def snapshot_path(explicit: str = "") -> str:
     return os.path.join(base, "issues.json")
 
 
+def _validate_issue_boundary(item: "IntakeItem") -> None:
+    """Fail-soft issue.v1 boundary guard (#145).
+
+    Surfaces a drift in the normalized intake item — the single source of issue
+    information every downstream selector reads — on the live path without ever
+    breaking intake. The saved snapshot is the SAME dict minus ``schema_version``;
+    we validate a stamped copy additively. Import + validation are best-effort.
+    """
+    try:
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        from src.orchestration import boundaries
+    except Exception:
+        return
+    try:
+        boundaries.warn_if_invalid(asdict(item), boundaries.ISSUE_SCHEMA,
+                                   label=f"issue#{item.number}")
+    except Exception:
+        pass
+
+
 def save_items(items: List[IntakeItem], path: str) -> None:
     """Persist issue information as the canonical local snapshot."""
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    for it in items:
+        _validate_issue_boundary(it)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump([asdict(i) for i in items], fh, ensure_ascii=False, indent=2)
         fh.write("\n")

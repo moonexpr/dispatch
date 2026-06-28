@@ -156,11 +156,35 @@ def _classify(item: _intake.IntakeItem, python_bin: str) -> Dict[str, Any]:
             text=True,
             check=True,
         )
-        return json.loads(result.stdout)
+        verdict = json.loads(result.stdout)
+        _validate_classification_boundary(verdict, item.number)
+        return verdict
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
             f"classifier failed for #{item.number}: {exc.stderr.strip()}"
         ) from exc
+
+
+def _validate_classification_boundary(verdict: Dict[str, Any], number: Any) -> None:
+    """Fail-soft classification.v1 boundary guard (#145).
+
+    classify.py is a quarantine reader that must import nothing exec-capable, so
+    the boundary is validated HERE — at the consumer-side reader — instead of in
+    the producer. The raw verdict is the SAME dict minus ``schema_version``; we
+    validate a stamped copy additively. Best-effort; never breaks the pipeline.
+    """
+    try:
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        from src.orchestration import boundaries
+    except Exception:
+        return
+    try:
+        boundaries.warn_if_invalid(verdict, boundaries.CLASSIFICATION_SCHEMA,
+                                   label=f"classification#{number}")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

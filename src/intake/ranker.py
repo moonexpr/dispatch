@@ -275,6 +275,33 @@ def _extract_json(text: str) -> Dict[str, Any]:
 # app/config/tuning.yml (selection.ranker). Here we just order the items
 # foundational -> dependent, tie-breaking by lower issue number.
 # --------------------------------------------------------------------------
+def _validate_ranked_queue_boundary(queue: Dict[str, Any]) -> None:
+    """Fail-soft ranked-queue.v1 boundary guard (#145).
+
+    Validates the {ranked, reasoning} queue (stamped to v1 additively) the
+    ranker emits — ordered issues + per-issue rationale. Best-effort import +
+    validation: surface a boundary drift on the live path, never break ranking.
+    """
+    try:
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        from src.orchestration import boundaries
+    except Exception:
+        return
+    try:
+        # reasoning is keyed by issue-number string in the contract; coerce keys
+        # so an int-keyed offline rationale still validates additively.
+        norm = {
+            "ranked": [int(n) for n in queue.get("ranked", [])],
+            "reasoning": {str(k): str(v) for k, v in (queue.get("reasoning") or {}).items()},
+        }
+        boundaries.warn_if_invalid(norm, boundaries.RANKED_QUEUE_SCHEMA,
+                                   label="ranked-queue")
+    except Exception:
+        pass
+
+
 def _rank_offline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     g = _dag.build(items, fwd=tuning.DEP_FWD, rev=tuning.DEP_REV)
     # Foundational-first (dependency depth), then the operator priority weights
@@ -282,11 +309,13 @@ def _rank_offline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ordered = sorted(items, key=lambda i: priority_key(i, g))
 
     print("ranker: offline deterministic dependency + priority ranking", file=sys.stderr)
+    _reasoning: Dict[str, str] = {}
     for i in ordered:
         n = int(i["number"])
         ds = g.deps[n]
         dep = "foundational (no deps)" if not ds else \
             "depends on " + ", ".join(f"#{x}" for x in ds)
+        _reasoning[str(n)] = dep
         bits = []
         if _is_feat(i):
             bits.append("feat")
@@ -302,6 +331,8 @@ def _rank_offline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             bits.append(f"lw={w}")
         extra = (" [" + ", ".join(bits) + "]") if bits else ""
         print(f"  #{n}: depth={g.depth[n]} — {dep}{extra}", file=sys.stderr)
+    _validate_ranked_queue_boundary(
+        {"ranked": [int(i["number"]) for i in ordered], "reasoning": _reasoning})
     return ordered
 
 
@@ -329,6 +360,10 @@ def rank(
 
     ranked_numbers = result.get("ranked", [])
     reasoning = result.get("reasoning", {})
+
+    # ranked-queue.v1 boundary (#145): the ordered issues + rationale the
+    # selector reads. Fail-soft — surface a drift, never break ranking.
+    _validate_ranked_queue_boundary({"ranked": ranked_numbers, "reasoning": reasoning})
 
     # Log reasoning to stderr
     print(f"ranker: model={model} ranked {len(ranked_numbers)} item(s)", file=sys.stderr)

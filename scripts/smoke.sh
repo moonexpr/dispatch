@@ -1614,6 +1614,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "§7.31 component boundaries (#145): Issue/Classification/RankedQueue/PrEvent/LedgerRecord v1"
+# Runnable, self-asserting unit module (no pytest; exit 0 = pass). Mirrors §7.30:
+# proves the five remaining boundary v1 schemas are valid, the golden fixtures
+# validate, and a PRODUCED artifact validates on the real producer path for each
+# (classify.py, ranker.rank offline, ledger.build_record, intake, and the smoke
+# PR-event fixtures) — and that tampered artifacts are rejected.
+if PIPELINE_DRY_RUN=1 python3 "${ROOT}/src/orchestration/test_boundaries.py" >/dev/null 2>&1; then
+  pass "boundaries unit suite green (5 v1 schemas + goldens + produced-artifact validation)"
+else
+  fail "boundaries unit suite failed"
+fi
+
+# ---------------------------------------------------------------------------
 section "§7 section-numbering authority — duplicate §7.x id guard (smoke-sections-v1)"
 # Duplicated values from a newline-delimited list on stdin (prints nothing if none).
 dup_ids() { sort | uniq -d; }

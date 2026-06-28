@@ -40,6 +40,23 @@ def load_payload(arg=None) -> str:
     return sys.stdin.read()
 
 
+def _validate_pr_event(payload) -> None:
+    """Fail-soft pr-event.v1 boundary guard (#145).
+
+    Same unified PR-event contract closure.py validates; `attempt` resolves to
+    one source of truth (payload field wins over fix-attempt-N labels). Surface
+    a drift on the live path, never break the fix ladder. Validate a stamped
+    copy additively (raw payload = v1 object minus ``schema_version``).
+    """
+    try:
+        from . import boundaries
+        if isinstance(payload, dict):
+            boundaries.warn_if_invalid(payload, boundaries.PR_EVENT_SCHEMA,
+                                       label="pr-event/fix-ladder")
+    except Exception:
+        pass
+
+
 def pr_labels(payload: dict) -> list[str]:
     out = []
     for lbl in payload.get("labels") or []:
@@ -70,6 +87,7 @@ def resolve_attempt(payload: dict) -> str:
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     payload = json.loads(load_payload(argv[0] if argv else None))
+    _validate_pr_event(payload)
     pr = payload.get("pr") or payload.get("pull_request")
     pr = "" if pr is None else str(pr)
     if not pr:

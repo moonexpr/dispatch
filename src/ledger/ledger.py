@@ -118,7 +118,30 @@ def build_record(stage: str, issue: Any, tick_id: str, dry_run: Any,
         "timestamp": timestamp or _iso_now(),
         "dry_run": _to_bool(dry_run),
     }
+    _validate_boundary(record)
     return record
+
+
+def _validate_boundary(record: Dict[str, Any]) -> None:
+    """Fail-soft ledger-record.v1 boundary guard (#145).
+
+    Surfaces a producer↔reconcile drift (the cost.* field names reconcile.py
+    depends on) on the live path without ever breaking a tick — the import and
+    the validation are both best-effort. The on-disk line is the SAME object
+    minus ``schema_version``; we validate a stamped copy additively.
+    """
+    try:
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        from src.orchestration import boundaries
+    except Exception:
+        return
+    try:
+        boundaries.warn_if_invalid(record, boundaries.LEDGER_RECORD_SCHEMA,
+                                   label="ledger-record")
+    except Exception:
+        pass
 
 
 def emit(record: Dict[str, Any], path: Optional[str] = None) -> str:

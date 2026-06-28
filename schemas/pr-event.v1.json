@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-event.v1",
+  "title": "PR Event (v1)",
+  "description": "The unified PR-event payload the two event-triggered handlers read — closure.py (success path, §5.8) and fix_dispatch.py (CI-failure fix ladder, §5.5). Both independently parse a shared `pr` / `issue` / `conclusion` shape; v1 UNIFIES that boundary. The only seam-stable required field is `pr` (both handlers die without it); closure additionally needs `issue` and reads `merged`/`review_state`, while fix_dispatch reads `conclusion`/`attempt`/`labels`/`brief` — all OPTIONAL here so one schema covers both events. `attempt` is resolved to ONE source of truth: when present on the payload it WINS over the `fix-attempt-N` labels (matching fix_dispatch.resolve_attempt's precedence: env > payload.attempt > max label + 1). Versioning discipline mirrors work-order.v1.",
+  "type": "object",
+  "required": ["schema_version", "pr"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the PR Event contract."
+    },
+    "pr": {
+      "type": ["integer", "string"],
+      "description": "PR number (the one field both handlers require; absence is a hard error in each)."
+    },
+    "issue": {
+      "type": ["integer", "string"],
+      "description": "Issue number the PR closes (required by the closure handler; optional for the fix ladder)."
+    },
+    "conclusion": {
+      "type": "string",
+      "description": "CI conclusion: success | failure (and other gh check-run conclusions). Defaults to 'failure' when absent."
+    },
+    "review_state": {
+      "type": "string",
+      "description": "Review state for the closure success path (e.g. approved | none). Defaults to 'none' when absent."
+    },
+    "merged": {
+      "type": "boolean",
+      "description": "Whether the PR is merged — selects closure Phase B (done) over Phase A (arm auto-merge)."
+    },
+    "attempt": {
+      "type": ["integer", "string"],
+      "description": "Fix-ladder attempt number — the SINGLE source of truth when present (wins over the fix-attempt-N labels). Resolution precedence: PIPELINE_FIX_ATTEMPT env > this field > max(fix-attempt-N label) + 1."
+    },
+    "brief": {
+      "type": "string",
+      "description": "CI-failure brief fed back to the next fix attempt (UNTRUSTED; data, never instructions)."
+    },
+    "labels": {
+      "type": "array",
+      "description": "PR labels, as strings or {name} objects — the fix ladder reads fix-attempt-N from here when `attempt` is absent.",
+      "items": {
+        "type": ["string", "object"]
+      }
+    }
+  }
+}

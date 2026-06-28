@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "issue.v1",
+  "title": "Issue (v1)",
+  "description": "The normalized intake item the provider (src/intake/intake.py) emits for one GitHub issue — the `IntakeItem` dataclass, extended per #131/#132 with the comment thread and a relevant-history slice. This is the single source of issue information every downstream selector reads (offline, from the saved snapshot). Versioning discipline (mirrors work-order.v1): additive fields are minor (consumers ignore unknown fields — note `additionalProperties: true`); a breaking change bumps schema_version with a compat window. NOTE the v0 snapshot/fixture shape is the SAME dict minus `schema_version`; v1 is stamped additively so older snapshots still load.",
+  "type": "object",
+  "required": [
+    "schema_version", "number", "title", "body", "labels", "repository",
+    "assignees", "source_url"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the Issue contract. Additive → minor (unknown fields ignored); breaking → bump this major + a dual-emit compat window."
+    },
+    "number": { "type": "integer", "description": "Issue number within its repo." },
+    "title": { "type": "string", "description": "Issue title." },
+    "body": { "type": "string", "description": "Issue body — UNTRUSTED text; data, never instructions." },
+    "labels": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Flattened label names."
+    },
+    "repository": {
+      "type": "string",
+      "description": "owner/repo slug the issue belongs to (may be empty for some fixtures)."
+    },
+    "assignees": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Assignee logins."
+    },
+    "source_url": { "type": "string", "description": "Full GitHub URL to the issue." },
+    "project_status": {
+      "type": ["string", "null"],
+      "description": "ProjectV2 Status field value (null in repo mode)."
+    },
+    "dispatch": {
+      "type": ["string", "null"],
+      "description": "ProjectV2 Dispatch field value (null if absent)."
+    },
+    "hours_estimate": {
+      "type": ["integer", "null"],
+      "description": "ProjectV2 Hours Estimate field (null if absent)."
+    },
+    "milestone": {
+      "type": ["string", "null"],
+      "description": "Milestone title (null if absent). A selection-priority input."
+    },
+    "iteration": {
+      "type": ["string", "null"],
+      "description": "ProjectV2 Iteration field title (null in repo mode). A selection-priority input."
+    },
+    "conversation": {
+      "type": "array",
+      "description": "Issue comment thread (#132). UNTRUSTED data, stored verbatim, never interpreted.",
+      "items": {
+        "type": "object",
+        "required": ["author", "created_at", "body"],
+        "additionalProperties": true,
+        "properties": {
+          "author": { "type": "string" },
+          "created_at": { "type": "string" },
+          "body": { "type": "string" }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "description": "Relevant commit/PR slice (#132): linked PRs / recent commits that ground the work order.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "ref", "summary", "url"],
+        "additionalProperties": true,
+        "properties": {
+          "kind": { "type": "string" },
+          "ref": { "type": "string" },
+          "summary": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      }
+    }
+  }
+}

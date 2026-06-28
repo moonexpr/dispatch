@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "pr": 142,
+  "issue": 101,
+  "conclusion": "success",
+  "review_state": "approved",
+  "merged": false,
+  "attempt": 2,
+  "brief": "pytest failed: 1 assertion in tests/test_foo.py::test_json_envelope.",
+  "labels": ["pr-open", "fix-attempt-1"]
+}

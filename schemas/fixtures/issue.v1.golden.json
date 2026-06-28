@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "number": 142,
+  "title": "Add a --json flag to the foo subcommand",
+  "body": "The foo subcommand prints human-readable text today. Add a --json flag that emits a stable machine envelope. Acceptance: existing text output unchanged; smoke.sh stays green.",
+  "labels": ["enhancement", "queued"],
+  "repository": "ReclaimByDesign/dispatch",
+  "assignees": ["moonexpr"],
+  "source_url": "https://github.com/ReclaimByDesign/dispatch/issues/142",
+  "project_status": "Scheduled",
+  "dispatch": null,
+  "hours_estimate": 4,
+  "milestone": "Babcock Release",
+  "iteration": null,
+  "conversation": [
+    {
+      "author": "moonexpr",
+      "created_at": "2026-06-12T18:30:00Z",
+      "body": "Mirror the envelope shape work-order.v1 already uses."
+    }
+  ],
+  "history": [
+    {
+      "kind": "pr",
+      "ref": "#101",
+      "summary": "feat(foo): scaffold the subcommand",
+      "url": "https://github.com/ReclaimByDesign/dispatch/pull/101"
+    }
+  ]
+}

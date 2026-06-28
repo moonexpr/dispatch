@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "classification.v1",
+  "title": "Classification (v1)",
+  "description": "The triage classifier's routing verdict — the `TriageResult{action, scope, route, confidence}` that src/classifier/classify.py emits and the dispatch loop (Verdict / pipeline._classify) consumes. Today the producer enum-validates internally but consumers re-parse the raw JSON; v1 freezes that boundary. The enums mirror the controlled vocabularies in app/config/tuning.yml (selection.classify.vocab); a vocab change is a content change behind v1, not a schema bump. Versioning discipline mirrors work-order.v1.",
+  "type": "object",
+  "required": ["schema_version", "action", "scope", "route", "confidence"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the Classification contract."
+    },
+    "action": {
+      "type": "string",
+      "description": "Triage action: one of the ACTIONS vocabulary (implement | decompose | duplicate? | wont-do)."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["xs", "s", "m", "l"],
+      "description": "Estimated complexity (drives route)."
+    },
+    "route": {
+      "type": "string",
+      "enum": ["gen-local", "gen-default", "gen-frontier"],
+      "description": "Model tier the scope maps to."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Classifier confidence (0.0–1.0) that this issue is implementable autonomously."
+    }
+  }
+}

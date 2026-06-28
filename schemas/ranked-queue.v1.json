@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ranked-queue.v1",
+  "title": "Ranked Queue (v1)",
+  "description": "The ranker's output: a list of issue numbers ordered most-foundational → most-dependent, plus a per-issue rationale. src/intake/ranker.py produces this (LLM path: the {ranked, reasoning} object the model returns; offline path: the deterministic dependency+priority ordering). v1 freezes the ordered-issues + rationale boundary the selector reads. Versioning discipline mirrors work-order.v1.",
+  "type": "object",
+  "required": ["schema_version", "ranked", "reasoning"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Version of the Ranked Queue contract."
+    },
+    "ranked": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "description": "Issue numbers ordered from most foundational (front) to most dependent (back)."
+    },
+    "reasoning": {
+      "type": "object",
+      "description": "One sentence per issue explaining its position, keyed by issue number as a string.",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

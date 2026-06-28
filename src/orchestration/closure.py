@@ -20,6 +20,23 @@ from .visitors import ExecutionVisitor, TickContext
 _visitor = ExecutionVisitor()
 
 
+def _validate_pr_event(payload) -> None:
+    """Fail-soft pr-event.v1 boundary guard (#145).
+
+    The PR-event payload is unified across closure (success) and fix_dispatch
+    (fix ladder); surface a drift on the live path without breaking closure.
+    The raw payload is the SAME object minus ``schema_version`` — validate a
+    stamped copy additively.
+    """
+    try:
+        from . import boundaries
+        if isinstance(payload, dict):
+            boundaries.warn_if_invalid(payload, boundaries.PR_EVENT_SCHEMA,
+                                       label="pr-event/closure")
+    except Exception:
+        pass
+
+
 def load_payload(arg=None) -> str:
     import os
 
@@ -34,6 +51,7 @@ def load_payload(arg=None) -> str:
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     payload = json.loads(load_payload(argv[0] if argv else None))
+    _validate_pr_event(payload)
     pr = payload.get("pr")
     pr = "" if pr is None else str(pr)
     issue = payload.get("issue")
