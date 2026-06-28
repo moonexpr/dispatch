@@ -398,26 +398,39 @@ class ExecutionVisitor(StageVisitor):
         common.ledger_emit("invoice", issue, cost_fields)
 
         if status == "completed":
-            # The engineer commits + pushes a branch but does NOT open a PR — admin
-            # owns PR creation (so a decomposed issue / multi-issue tick consolidates
-            # into ONE PR). If the Invoice carries no PR, open the consolidated PR
-            # for its branch now, then arm auto-merge on it. (Fixtures that already
-            # carry a pr_number skip this and arm directly — back-compat.)
-            if not pr_number:
+            from . import tick_consolidation
+            if tick_consolidation.enabled():
+                # Tick-level super-PR mode (DISPATCH_TICK_PR=1): DEFER PR creation.
+                # The engineer pushed its branch; record it for the after-the-loop
+                # tick consolidation (ONE PR across every issue this tick) and just
+                # relabel here — no per-issue PR, no per-issue merge arm.
                 branch = inv.get("branch") or ""
-                if branch:
-                    pr_number = self._open_consolidated_pr(issue, branch, summary)
-            common.log(f"#{issue}: completed — arming auto-merge")
-            if pr_number:
-                common.gh_mutate(
-                    "pr", "comment", pr_number, "--body",
-                    common.format_invoice_comment("completed", summary, route_used=route_used),
+                tick_consolidation.record_completed(issue, branch)
+                common.log(
+                    f"#{issue}: completed — deferring PR to the tick super-PR "
+                    f"(branch {branch or 'none'})"
                 )
-                # Arm auto-merge; branch protection still requires the human tap.
-                common.gh_mutate(
-                    "pr", "merge", pr_number, "--auto", "--squash",
-                    "--subject", f"Closes #{issue}",
-                )
+            else:
+                # Per-issue mode (default): the engineer commits + pushes a branch but
+                # does NOT open a PR — admin owns PR creation (so a decomposed issue
+                # consolidates into ONE PR). Open the consolidated PR for its branch
+                # when the Invoice carries none, then arm auto-merge. (Fixtures that
+                # already carry a pr_number skip the create and arm directly.)
+                if not pr_number:
+                    branch = inv.get("branch") or ""
+                    if branch:
+                        pr_number = self._open_consolidated_pr(issue, branch, summary)
+                common.log(f"#{issue}: completed — arming auto-merge")
+                if pr_number:
+                    common.gh_mutate(
+                        "pr", "comment", pr_number, "--body",
+                        common.format_invoice_comment("completed", summary, route_used=route_used),
+                    )
+                    # Arm auto-merge; branch protection still requires the human tap.
+                    common.gh_mutate(
+                        "pr", "merge", pr_number, "--auto", "--squash",
+                        "--subject", f"Closes #{issue}",
+                    )
             common.gh_mutate(
                 "issue", "edit", issue,
                 "--remove-label", "claimed", "--add-label", "done-pending-merge",

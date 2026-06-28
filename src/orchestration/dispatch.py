@@ -460,6 +460,15 @@ def main(argv=None) -> int:
         claim_issue(ctx)
         claimed += 1
 
+    # Tick-level super-PR (opt-in, DISPATCH_TICK_PR=1): after every issue's engineer
+    # has committed + pushed its branch, merge the branches completed THIS tick into
+    # one integration branch and open ONE consolidated PR. No-op (and no network)
+    # when the flag is off — the per-issue consolidated PR (intake) stands.
+    from . import tick_consolidation
+
+    if tick_consolidation.enabled():
+        tick_consolidation.consolidate_tick()
+
     common.log("dispatch: complete.")
     return 0
 
