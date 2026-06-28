@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import prep  # src/baseworkflow/subsystems/prep.py
 import rescaffold  # src/baseworkflow/subsystems/rescaffold.py — the shared #137 directive
@@ -101,15 +101,72 @@ def _engineer_branch(engineering_result: Dict[str, Any], job: Dict[str, Any], is
     return f"pipeline/issue-{issue}"
 
 
-def consolidate_pr(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
-    """M7.5 — open ONE consolidated PR for the engineering branch, or record a skip.
+def _clone_dir(engineering_result: Dict[str, Any]) -> Optional[str]:
+    """The engineer's LOCAL clone (committed-but-unpushed branch), surfaced on the
+    engineering_result meta by the work-phase live seam. ``None`` under dry-run /
+    in-process (no clone)."""
+    cd = (engineering_result.get("meta") or {}).get("clone_dir")
+    return cd if isinstance(cd, str) and cd else None
 
-    Only a ``completed`` engineering result yields a PR — a partial/failed/
-    needs-human result has nothing shippable, so we record a skip and let
-    ``intake_invoice`` drive the fix-ladder / escalation. The PR body restates the
-    work plan's acceptance criteria and carries ``Closes #<n>`` so GitHub auto-closes
-    the issue on (squash-)merge. Writes ``consolidation`` to the deliverables shelf;
-    ``intake_invoice`` reads ``consolidation.pr_number`` to arm auto-merge."""
+
+def _git(clone_dir: str, *args: str):
+    return proc.run([os.environ.get("GIT_BIN", "git"), "-C", clone_dir, *args], capture=True)
+
+
+def _consolidate_commit_and_push(clone_dir: str, base: str, branch: str, message: str) -> bool:
+    """Squash the engineer's LOCAL unit commits into ONE consolidated commit, then push
+    the branch. The engineer agents commit each unit locally (so the architect can
+    compose multiple units) but never push; admin owns the single consolidated commit +
+    the push, so a decomposed issue lands as one reviewable commit with a proper message.
+
+    The commit is authored by the OPERATOR's git identity — the clone inherits the
+    machine's global ``user.name`` / ``user.email``, so we deliberately do NOT override
+    it; the shipped commit carries the operator's signature. Only if no git identity is
+    configured at all (e.g. a bare CI box) do we fall back to a generic ``dispatch``
+    identity so the commit can still be made. ``gpgsign`` is forced off — the unattended
+    pipeline has no GPG TTY/pinentry, and the squash-merge to ``base`` is GitHub-verified
+    regardless. Returns True iff the push succeeded."""
+    _git(clone_dir, "add", "-A")
+    base_ref = f"origin/{base}"
+    if _git(clone_dir, "rev-parse", "--verify", "--quiet", base_ref).returncode == 0:
+        # Collapse every local commit back to base, keeping the cumulative tree staged.
+        _git(clone_dir, "reset", "--soft", base_ref)
+        _git(clone_dir, "add", "-A")
+    cfg = ["-c", "commit.gpgsign=false"]  # headless: no GPG TTY/pinentry
+    have_name = bool(_git(clone_dir, "config", "user.name").stdout.strip())
+    have_email = bool(_git(clone_dir, "config", "user.email").stdout.strip())
+    if not (have_name and have_email):
+        # No operator identity configured — fall back so the commit can still be made.
+        cfg += ["-c", "user.name=dispatch", "-c", "user.email=dispatch@reclaimbydesign.local"]
+    _git(
+        clone_dir, *cfg,
+        "commit", "-q", "-m", message,
+    )  # tolerate a no-op commit (nothing staged) — the push below is the real gate
+    return _git(clone_dir, "push", "-u", "origin", branch).returncode == 0
+
+
+def _cleanup_clone(clone_dir: Optional[str]) -> None:
+    if clone_dir and os.path.isdir(clone_dir):
+        import shutil
+        shutil.rmtree(clone_dir, ignore_errors=True)
+
+
+def consolidate_pr(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+    """M7.5 — squash the engineer's local commits into ONE, push, and open ONE PR
+    (or record a skip).
+
+    The engineer agents commit their unit work to a LOCAL branch but never push.
+    This step is where the pipeline takes ownership of git's outward-facing edge:
+    it squashes those local commits into a single ``dispatch``-authored commit with
+    a proper message, pushes ``pipeline/issue-<n>``, then opens ONE PR carrying
+    ``Closes #<n>`` so GitHub auto-closes the issue on (squash-)merge.
+
+    Only a ``completed`` engineering result ships — partial/failed/needs-human has
+    nothing shippable, so we record a skip and let ``intake_invoice`` drive the
+    fix-ladder / escalation. Under dry-run / in-process there is no clone, so the
+    push is skipped and the intended ``gh pr create`` is recorded only. Always tears
+    down the engineer's clone before returning. Writes ``consolidation`` to the
+    deliverables shelf; ``intake_invoice`` reads ``consolidation.pr_number``."""
     engineering_result = inputs.get("engineering_result") or {}
     job = inputs.get("job") or {}
     work_plan = inputs.get("work_plan") or {}
@@ -118,9 +175,11 @@ def consolidate_pr(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     title = job.get("title") or f"issue #{issue}"
     status = _invoice_status(engineering_result)
     dry = bool(getattr(ctx, "dry_run", True))
+    clone_dir = _clone_dir(engineering_result)
 
     if status != "completed":
         common.log(f"consolidate-pr: issue=#{issue} status={status} — nothing to ship, no PR (skip)")
+        _cleanup_clone(clone_dir)
         return {"consolidation": {
             "issue": issue, "status": status, "pr_number": None, "branch": None,
             "skipped": True, "dry_run": dry, "mutations": [],
@@ -134,8 +193,20 @@ def consolidate_pr(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     pr_title = f"Implement #{issue}: {title}"
     pr_body = (
         f"Consolidated implementation of #{issue} by the dispatch BaseWorkflow build "
-        f"phase. The engineering agents committed to `{branch}`; this single PR "
-        f"squash-merges them.\n\n## Acceptance\n{acc_block}\n\n{summary}\n\nCloses #{issue}"
+        f"phase. The engineering agents committed to `{branch}`; admin squashed those "
+        f"commits into one and opened this single PR.\n\n## Acceptance\n{acc_block}\n\n"
+        f"{summary}\n\nCloses #{issue}"
+    )
+    # The consolidated commit message admin authors on the squashed branch (distinct
+    # from the PR body): a proper title + trimmed rationale + the auto-close trailer.
+    commit_summary = summary.strip()
+    if len(commit_summary) > 600:
+        commit_summary = commit_summary[:600].rstrip() + "…"
+    commit_message = (
+        f"Implement #{issue}: {title}\n\n"
+        + (commit_summary + "\n\n" if commit_summary else "")
+        + f"Consolidated by the dispatch Admin build phase from the engineering work "
+        f"on {branch}.\n\nCloses #{issue}"
     )
     # --repo is appended by gh_mutate / gh_repo_args from PIPELINE_REPO (parity with
     # intake_invoice), so it is NOT in the arg vector here.
@@ -150,19 +221,29 @@ def consolidate_pr(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
         # Record-only: prints the greppable DRY-RUN line, makes no network call.
         common.gh_mutate(*args)
     else:
-        cmd = [os.environ.get("GH_BIN", "gh"), *args, *common.gh_repo_args()]
-        res = proc.run(cmd, capture=True)
-        pr_url = (res.stdout or "").strip()
-        tail = pr_url.rstrip("/").rsplit("/", 1)[-1] if pr_url else ""
-        if res.returncode == 0 and tail.isdigit():
-            pr_number = int(tail)
-        else:
-            # Branch is pushed but the PR could not be opened — partial (work done,
-            # no PR to arm-merge). intake_invoice then runs the partial transition.
-            status = "partial"
-            common.log(f"consolidate-pr: PR creation failed for #{issue} "
-                       f"(rc={res.returncode}) — partial")
+        pushed = True
+        if clone_dir:
+            # Admin squashes the engineer's local commits and pushes the branch.
+            pushed = _consolidate_commit_and_push(clone_dir, base, branch, commit_message)
+            if not pushed:
+                status = "partial"
+                common.log(f"consolidate-pr: could not squash+push {branch} for #{issue} "
+                           f"— partial (no PR)")
+        if pushed:
+            cmd = [os.environ.get("GH_BIN", "gh"), *args, *common.gh_repo_args()]
+            res = proc.run(cmd, capture=True)
+            pr_url = (res.stdout or "").strip()
+            tail = pr_url.rstrip("/").rsplit("/", 1)[-1] if pr_url else ""
+            if res.returncode == 0 and tail.isdigit():
+                pr_number = int(tail)
+            else:
+                # Branch is pushed but the PR could not be opened — partial (work done,
+                # no PR to arm-merge). intake_invoice then runs the partial transition.
+                status = "partial"
+                common.log(f"consolidate-pr: PR creation failed for #{issue} "
+                           f"(rc={res.returncode}) — partial")
 
+    _cleanup_clone(clone_dir)
     return {"consolidation": {
         "issue": issue, "status": status, "pr_number": pr_number, "pr_url": pr_url,
         "branch": branch, "base": base, "skipped": False, "dry_run": dry,

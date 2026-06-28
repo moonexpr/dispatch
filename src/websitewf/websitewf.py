@@ -102,6 +102,16 @@ def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
     """Run WebsiteWF against the RealActionFactory (same summary shape as run_mock).
     Under ``dry_run=True`` the inference runner emits a deterministic placeholder
     instead of calling a model."""
+    import shutil
+    import tempfile
+
     from engine.actions import RealActionFactory
 
-    return _run(RealActionFactory(), job, triage, dry_run=dry_run)
+    # Per-run isolated shelf root (see baseworkflow.run_live): a fresh temp root per
+    # tick, torn down after, so concurrent / sequential ticks can't read each other's
+    # stale shelf state (shelves are within-run only — CLAUDE.md).
+    shelf_root = tempfile.mkdtemp(prefix="dispatch-shelves-")
+    try:
+        return _run(RealActionFactory(shelf_root=shelf_root), job, triage, dry_run=dry_run)
+    finally:
+        shutil.rmtree(shelf_root, ignore_errors=True)

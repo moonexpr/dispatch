@@ -181,19 +181,31 @@ def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
     shelf-backed configuration. No orchestration-tick wiring is done here; that is
     Phase 2+.
     """
+    import shutil
+    import tempfile
+
     # ArchitectFactory is a RealActionFactory whose only override is the live
-    # inference runner for architect:draft_work_plan (the architect SDK agent);
-    # under dry_run it defers to the deterministic oracle, so this path is unchanged.
+    # inference runner for architect:draft_work_plan (the architect SDK agent); under
+    # dry_run it defers to the deterministic oracle, so that path is unchanged.
     from bindings.architect import ArchitectFactory
 
-    factory = ArchitectFactory()
+    # Per-run isolated shelf root. The FileShelf family is durable WITHIN a run, but
+    # shelves are within-run state only (CLAUDE.md) — a fixed shared on-disk root let
+    # sequential / concurrent ticks read each other's stale `job`/deliverables (a tick
+    # once read another issue's job and mutated the wrong issue). A fresh temp root per
+    # run, torn down in the finally below, gives each tick clean isolation.
+    shelf_root = tempfile.mkdtemp(prefix="dispatch-shelves-")
+    factory = ArchitectFactory(shelf_root=shelf_root)
     wf = BaseWorkflow(factory, job=job, triage=triage)
     ctx = wf.context(dry_run=dry_run)
-    result = wf.run(ctx=ctx)
-    return {
-        "result": result,
-        "ctx": ctx,
-        "workflow": wf,
-        "deliverables": wf.shelves.deliverables.snapshot(),
-        "interpreter": wf.last_interpreter,
-    }
+    try:
+        result = wf.run(ctx=ctx)
+        return {
+            "result": result,
+            "ctx": ctx,
+            "workflow": wf,
+            "deliverables": wf.shelves.deliverables.snapshot(),
+            "interpreter": wf.last_interpreter,
+        }
+    finally:
+        shutil.rmtree(shelf_root, ignore_errors=True)

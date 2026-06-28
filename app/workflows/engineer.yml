@@ -39,14 +39,15 @@ phases:
   implement:
     - engineer:run
 
-  # deliver — the SCRIPT (never the model) owns git: judge + commit the work, run
-  # the context-sanity gate, push the branch, and build the completed/needs-human
-  # Invoice carrying that branch. The engineer does NOT open a PR — PR creation is
-  # the Administrator's (build-phase) job, so a decomposed issue / multi-issue tick
-  # lands as ONE consolidated PR instead of N. The Invoice's branch is the seam the
-  # admin consolidation reads.
+  # deliver — the SCRIPT (never the model) owns git: judge + commit the unit work
+  # (one or more LOCAL commits — a decomposed issue may carry several), run the
+  # context-sanity gate, and build the completed/needs-human Invoice carrying that
+  # LOCAL branch + its clone. The engineer does NOT push and does NOT open a PR:
+  # the Administrator's build phase SQUASHES the local commits into ONE, pushes the
+  # branch, and opens ONE PR — so a decomposed / multi-issue tick lands as a single
+  # reviewable commit + PR instead of N. The Invoice's branch + clone_dir are the
+  # seam the admin consolidation reads.
   deliver:
     - engineer:judge
     - engineer:contamination
-    - engineer:push
     - engineer:finalize

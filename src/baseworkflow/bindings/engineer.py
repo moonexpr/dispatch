@@ -26,23 +26,27 @@ step, or retune the early-exit. End users touch YAML, never this file.
 
 The shape, made explicit by the YAML
 -------------------------------------
-  * the deterministic git/scan steps are **procedures** (clone, branch, judge,
-    contamination gate, push, finalize). PR creation is NOT here — the engineer
-    commits + pushes a branch; the Administrator's build phase opens ONE PR from it
-    (so a decomposed issue / multi-issue tick consolidates into a single PR);
+  * the deterministic git/scan steps are **procedures** (clone, branch, judge +
+    commit, contamination gate, finalize). Neither push nor PR creation is here —
+    the engineer COMMITS the unit work to a LOCAL branch (one or more commits; a
+    decomposed issue may carry several) but never pushes; the Administrator's build
+    phase squashes those commits into ONE, pushes the branch, and opens ONE PR (so a
+    decomposed / multi-issue tick consolidates into a single commit + PR);
   * the model run is the one **inference** (``engineer:run``) — the agent leaf whose
     *runner* is injected by the factory (``EngineerFactory``), the inversion-of-
     control hinge ``engine/actions/action.py`` describes. Swap the factory and the
     same workflow is mock or live;
   * the four Invoice outcomes are modelled by the declarative ``terminal_when:``
     early-exit (engine primitive; predicate ``engineer_terminal`` registered here):
-      - ``failed``  — a handled fatal (clone/branch/push fail, backend error/timeout):
+      - ``failed``  — a handled fatal (clone/branch fail, backend error/timeout):
         a *terminal* Output carrying the failed Invoice;
       - ``needs-human`` — no commits ahead, or residual context contamination;
-      - ``completed`` — the happy path the ``engineer:finalize`` step builds (branch
-        pushed, PR deferred to the admin build-phase consolidation).
-    (``partial`` — branch pushed but PR creation failed — is no longer an engineer
-    outcome: the engineer does not create PRs. It now arises in the build phase.)
+      - ``completed`` — the happy path the ``engineer:finalize`` step builds (work
+        committed to a LOCAL branch; squash + push + PR deferred to the admin
+        build-phase consolidation).
+    (``partial`` — squash/push or PR creation failed — is no longer an engineer
+    outcome: the engineer neither pushes nor creates PRs. It now arises in the build
+    phase, where the squash + push + PR live.)
     A step that has decided the Invoice ends the run without travelling as an
     exception (failures-as-data). Genuinely unexpected exceptions still trap into an
     engine ``Error`` and :func:`run_live` turns that into a backstop ``failed`` Invoice.
@@ -650,10 +654,10 @@ def act_push(_inputs: Any, ctx: Context) -> Any:
 # -- A7: finalize the happy-path Invoice ------------------------------------
 def act_finalize(_inputs: Any, ctx: Context) -> Any:
     """The last step: build the ``completed`` (or ``needs-human`` on residual
-    contamination) Invoice carrying the pushed branch. The engineer does NOT open a
-    PR — ``pr_number`` is therefore ``None`` and the Administrator's build-phase
-    consolidation opens ONE PR from this branch. Returns the Invoice as the
-    controller's Result value."""
+    contamination) Invoice carrying the LOCAL branch. The engineer neither pushes nor
+    opens a PR — ``pr_number`` is ``None`` and the Administrator's build-phase
+    consolidation SQUASHES the local commits, pushes the branch, and opens ONE PR.
+    Returns the Invoice as the controller's Result value."""
     s = _setup(ctx)
     contamination_note = _sh(ctx).get("contamination_note") or ""
     summary = _sh(ctx).get("summary") or ""
@@ -661,7 +665,7 @@ def act_finalize(_inputs: Any, ctx: Context) -> Any:
     changed_lines = _sh(ctx).get("changed_lines") or 0
     final_status = "needs-human" if contamination_note else "completed"
     _log(f"#{s['issue']} -> {final_status} (branch {branch}, {changed_lines} lines, "
-         f"{int(_elapsed(ctx))}s; PR deferred to admin consolidation)")
+         f"{int(_elapsed(ctx))}s; committed locally — push + PR deferred to admin consolidation)")
     invoice = build_invoice(
         issue=s["issue"], repo=s["repo"], status=final_status, branch=branch, pr_number=None,
         scope_actual=_sh(ctx).get("scope_actual") or s["scope"], route_used=s["route"],
@@ -789,12 +793,20 @@ def _setup_for(job: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def run_live(job: Dict[str, Any]) -> Dict[str, Any]:
+def run_live(job: Dict[str, Any], *, keep_clone: bool = False) -> Dict[str, Any]:
     """Compile engineer.yml against the live ``EngineerFactory``, seed the run
     parameters onto the input shelf, run the controller, and return the Invoice.
     The Invoice is read off ``deliverables.invoice`` (every modelled outcome writes
-    it there); an unmodelled engine Error becomes a backstop ``failed`` Invoice."""
+    it there); an unmodelled engine Error becomes a backstop ``failed`` Invoice.
+
+    The engineer COMMITS the unit work to a LOCAL branch but never pushes — the
+    Administrator's build phase squashes those commits into one and pushes. When
+    ``keep_clone`` is set, the clone is NOT torn down here (admin owns the push +
+    cleanup) and its path is surfaced on the returned Invoice as ``clone_dir`` so
+    the build phase can find the committed branch."""
     setup = _setup_for(job)
+    if keep_clone:
+        setup["keep"] = True  # _cleanup honors this — admin owns push + cleanup
     ctrl = compile_workflow(_workflow_node(), registry=build_registry(), factory=EngineerFactory())
     ctx = ctrl.context(dry_run=False)
     ctx.shelves.input.put("job", job)
@@ -807,18 +819,22 @@ def run_live(job: Dict[str, Any]) -> Dict[str, Any]:
         result = ctrl.run(ctx=ctx)
     finally:
         _cleanup(ctx)
+    clone_dir = ctx.shelves.shared.get("clone_dir")
     invoice = ctx.shelves.deliverables.get("invoice")
-    if isinstance(invoice, dict):
-        return invoice
-    if result.ok and isinstance(result.value, dict):
-        return result.value
-    detail = getattr(result, "detail", "") or str(getattr(result, "error", "engine error"))
-    return build_invoice(
-        issue=setup["issue"], repo=setup["repo"], status="failed", branch=None, pr_number=None,
-        scope_actual=setup["scope"], route_used=setup["route"], tokens_in=0, tokens_out=0,
-        duration_seconds=0, model=setup["model"],
-        summary=f"Engineer workflow errored on #{job.get('issue')}: {detail}",
-    )
+    if not isinstance(invoice, dict):
+        if result.ok and isinstance(result.value, dict):
+            invoice = result.value
+        else:
+            detail = getattr(result, "detail", "") or str(getattr(result, "error", "engine error"))
+            invoice = build_invoice(
+                issue=setup["issue"], repo=setup["repo"], status="failed", branch=None, pr_number=None,
+                scope_actual=setup["scope"], route_used=setup["route"], tokens_in=0, tokens_out=0,
+                duration_seconds=0, model=setup["model"],
+                summary=f"Engineer workflow errored on #{job.get('issue')}: {detail}",
+            )
+    if keep_clone and clone_dir:
+        invoice = {**invoice, "clone_dir": clone_dir}
+    return invoice
 
 
 def _cleanup(ctx: Context) -> None:
@@ -849,12 +865,14 @@ def build_execute_orchestration(factory: Any):
       the decomposition's execution and writes a placeholder ``engineering_result``.
       This is the path the e2e/mock suites pin (no real model call; depth>0).
     * **live** (``ctx.dry_run`` False — ``dispatch --live``) — drive the real
-      ``engineer.yml`` lifecycle via :func:`run_live`: clone the target repo, cut
-      ``pipeline/issue-<n>``, run the engineer agent on the subscription,
-      judge/commit/contamination-scan, and PUSH the branch. The returned Invoice
-      (pushed branch + canonical status) becomes ``engineering_result`` so the
-      Administrator's build phase opens ONE PR from the branch. ``orchestration_script``
-      is not read here (so the WebsiteWF proxy's in-rewire is harmless live).
+      ``engineer.yml`` lifecycle via :func:`run_live` (``keep_clone=True``): clone the
+      target repo, cut ``pipeline/issue-<n>``, run the engineer agent on the
+      subscription, judge/commit (LOCAL commits only) / contamination-scan. The
+      engineer does NOT push. The returned Invoice (local branch + canonical status +
+      ``clone_dir``) becomes ``engineering_result`` — ``clone_dir`` is moved to the
+      result meta so the Administrator's build phase can squash the local commits,
+      push the branch, and open ONE PR. ``orchestration_script`` is not read here (so
+      the WebsiteWF proxy's in-rewire is harmless live).
 
     Returns a Result so the monitor loop predicates read success/abort.
     """
@@ -867,7 +885,10 @@ def build_execute_orchestration(factory: Any):
             plan = deliv.get("plan")
             if isinstance(plan, dict) and plan.get("units") and "plan" not in job:
                 job["plan"] = plan  # carry the architect's decomposition into the units
-            invoice = run_live(job)
+            # keep_clone: the engineer commits locally but does NOT push; the Admin
+            # build phase squashes those commits + pushes, so it needs the clone.
+            invoice = run_live(job, keep_clone=True)
+            clone_dir = invoice.pop("clone_dir", None)  # transport out-of-band; keep the Invoice schema-clean
             status = str(invoice.get("status") or "failed")
             deliv.put("invoice", invoice)
             deliv.put("engineering_result", {
@@ -877,6 +898,7 @@ def build_execute_orchestration(factory: Any):
                     "status": status,
                     "branch": invoice.get("branch"),
                     "summary": invoice.get("summary"),
+                    "clone_dir": clone_dir,  # admin:consolidate_pr squashes + pushes from here
                 },
             })
             # The work phase ran to a verdict; the canonical status (carried in
