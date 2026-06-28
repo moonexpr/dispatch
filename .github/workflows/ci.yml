@@ -31,8 +31,8 @@ jobs:
       - name: Install jq + shellcheck
         run: sudo apt-get update && sudo apt-get install -y jq shellcheck
 
-      - name: Install PyYAML (litellm config structural check)
-        run: python3 -m pip install --quiet pyyaml
+      - name: Install Python deps (PyYAML for config checks; jsonschema for smoke.py v1 seam contracts)
+        run: python3 -m pip install --quiet pyyaml jsonschema
 
       - name: Shellcheck scripts
         # Lint every tracked shell script under scripts/ (recursive: scripts/*.sh
