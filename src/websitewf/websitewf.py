@@ -69,9 +69,10 @@ def run_mock(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
 
 
 def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = True) -> Dict[str, Any]:
-    """Run WebsiteWF against the RealActionFactory (same summary shape as run_mock).
-    Under ``dry_run=True`` the inference runner emits a deterministic placeholder
-    instead of calling a model."""
-    from engine.actions import RealActionFactory
+    """Run WebsiteWF against the ArchitectFactory (a RealActionFactory whose only
+    override is the live architect:draft_work_plan SDK agent — inherited from the
+    baseworkflow overlay). Under ``dry_run=True`` the inference runner emits the
+    deterministic oracle output instead of calling a model."""
+    from bindings.architect import ArchitectFactory
 
-    return _run(RealActionFactory(), job, triage, dry_run=dry_run)
+    return _run(ArchitectFactory(), job, triage, dry_run=dry_run)

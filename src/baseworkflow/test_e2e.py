@@ -122,9 +122,11 @@ def test_run_live_dry_run_matches_mock() -> None:
     mock_keys = set(bw.run_mock(JOB, TRIAGE)["deliverables"].keys())
     check("run_live deliverable keys == run_mock", live_keys == mock_keys,
           f"sym_diff={sorted(live_keys ^ mock_keys)}")
-    # uses the real (enforcing) factory family, not the mock
-    check("run_live used RealActionFactory",
-          type(live["workflow"].factory).__name__ == "RealActionFactory",
+    # uses the real (enforcing) factory family, not the mock. ArchitectFactory is
+    # the production factory (a RealActionFactory whose only override is the live
+    # architect:draft_work_plan SDK agent); under dry_run it behaves as the parent.
+    check("run_live used the RealActionFactory family",
+          isinstance(live["workflow"].factory, RealActionFactory),
           f"factory={type(live['workflow'].factory).__name__}")
 
 

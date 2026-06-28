@@ -1,8 +1,16 @@
 # A7 — the structured work plan (invariants, assumptions, acceptance criteria,
 # abort conditions, issues affected, bucket, UML for B|C, authorization). Emitted
 # as JSON (fmt), so the inference carries a JSON adapter.
+#
+# An INFERENCE: under ArchitectFactory (baseworkflow's production factory) the LIVE
+# runner drives a real Claude agent (engine.agent_sdk) to arrange the epic's work
+# units and assign an engineer agent that commits to each, layered on the
+# deterministic baseline. The `bind: draft_work_plan` body is the dry-run/mock
+# ORACLE (compiled in by CompileVisitor), so offline + CI stay byte-identical and
+# any live model/parse failure falls back to it. Non-raw: the oracle writes
+# work_plan via the interface; the live runner writes it itself.
 token: architect:draft_work_plan
-kind: procedure
+kind: inference
 fmt: json
 bind: draft_work_plan
 permission: []

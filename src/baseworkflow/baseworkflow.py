@@ -181,9 +181,12 @@ def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
     shelf-backed configuration. No orchestration-tick wiring is done here; that is
     Phase 2+.
     """
-    from engine.actions import RealActionFactory
+    # ArchitectFactory is a RealActionFactory whose only override is the live
+    # inference runner for architect:draft_work_plan (the architect SDK agent);
+    # under dry_run it defers to the deterministic oracle, so this path is unchanged.
+    from bindings.architect import ArchitectFactory
 
-    factory = RealActionFactory()
+    factory = ArchitectFactory()
     wf = BaseWorkflow(factory, job=job, triage=triage)
     ctx = wf.context(dry_run=dry_run)
     result = wf.run(ctx=ctx)

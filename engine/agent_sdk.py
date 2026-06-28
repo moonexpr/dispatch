@@ -33,6 +33,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+# TODO(John): Refine the agent_sdk and runners with a better abstraction later to
+# make this machinery less cumbersome. Today each caller (EngineerFactory's
+# _engineer_runner, ArchitectFactory's _architect_runner) hand-rolls the same
+# shape — read structured inputs off the shelf, build a prompt, make_runner().run(),
+# parse the result, write outputs, fail-safe — around this runner. A cleaner
+# abstraction (e.g. a declarative "agent action" that owns prompt-build + parse +
+# shelf I/O, with the factory only injecting the backend) would let a new agent be
+# added with a prompt + a parser instead of a bespoke factory + runner pair.
+
 # The default agent tool set (the SDK path passes this explicitly; the CLI path
 # runs under --permission-mode bypassPermissions and lets the lead use every tool).
 DEFAULT_TOOLS: List[str] = ["Read", "Edit", "Write", "Bash", "Agent", "Task"]
