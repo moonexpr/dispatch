@@ -35,8 +35,9 @@ from typing import Any, Dict, List, Optional
 # ``schema_version``.
 SEAM_SCHEMA_VERSION = 1
 
-# <root>/schemas/ — this file lives at <root>/src/orchestration/seam.py.
-SCHEMAS_DIR = Path(__file__).resolve().parents[2] / "schemas"
+# <root>/schemas/ — this file lives at <root>/src/visitor/orchestration/seam.py,
+# so repo root is parents[3] (orchestration -> visitor -> src -> <root>).
+SCHEMAS_DIR = Path(__file__).resolve().parents[3] / "schemas"
 WORK_ORDER_SCHEMA = SCHEMAS_DIR / "work-order.v1.json"
 JOB_REQUEST_SCHEMA = SCHEMAS_DIR / "job-request.v1.json"
 INVOICE_SCHEMA = SCHEMAS_DIR / "invoice.v1.json"

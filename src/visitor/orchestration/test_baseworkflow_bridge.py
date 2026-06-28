@@ -26,10 +26,16 @@ import json
 import os
 import sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_SRC = os.path.dirname(_HERE)
-_ROOT = os.path.dirname(_SRC)
-for _p in (_ROOT, _SRC, _HERE):
+_HERE = os.path.dirname(os.path.abspath(__file__))          # src/visitor/orchestration
+_VISITOR = os.path.dirname(_HERE)                           # src/visitor
+_SRC = os.path.dirname(_VISITOR)                            # src
+_ROOT = os.path.dirname(_SRC)                               # repo root
+# The orchestration lineage moved under src/visitor/ (see src/visitor/__init__.py),
+# one level deeper. Put repo root on the path for the src.visitor.* package imports
+# below, plus the subsystem dirs the bridge's enrich chain reaches via bare-name
+# imports (mirrors src/baseworkflow/bindings/__init__.py).
+for _p in (_ROOT, _SRC, _VISITOR, _HERE,
+           os.path.join(_VISITOR, "architect"), os.path.join(_VISITOR, "budget")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -66,7 +72,7 @@ def test_enrich_dry_run_no_model_call() -> None:
     """(a) baseworkflow + dry-run enriches with orchestration_script + work_plan,
     and never calls the model."""
     os.environ["PIPELINE_DRY_RUN"] = "1"
-    from src.orchestration import baseworkflow_bridge as bridge
+    from src.visitor.orchestration import baseworkflow_bridge as bridge
 
     # Spy on the real model entrypoint: under dry-run it must never be called.
     import engine.models as models
@@ -99,7 +105,7 @@ def test_enrich_carries_plan_units_for_fanout() -> None:
     out on (``job["plan"]["units"]``). Without this the Engineer sees zero units
     and collapses an authored multi-unit decomposition to a single agent."""
     os.environ["PIPELINE_DRY_RUN"] = "1"
-    from src.orchestration import baseworkflow_bridge as bridge
+    from src.visitor.orchestration import baseworkflow_bridge as bridge
 
     enriched = json.loads(bridge.author_via_baseworkflow(_JOB_REQUEST))
     plan = enriched.get("plan")
@@ -110,7 +116,7 @@ def test_enrich_carries_plan_units_for_fanout() -> None:
     # Cross-check against the actual consumer contract: the Engineer's unit
     # extractor recognises the enriched request as a decomposition.
     try:
-        from src.orchestration.engineer_sdk import _extract_units
+        from src.visitor.orchestration.engineer_sdk import _extract_units
 
         found, _staffing = _extract_units(enriched)
         _ok(len(found) >= 1,
@@ -121,7 +127,7 @@ def test_enrich_carries_plan_units_for_fanout() -> None:
 
 def test_failsafe_returns_original_on_error() -> None:
     """(b) any error -> the ORIGINAL request is returned unchanged."""
-    from src.orchestration import baseworkflow_bridge as bridge
+    from src.visitor.orchestration import baseworkflow_bridge as bridge
 
     # Malformed JSON: json.loads raises -> fail-safe path.
     bad = "{not valid json"
@@ -150,8 +156,8 @@ def test_failsafe_returns_original_on_error() -> None:
 def _run_visit_workorder_with_tripwire():
     """Drive ExecutionVisitor.visit_workorder with the bridge replaced by a
     tripwire that counts calls. Returns (call_count, built_job_request)."""
-    from src.orchestration.visitors import ExecutionVisitor, TickContext
-    from src.orchestration import baseworkflow_bridge as bridge
+    from src.visitor.orchestration.visitors import ExecutionVisitor, TickContext
+    from src.visitor.orchestration import baseworkflow_bridge as bridge
 
     called = {"n": 0}
     orig = bridge.author_via_baseworkflow
@@ -163,7 +169,7 @@ def _run_visit_workorder_with_tripwire():
     bridge.author_via_baseworkflow = _tripwire
     # visit_workorder imports the symbol from the module at call time, so patch
     # there too.
-    import src.orchestration.baseworkflow_bridge as bmod
+    import src.visitor.orchestration.baseworkflow_bridge as bmod
     bmod_orig = bmod.author_via_baseworkflow
     bmod.author_via_baseworkflow = _tripwire
 

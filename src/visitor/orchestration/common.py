@@ -43,9 +43,11 @@ from engine import proc, runtime
 
 
 # ---------------------------------------------------------------------------
-# Repo-root resolution. This file lives at <root>/src/orchestration/.
+# Repo-root resolution. This file lives at <root>/src/visitor/orchestration/
+# (the lineage was consolidated under src/visitor/ — see src/visitor/__init__.py),
+# so repo root is parents[3]: orchestration -> visitor -> src -> <root>.
 # ---------------------------------------------------------------------------
-PIPELINE_ROOT = Path(__file__).resolve().parents[2]
+PIPELINE_ROOT = Path(__file__).resolve().parents[3]
 os.environ.setdefault("PIPELINE_ROOT", str(PIPELINE_ROOT))
 
 
@@ -129,8 +131,8 @@ _default("ENGINEER_BIN", "")
 # warning — see visitors.py ``visit_workorder``). Read live at call time.
 _default("DISPATCH_ENGINE", "baseworkflow")
 
-LEDGER_PY = os.environ.get("LEDGER_PY", str(PIPELINE_ROOT / "src" / "ledger" / "ledger.py"))
-PREP_PY = os.environ.get("PREP_PY", str(PIPELINE_ROOT / "src" / "architect" / "prep.py"))
+LEDGER_PY = os.environ.get("LEDGER_PY", str(PIPELINE_ROOT / "src" / "visitor" / "ledger" / "ledger.py"))
+PREP_PY = os.environ.get("PREP_PY", str(PIPELINE_ROOT / "src" / "visitor" / "architect" / "prep.py"))
 
 
 # Read an env var with a fallback; the live source of truth at call time.
