@@ -1,0 +1,26 @@
+# M6.5 — publish the delivered app to its hosting providers (Vercel + Supabase).
+# Runs in the build phase right after admin:update_docs: once a unit is delivered
+# and its docs are refreshed, ship the running app — push the Supabase database/
+# functions and deploy the Vercel frontend. A procedure; like the other gh/network
+# actions it reads the run Context for ctx.dry_run, which gates every deploy (no
+# network on the dry-run path — the intended commands are recorded only).
+token: admin:publish
+kind: procedure
+bind: publish
+budget: admin
+
+# Deploy capabilities this action uses, declared in the same namespaced vocabulary
+# as the gh-write actions (consolidate_pr / intake_invoice). Declarative today (a
+# procedure exposes no spec.tools for the PermissionGovernor to gate on); the real
+# dry-run safety is enforced imperatively in the binding via ctx.dry_run.
+permission:
+  - vercel:deploy        # deploy the frontend to Vercel (prod)
+  - supabase:db:push     # push the database schema / migrations to Supabase
+
+interface:
+  in:
+    engineering_result: deliverables.engineering_result
+    docs: deliverables.docs
+    job: input.job
+  out:
+    published: deliverables.published
