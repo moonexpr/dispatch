@@ -208,6 +208,53 @@ DEFAULTS: Dict[str, Any] = {
                     "  Exercise:  {exercise}\n"
                     "  Verify:    {verify}"),
             },
+            # PLAN-section PHASE TEXT templates (#133). The phase prose is DATA;
+            # workorder COMPUTES the per-phase token allocations + impl hint and
+            # fills these via str.format. `diagnose` is the TRIAGE-FIRST phase
+            # rendered BETWEEN read and implement: it tells the engineer to engage
+            # the embedded conversation + history (#132 grounding), confirm/extend
+            # the existing triage, RECORD the diagnosis, and only then implement.
+            # The diagnosis comment is a WRITE to the thread, so the template gates
+            # it behind the dry-run rails (post only when DRY_RUN=0; else capture in
+            # a commit message). It draws from the READ allocation — no new token
+            # line — so approval.phase_split arithmetic is unchanged.
+            "plan": {
+                "read": (
+                    "PHASE 1 — READ ({read}): everything you need is embedded above under "
+                    "EMBEDDED RESOURCES — the referenced source, the worker contract, the Invoice "
+                    "schema, and the conventions. Confirm your understanding against it. Do NOT "
+                    "fetch or research additional files unless a STOP CONDITION applies."),
+                "diagnose": (
+                    "PHASE 2 — DIAGNOSE / TRIAGE-FIRST (within the READ allocation, {read}): before "
+                    "you change any code, engage the issue thread. {grounding} Confirm or extend the "
+                    "existing triage, reproduce the problem if this is a bug, and isolate the root "
+                    "cause. RECORD your diagnosis and the fix plan the implementation will follow: "
+                    "when DRY_RUN is 1 (it is {dry_run} here) capture it in your first commit message "
+                    "on `{branch}` (do NOT post to the thread); only when DRY_RUN=0 may you ALSO post "
+                    "it as a brief thread comment on issue #{issue}. Do not implement until the root "
+                    "cause and a concrete, sliceable fix plan are written down."),
+                "implement": (
+                    "PHASE 3 — IMPLEMENT ({implement}): {impl_hint}. Commit incrementally on "
+                    "`{branch}`."),
+                "verify": (
+                    "PHASE 4 — VERIFY ({verify}): run {gate}. It must pass. Fix causes, not "
+                    "symptoms. If it cannot pass within budget, open a DRAFT PR explaining which "
+                    "check fails."),
+                "commit": (
+                    "PHASE 5 — COMMIT & PR ({commit}): stage only files you touched. Commit "
+                    "(signed). Open one PR against `main` with the done-criteria checklist and "
+                    "`Closes #{issue}`. Stop. Return the Invoice."),
+                "reserve": (
+                    "RESERVE ({reserve}): contingency held by ADMIN — do not pre-spend."),
+                "grounding_with_thread": (
+                    "Read the embedded 'Conversation so far' (the maintainer/triage discussion) and "
+                    "'Relevant history' (linked PRs / recent commits) above — they are the grounding "
+                    "for this task; build on the diagnosis already recorded there rather than "
+                    "starting cold."),
+                "grounding_no_thread": (
+                    "No conversation or linked history was embedded for this issue; diagnose from the "
+                    "issue body and the referenced source above."),
+            },
         },
         # Research-mode gap-detection (Pillar 2, E6-1). The deterministic architect
         # gap heuristic (src/architect/research.py) reads these. `enabled` is a
@@ -383,6 +430,9 @@ BOX_W: int = int(_GEN["workorder"]["box_width"])
 # Work-order block LAYOUT templates (#144) — label/layout text as data, filled
 # by workorder via str.format; the computed values stay Python.
 WORKORDER_BLOCK: Dict[str, str] = dict(_GEN["workorder"]["block"])
+# PLAN-section PHASE TEXT templates (#133) — the triage-first phase prose as data,
+# filled by workorder via str.format; the token allocations stay computed in Python.
+WORKORDER_PLAN: Dict[str, str] = dict(_GEN["workorder"]["plan"])
 
 # research-mode gap-detection (Pillar 2, E6-1) — the new generation.research block,
 # consumed by src/architect/research.py::detect_gap.

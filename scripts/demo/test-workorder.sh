@@ -218,5 +218,80 @@ else
 fi
 
 echo
+echo "-- diagnosis / triage-first PLAN phase (#133) --"
+
+D_OUT="$(ROOT="${ROOT}" "${PY}" - <<'PYEOF'
+import os, sys
+ACP = os.path.join(os.environ["ROOT"], "src", "architect")
+sys.path.insert(0, ACP); sys.path.insert(0, os.path.dirname(ACP))
+import approval, decompose, workorder, resources
+
+job = {"issue": 7, "repo": "acme/x", "title": "fix the crash",
+       "body": "It crashes.\n## Acceptance Criteria\n- no crash\n",
+       "route": "gen-default", "scope": "m", "confidence": 0.9}
+triage = {"action":"implement","scope":"m","route":"gen-default","confidence":0.9}
+auth = approval.approve(job, triage)
+plan = decompose.plan(job, [], verify_cmd="bash scripts/smoke.sh")
+
+# (a) With the #132 grounding embedded: the DIAGNOSE phase points the engineer at
+#     the conversation + history and says "build on the diagnosis already recorded".
+convo = [{"author":"maintainer","created_at":"t","body":"Triage: null deref in foo()."}]
+hist  = [{"kind":"commit","ref":"abc123","summary":"touched foo()","url":""}]
+res = resources.gather(job, os.environ["ROOT"], conversation=convo, history=hist)
+wo  = workorder.render(job, triage, auth, resources=res, plan=plan,
+                       verify_cmd="bash scripts/smoke.sh")
+
+# (b) Without any thread: the phase is still present but uses the no-thread grounding.
+res0 = resources.gather(job, os.environ["ROOT"])
+wo0  = workorder.render(job, triage, auth, resources=res0, plan=plan,
+                        verify_cmd="bash scripts/smoke.sh")
+
+# Slice out the PLAN section to assert ordering/budget within it.
+ps, pe = wo.index("# PLAN  (phased"), wo.index("# ISSUE")
+plan_sec = wo[ps:pe]
+
+checks = []
+def check(label, cond): checks.append((label, bool(cond)))
+
+# The triage-first phase exists and sits BETWEEN read and implement.
+check("DIAGNOSE/TRIAGE-FIRST phase rendered", "PHASE 2 — DIAGNOSE / TRIAGE-FIRST" in plan_sec)
+check("DIAGNOSE precedes IMPLEMENT", plan_sec.index("DIAGNOSE") < plan_sec.index("PHASE 3 — IMPLEMENT"))
+check("phases renumbered: IMPLEMENT is PHASE 3", "PHASE 3 — IMPLEMENT (36,000)" in plan_sec)
+check("phases renumbered: VERIFY is PHASE 4", "PHASE 4 — VERIFY (9,600)" in plan_sec)
+check("phases renumbered: COMMIT & PR is PHASE 5", "PHASE 5 — COMMIT & PR (6,400)" in plan_sec)
+# Budget arithmetic is UNCHANGED — DIAGNOSE draws from the READ allocation, adds no line.
+check("READ budget unchanged (12,000)", "PHASE 1 — READ (12,000)" in plan_sec)
+check("RESERVE budget unchanged (16,000)", "RESERVE (16,000)" in plan_sec)
+check("DIAGNOSE draws from the READ allocation", "within the READ allocation, 12,000" in plan_sec)
+# It leverages the #132 grounding and gates the thread-comment write behind dry-run.
+check("DIAGNOSE engages the issue thread", "engage the issue thread" in plan_sec)
+check("DIAGNOSE leverages embedded conversation+history (#132)",
+      "build on the diagnosis already recorded" in plan_sec)
+check("diagnosis WRITE gated behind dry-run rails",
+      "DRY_RUN=0 may you ALSO post it" in plan_sec and "do NOT post to the thread" in plan_sec)
+check("DIAGNOSE records the diagnosis before implementing",
+      "Do not implement until the root cause" in plan_sec)
+# With no thread embedded the phase still renders, with the no-thread grounding.
+check("no-thread order still has the DIAGNOSE phase", "PHASE 2 — DIAGNOSE / TRIAGE-FIRST" in wo0)
+check("no-thread grounding clause used when no thread embedded",
+      "No conversation or linked history was embedded" in wo0)
+# Phase text is DATA-DRIVEN (config), not hardcoded — same byte-stable render twice.
+check("deterministic render", wo == workorder.render(job, triage, auth, resources=res, plan=plan,
+                                                      verify_cmd="bash scripts/smoke.sh"))
+# A research order keeps its own inline plan and does NOT grow a DIAGNOSE phase.
+wor = workorder.render(job, triage, auth, resources=res0, plan=plan,
+                       verify_cmd="bash scripts/smoke.sh", mode="research", topic="foo")
+check("research order has no DIAGNOSE phase", "DIAGNOSE / TRIAGE-FIRST" not in wor)
+
+for label, good in checks:
+    print(("OK" if good else "NO") + "\t" + label)
+PYEOF
+)"
+while IFS=$'\t' read -r tag label; do
+  [[ -z "${label}" ]] && continue
+  [[ "${tag}" == "OK" ]] && ok "${label}" || bad "${label}"
+done <<< "${D_OUT}"
+
+echo
 echo "== WORK-ORDER: ${pass} passed, ${fail} failed =="
 [[ "${fail}" -eq 0 ]]
