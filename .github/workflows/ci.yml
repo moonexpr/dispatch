@@ -43,5 +43,5 @@ jobs:
         # stay out of scope.
         run: shellcheck -x --severity=warning --source-path=SCRIPTDIR $(git ls-files 'scripts/*.sh')
 
-      - name: Smoke (dry-run, offline)
-        run: bash scripts/smoke.sh
+      - name: Smoke (workflow-engine gate, dry-run, offline)
+        run: python3 scripts/smoke.py
