@@ -24,12 +24,66 @@ import common  # src/baseworkflow/subsystems/common.py
 from engine import proc  # engine.proc — capturing subprocess wrapper (PR-create stdout)
 
 
-def prepare_env(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """M1 — prepare the work environment (worktree/harness plan)."""
+def _ensure_repo_exists(repo: str, ctx: Any) -> Dict[str, Any]:
+    """Make sure the TARGET repo exists on GitHub before the engineer clones it.
+
+    A missing target makes ``engineer:clone`` fail and the whole tick produce nothing
+    pushable, so prep guarantees the repo is there first. Idempotent: an existing repo
+    is left untouched (``gh repo view`` then create-if-missing — the same shape as
+    scripts/demo/provision-testrepo.sh). Network-MUTATING (``gh repo create``), so —
+    like consolidate_pr / publish / intake_invoice — the create is gated on
+    ``ctx.dry_run``: under dry-run the intended create is recorded only (greppable
+    DRY-RUN line via common.run) and no network call is made; the read-only
+    ``gh repo view`` probe is skipped too, so the dry-run path stays side-effect-free."""
+    dry = bool(getattr(ctx, "dry_run", True))
+    repo = (repo or "").strip()
+    gh = os.environ.get("GH_BIN", "gh")
+    desc = "Disposable dispatch pipeline target (auto-created by admin:prepare_env)."
+    # --add-readme seeds an initial commit on the default branch, so the freshly
+    # created repo is a usable clone/PR target (engineer:clone has a branch to clone;
+    # consolidate_pr has a `--base` that exists). An existing repo is never re-seeded.
+    create = [gh, "repo", "create", repo, "--private", "--add-readme", "--description", desc]
+
+    if not repo:
+        common.log("prepare-env: no target repo configured — cannot ensure existence")
+        return {"repo": "", "ensured": False, "existed": None, "created": False,
+                "dry_run": dry, "reason": "no repo configured"}
+
+    if dry:
+        # Record-only: print the intended create (greppable), make no network call.
+        common.run(*create)
+        return {"repo": repo, "ensured": True, "existed": None, "created": False,
+                "dry_run": True}
+
+    # Live: view-then-create (idempotent). The view is a non-mutating probe, so it
+    # runs directly; only the create is the mutation.
+    existed = proc.run([gh, "repo", "view", repo], capture=True).returncode == 0
+    created = False
+    if existed:
+        common.log(f"prepare-env: target repo {repo} already exists — ok")
+    else:
+        common.log(f"prepare-env: target repo {repo} missing — creating (private)")
+        rc = proc.run(create, capture=True).returncode
+        created = rc == 0
+        if not created:
+            common.log(f"prepare-env: could NOT create {repo} (rc={rc}) — engineer clone may fail")
+    return {"repo": repo, "ensured": existed or created, "existed": existed,
+            "created": created, "dry_run": False}
+
+
+def prepare_env(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+    """M1 — prepare the work environment (worktree/harness plan).
+
+    Also ensures the TARGET repo exists on GitHub before the engineer clones it (a
+    missing target otherwise fails the clone and the tick ships nothing). The ensure
+    is dry-run-gated; its record rides on ``env.repo_ensure`` (no new deliverable key,
+    so the e2e deliverable set is unchanged)."""
     job = inputs.get("job") or {}
     plan = inputs.get("plan")
     labels = list(job.get("labels", []) or [])
     env = prep.build(job, labels, plan)
+    repo = job.get("repo") or os.environ.get("PIPELINE_REPO", "")
+    env = {**env, "repo_ensure": _ensure_repo_exists(repo, ctx)}
     return {"env": env, "prep": env}
 
 
@@ -559,7 +613,7 @@ def verify_ci(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
 
 
 def register(reg: Any) -> None:
-    reg.register_action("prepare_env", prepare_env)
+    reg.register_action("prepare_env", prepare_env, needs_ctx=True)
     reg.register_action("write_adversarial", write_adversarial)
     reg.register_action("update_docs", update_docs)
     reg.register_action("publish", publish, needs_ctx=True)
