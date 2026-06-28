@@ -1651,6 +1651,18 @@ else
   fail "continuation unit suite failed"
 fi
 
+section "§7.34 ADR-001 statechart closure: deep-history resume (#9) + shared-shelf write contract (#6)"
+# Runnable, self-asserting unit module (no pytest; exit 0 = pass). Closes the two
+# open ADR-001 action items: the interpreter resumes a controller killed mid-work
+# at its deepest active (nested) configuration instead of restarting, and the
+# factory's ``shared`` shelf is write-serialized (SerializedShelf) so a concurrent
+# in(state)-style guard never reads a torn write.
+if PIPELINE_DRY_RUN=1 python3 "${ROOT}/engine/actions/test_statechart.py" >/dev/null 2>&1; then
+  pass "statechart unit suite green (deep-history resume + shared-shelf serialized writes)"
+else
+  fail "statechart unit suite failed"
+fi
+
 section "§7.33 no-policy-literals-in-code guard (#144, capstone of #141): routing policy lives in config"
 # The policy→config migration (#136/#137/#138/#142/#144) moved the routing
 # DECISIONS — scope→route map, CI fix-ladder, the ladder cap, the confidence

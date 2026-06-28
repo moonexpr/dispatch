@@ -67,7 +67,9 @@ class Event:
 class Interpreter:
     """Drives one chart to completion and returns the Result that reached the top.
     ``events`` is the transition-level audit; ``config`` + ``history`` are the
-    serializable resume seam."""
+    serializable resume seam. Seed ``history`` from a prior ``snapshot()`` (via
+    ``restore``) and set ``resuming`` to re-enter at the deepest active
+    configuration instead of restarting — that is deep history (H*)."""
 
     chart: Statechart
     ctx: Any
@@ -75,6 +77,7 @@ class Interpreter:
     config: Configuration = field(default_factory=Configuration)
     events: List[Dict[str, Any]] = field(default_factory=list)
     history: Dict[str, str] = field(default_factory=dict)
+    resuming: bool = False  # when True, _initial_child re-enters from history (H*)
     _internal: Deque[Event] = field(default_factory=deque)
     _external: Deque[Event] = field(default_factory=deque)  # broadcast seam (unused)
 
@@ -111,7 +114,7 @@ class Interpreter:
         on ``ctx.counters[state.id]`` for its guard to read."""
         self.config.enter(state.id)
         try:
-            cur_id = state.initial or (state.children[0].id if state.children else "")
+            cur_id = self._initial_child(state)
             feed = payload
             result: Result = Output(payload)
             iteration = 0
@@ -154,6 +157,21 @@ class Interpreter:
         finally:
             self.config.leave(state.id)
 
+    # -- entry / deep history ----------------------------------------------
+    def _initial_child(self, state: State) -> str:
+        """The child a superstate enters. Normally its ``initial`` (or first
+        child). When ``resuming`` and ``history`` records a still-valid child for
+        this superstate, re-enter there instead — so each superstate on the
+        recorded active path resumes at its last active child (deep history),
+        skipping earlier siblings that already completed. Branches the dead run
+        never reached carry no history entry and enter normally."""
+        default = state.initial or (state.children[0].id if state.children else "")
+        if self.resuming:
+            resumed = self.history.get(state.id)
+            if resumed and any(c.id == resumed for c in state.children):
+                return resumed
+        return default
+
     # -- agenda + selection -------------------------------------------------
     def _emit(self, event: Event) -> None:
         """Place a completion event on the internal queue and drain it. Draining
@@ -183,8 +201,26 @@ class Interpreter:
             "events": list(self.events),
         }
 
+    def restore(self, snapshot: Dict[str, Any]) -> "Interpreter":
+        """Seed this interpreter from a prior :meth:`snapshot` so the next
+        :meth:`run` re-enters at the deepest active configuration (deep history,
+        H*) rather than restarting from zero. Returns ``self`` for chaining."""
+        self.history = dict(snapshot.get("history", {}))
+        self.resuming = True
+        return self
+
 
 def interpret(chart: Statechart, ctx: Any, payload: Any = None, *, semantics: str = "async") -> Result:
     """Run a chart to completion and return its Result. Convenience wrapper used
     by ``Controller.run``."""
     return Interpreter(chart, ctx, semantics=semantics).run(payload)
+
+
+def resume(
+    chart: Statechart, ctx: Any, snapshot: Dict[str, Any], payload: Any = None, *, semantics: str = "async"
+) -> Result:
+    """Run a chart from a prior ``snapshot`` (deep-history resume) and return its
+    Result. The mirror of :func:`interpret` for the durability path: a controller
+    that died mid-run resumes its nested active configuration instead of replaying
+    completed work."""
+    return Interpreter(chart, ctx, semantics=semantics).restore(snapshot).run(payload)

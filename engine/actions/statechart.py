@@ -17,8 +17,10 @@ Construct mapping (from the HFSM addendum):
     the guard).
   * ``PARALLEL`` — orthogonal regions, co-active (single-region stub for now).
   * ``FINAL``    — an absorbing state the completion/error edges target.
-  * history (H*) — a durability seam: a compound may record its deepest active
-    configuration for re-entry (the resume seam; restore is minimal for now).
+  * history (H*) — a durability seam: a compound records its deepest active
+    child as it runs, and ``Interpreter.restore``/``resume`` re-enter from that
+    recorded configuration so a controller that died mid-run resumes its nested
+    active position instead of restarting.
 
 What is deliberately a *seam, not a feature* yet: the broadcast event bus,
 ``in(state)`` guards across sibling regions, and multi-region peer switching. The

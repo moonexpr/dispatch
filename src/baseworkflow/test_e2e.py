@@ -148,7 +148,12 @@ def test_budget_tracked_and_phased() -> None:
 def test_no_real_side_effects() -> None:
     out = bw.run_mock(JOB, TRIAGE)
     wf = out["workflow"]
-    backends = {type(wf.shelves.input).__name__, type(wf.shelves.deliverables).__name__, type(wf.shelves.shared).__name__}
+    # The ``shared`` shelf is wrapped in a SerializedShelf (ADR-001 #6 write
+    # contract); unwrap to the underlying backend so the invariant we assert is the
+    # real one — no disk-backed (FileShelf) shelf, i.e. no side effects leave memory.
+    def _backend(s: object) -> str:
+        return type(getattr(s, "inner", s)).__name__
+    backends = {_backend(wf.shelves.input), _backend(wf.shelves.deliverables), _backend(wf.shelves.shared)}
     check("all shelves are in-memory (no disk)", backends == {"MemoryShelf"}, f"backends={backends}")
     check("ran under dry_run", out["ctx"].dry_run is True)
 

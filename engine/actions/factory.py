@@ -29,13 +29,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from .action import Action, Inference, Procedure, Program
+from .action import Action, Inference, Procedure, Program, Proxy
 from .adapter import Adapter, adapter_for
 from .control import Controller, Parallel, Sequence
 from .governor import BudgetGovernor, Governor, IterationGovernor, PermissionGovernor
 from .result import Output
 from .script import InferenceSpec, OrchestrationScript
-from .shelf import FileShelf, MemoryShelf, Shelf, Shelves
+from .shelf import FileShelf, MemoryShelf, SerializedShelf, Shelf, Shelves
 
 # Default route -> alias map for the real backend, kept local so engine/ never
 # imports src/tuning (which would be a forbidden engine->src edge). The workflow
@@ -61,6 +61,13 @@ class AbstractActionFactory(ABC):
     def program(self, controller: Controller, *, name: str = "program") -> Action:
         return Program(name, controller)
 
+    def proxy(self, name: str, inner: Action, *, pre: Any = (), post: Any = ()) -> Action:
+        """Wrap ``inner`` in an I/O-reroute :class:`Proxy`. ``pre``/``post`` are
+        sequences of ``(src_shelf, src_key, dst_shelf, dst_key)`` shelf copies done
+        before / after the wrapped action runs. Backend-agnostic (shelf mechanism
+        only), so it is concrete on the abstract factory like :meth:`program`."""
+        return Proxy(name, inner, pre=pre, post=post)
+
     # -- supporting members of the same theme -------------------------------
     @abstractmethod
     def shelf(self, kind: str) -> Shelf: ...
@@ -78,7 +85,14 @@ class AbstractActionFactory(ABC):
 
     # -- composite helpers (shared) -----------------------------------------
     def shelves(self) -> Shelves:
-        return Shelves(self.shelf("input"), self.shelf("deliverables"), self.shelf("shared"))
+        # ADR-001 #6: the ``shared`` shelf is write-serialized so an in(state)-style
+        # guard never reads a torn write once Controllers run as peers; ``input`` /
+        # ``deliverables`` stay last-write-wins.
+        return Shelves(
+            self.shelf("input"),
+            self.shelf("deliverables"),
+            SerializedShelf(self.shelf("shared")),
+        )
 
     # -- deserialize an orchestration script into a Program (shared) --------
     def deserialize(self, script: Any, *, name: str = "engineering") -> Action:

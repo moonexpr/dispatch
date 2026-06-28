@@ -18,6 +18,7 @@ Leaf module: imports only stdlib + ``engine.filesys`` (itself a leaf).
 from __future__ import annotations
 
 import json
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List
@@ -140,6 +141,53 @@ class FileShelf(Shelf):
             return [f[:-5] for f in os.listdir(d) if f.endswith(".json")]
         except FileNotFoundError:
             return []
+
+
+class SerializedShelf(Shelf):
+    """Write-serializing decorator over another Shelf — the pin for ADR-001
+    Action Item 6 (the shared-shelf concurrency contract).
+
+    All mutating ops (``put``/``update``/``drop``) take a re-entrant lock, so once
+    Controllers run as concurrent peers an ``in(state)``-style guard reading the
+    ``shared`` shelf never observes a torn write; an ``update`` lands atomically
+    rather than interleaving with another writer's keys. Reads pass straight
+    through. The factory wraps ``shared`` in this and leaves ``input`` /
+    ``deliverables`` plain (last-write-wins is fine for those). Under today's
+    single-region RTC the lock is uncontended — it exists to make the contract
+    *structural*, not an accident of there being only one writer today."""
+
+    def __init__(self, inner: Shelf) -> None:
+        self.kind = inner.kind
+        self._inner = inner
+        self._lock = threading.RLock()
+
+    @property
+    def inner(self) -> Shelf:
+        return self._inner
+
+    # reads pass through (no lock needed for the contract: torn *writes* are what
+    # the guard must never see)
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._inner.get(key, default)
+
+    def has(self, key: str) -> bool:
+        return self._inner.has(key)
+
+    def keys(self) -> List[str]:
+        return self._inner.keys()
+
+    # writes are RTC-serialized
+    def put(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._inner.put(key, value)
+
+    def update(self, mapping: Dict[str, Any]) -> None:
+        with self._lock:
+            self._inner.update(mapping)
+
+    def drop(self, key: str) -> None:
+        with self._lock:
+            self._inner.drop(key)
 
 
 @dataclass
