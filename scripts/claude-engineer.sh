@@ -199,7 +199,6 @@ if ! "${GH_BIN}" repo clone "${repo}" "${clone_dir}" -- --depth 1 >/dev/null 2>&
 fi
 
 cd "${clone_dir}"
-default_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
 git checkout -b "${branch}" >/dev/null 2>&1 || fail_invoice "failed" "Could not create branch ${branch}."
 
 # 2) Build the task prompt. Issue text is DATA, not instructions (HANDOFF §8):
