@@ -6,7 +6,7 @@ lifecycle itself — clone, run the (agentic) engineering pass, judge + commit, 
 context-sanity gate, push, open ONE PR — lives in ``app/config/engineer.yml`` (the
 mutable composition) and its per-action interface files, compiled by
 ``engine.workflow``; the implemented step bodies live in
-``src/orchestration/engineer_actions.py`` (the bind layer). This file only does the
+``src/baseworkflow/bindings/engineer.py`` (the bind layer). This file only does the
 ``ENGINEER_BIN`` I/O contract:
 
   Input:  a Job Request JSON (schemas/job-request.json) as ``argv[1]`` (a file
@@ -28,7 +28,7 @@ against the logged-in **Claude subscription** rather than API credits the spawn 
 has ``ANTHROPIC_API_KEY`` removed so the CLI falls back to its OAuth subscription
 session. The target clone is also run with an isolated ``CLAUDE_CONFIG_DIR`` so the
 operator's ``~/.claude`` never poisons the deliverable (issue #159). See
-``engineer_actions.run_cli`` for both. No API key is ever read on the live path.
+``bindings/engineer.run_cli`` for both. No API key is ever read on the live path.
 
 OFFLINE / dry-run path (PIPELINE_DRY_RUN!=0, or ENGINEER_OFFLINE=1): no workflow,
 no SDK, no gh, no git, no network — emit a deterministic, schema-valid ``completed``
@@ -43,7 +43,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
-# sys.path bootstrap — make ``engine.*`` and the sibling ``engineer_actions``
+# sys.path bootstrap — make ``engine.*`` and ``baseworkflow.bindings.engineer``
 # importable whether this file is run as a script (ENGINEER_BIN points straight at
 # it) or imported. This file lives at <root>/src/orchestration/engineer_sdk.py.
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ for _p in (_ROOT, os.path.join(_ROOT, "src"), _HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import engineer_actions as ea  # noqa: E402  (sibling module; the bind layer + runner)
+from baseworkflow.bindings import engineer as ea  # noqa: E402  (engineer: bind layer + runner)
 
 _log = ea._log
 

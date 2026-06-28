@@ -8,7 +8,7 @@
 # the namespaced tokens below. End users edit this file + the action interface
 # files — no Python. Validate with:
 #   python3 -m engine.workflow app/config/engineer.yml \
-#     --registry src.orchestration.engineer_actions:build_registry
+#     --registry src.baseworkflow.bindings.engineer:build_registry
 name: engineer
 
 uses:
@@ -36,12 +36,14 @@ phases:
   implement:
     - engineer:run
 
-  # deliver — the SCRIPT (never the model) owns git/gh: judge + commit the work,
-  # run the context-sanity gate, push the branch, open ONE PR, and build the
-  # completed/needs-human Invoice.
+  # deliver — the SCRIPT (never the model) owns git: judge + commit the work, run
+  # the context-sanity gate, push the branch, and build the completed/needs-human
+  # Invoice carrying that branch. The engineer does NOT open a PR — PR creation is
+  # the Administrator's (build-phase) job, so a decomposed issue / multi-issue tick
+  # lands as ONE consolidated PR instead of N. The Invoice's branch is the seam the
+  # admin consolidation reads.
   deliver:
     - engineer:judge
     - engineer:contamination
     - engineer:push
-    - engineer:open_pr
     - engineer:finalize
