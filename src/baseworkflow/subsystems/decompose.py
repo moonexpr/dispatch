@@ -37,6 +37,21 @@ _CX = tuning.DECOMPOSE_COMPLEXITY
 # falls back to DEFAULTS (byte-identical text).
 _TPL = tuning.DECOMPOSE_TEMPLATES
 
+# Feature-decomposition knobs (greenfield multi-feature builds). When a job is a
+# "build an app" ask that enumerates features/pages/routes AND references no
+# existing files, decompose by FEATURE: a foundation unit, then one unit per
+# feature (a parallel wave of team agents), then the verify tail. Config lives in
+# generation.decompose.features; this module only matches + renders.
+_FEAT = tuning.DECOMPOSE_FEATURES
+_FTPL = dict(_FEAT.get("templates") or {})
+
+# Light backend-vs-frontend hint for staffing a feature unit (data only).
+_BACKEND_HINT = re.compile(
+    r"\b(api|backend|server|database|db|persistence|auth|schema|migration|model|endpoint|webhook|cron|queue)\b",
+    re.IGNORECASE)
+_FEATURE_HEADINGS = [str(h).lower() for h in (_FEAT.get("headings") or [])]
+_BUILD_SIGNALS = [str(s).lower() for s in (_FEAT.get("build_signals") or [])]
+
 
 def _spec_for(path: str):
     """Map a file/area to a (function, domain) specialization.
@@ -169,6 +184,83 @@ def _complexity(job: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _slug(text: str, *, words: int = 4) -> str:
+    parts = re.findall(r"[a-z0-9]+", text.lower())
+    return "-".join(parts[:words]) or "feature"
+
+
+def _feature_descriptor(text: str) -> Dict[str, str]:
+    """Turn one feature/page/route bullet into ``{name, route}``. An explicit
+    ``/path`` token in the text wins; otherwise a slug route is derived from the
+    name. Issue text is parsed as untrusted data only."""
+    name = " ".join(text.split()).strip(" .:-")
+    m = re.search(r"(?<!\w)(/[A-Za-z0-9][\w/-]*)", text)
+    route = m.group(1) if m else "/" + _slug(name)
+    # Trim a trailing "at /route" style suffix from the displayed name.
+    name = re.sub(r"\s*[\(\[]?\s*(?:at\s+)?/[\w/-]+\s*[\)\]]?\s*$", "", name).strip() or name
+    return {"name": name[:80], "route": route}
+
+
+def _feature_spec(name: str):
+    """Light backend-vs-frontend staffing hint for a feature unit (data only)."""
+    if _BACKEND_HINT.search(name):
+        return ("engineer", "backend / API")
+    return ("engineer", "frontend / UI")
+
+
+def _build_intent(job: Dict[str, Any]) -> bool:
+    text = f"{job.get('title', '')}\n{job.get('body', '')}".lower()
+    return any(sig in text for sig in _BUILD_SIGNALS)
+
+
+def extract_features(body: str, *, limit: int = 0) -> List[Dict[str, str]]:
+    """Feature/page/route bullets under the first configured feature heading, as
+    ``[{name, route}]``. ``[]`` when no such section is present. Data only."""
+    if not body:
+        return []
+    cap = limit or int(_FEAT.get("max_features", 12) or 12)
+    for h in _FEATURE_HEADINGS:
+        pat = re.compile(r"^\s*(?:#{1,6}\s*|\*\*\s*)?" + re.escape(h) + r"\b", re.IGNORECASE)
+        items = _capture_under(body, pat, cap)
+        if items:
+            return [_feature_descriptor(it) for it in items][:cap]
+    return []
+
+
+def _detect_features(job: Dict[str, Any], discovered: List[str]) -> List[Dict[str, str]]:
+    """Return a feature list IFF the job is a greenfield, multi-feature build:
+    a build-intent signal, an enumerated feature/page/route section, and NO
+    referenced existing files. Otherwise ``[]`` — the slice path runs unchanged,
+    so existing bug/refactor decomposition is byte-identical."""
+    if discovered:                       # references existing files -> not greenfield
+        return []
+    if not _build_intent(job):
+        return []
+    feats = extract_features(job.get("body") or "")
+    if len(feats) < int(_FEAT.get("min_features", 2) or 2):
+        return []
+    cap = max(1, min(int(_FEAT.get("max_features", 12) or 12), _SWARM_MAX - 2))
+    return feats[:cap]
+
+
+def _waves(units: List[Dict[str, Any]]) -> List[List[str]]:
+    """Topological waves over ``depends_on``: each wave is the set of units whose
+    dependencies are satisfied by earlier waves — a parallel wave of team agents.
+    Engineering proceeds wave by wave (foundation, then features, then verify)."""
+    done: set = set()
+    waves: List[List[str]] = []
+    remaining = list(units)
+    while remaining:
+        ready = [u for u in remaining if all(d in done for d in (u.get("depends_on") or []))]
+        if not ready:                    # dependency-cycle guard: emit the rest
+            ready = remaining
+        ready_ids = {u["id"] for u in ready}
+        waves.append([u["id"] for u in ready])
+        done |= ready_ids
+        remaining = [u for u in remaining if u["id"] not in ready_ids]
+    return waves
+
+
 def plan(job: Dict[str, Any], discovered: List[str],
          *, verify_cmd: str = "bash scripts/smoke.sh") -> Dict[str, Any]:
     issue = job.get("issue")
@@ -177,60 +269,95 @@ def plan(job: Dict[str, Any], discovered: List[str],
     cx = _complexity(job)
 
     # Units are assembled WITHOUT ids, then lettered A,B,C… in emission order at
-    # the end — so a prepended diagnosis phase keeps the ids contiguous.
+    # the end — so a prepended diagnosis/foundation phase keeps ids contiguous.
     units: List[Dict[str, Any]] = []
 
-    # Diagnosis phase (#134): a distinct investigation unit for deep/complex work
-    # (deep-bug label, or a high enough slice count). It relies ONLY on signals
-    # already on the item — root cause from the issue thread + referenced code —
-    # NOT on new intake history (that grounding is #133, separate and blocked).
-    if cx["diagnosis"]:
-        focus = ", ".join(f"`{p}`" for p in discovered[:4]) or "the referenced code paths"
+    features = _detect_features(job, discovered)
+    if features:
+        # FEATURE DECOMPOSITION (greenfield multi-feature build): a foundation unit
+        # first (the shared skeleton every feature needs), then ONE unit PER FEATURE
+        # — all depending only on the foundation, so they form a single parallel
+        # wave of team agents — then the integration/verify tail. This is what turns
+        # "build a personal accounting app" into a foundation-first sequence of
+        # parallel work units, baked into baseworkflow (every engine inherits it).
         units.append({
             "id": "",
-            "deliverable": _TPL["diagnosis_deliverable"].format(issue=issue, focus=focus),
-            "files": list(discovered),
-            "specialization": _spec("analyst", "diagnostics / root-cause"),
-            "depends_on": [],
-            "phase": "diagnosis",
-            "acceptance": _TPL["diagnosis_acceptance"].format(),
-        })
-
-    # Implementation phase: one cohesive unit per referenced file, then — when
-    # complexity asks for more slices than there are files — generic slices to
-    # reach the target count. xs/s/m with no label/body signal => 1 slice, so a
-    # trivial issue keeps today's single implementation unit (zero inflation).
-    for path in discovered:
-        fn, domain = _spec_for(path)
-        units.append({
-            "id": "",
-            "deliverable": _TPL["file_deliverable"].format(path=path),
-            "files": [path],
-            "specialization": _spec(fn, domain),
-            "depends_on": [],
-            "phase": "implement",
-            "acceptance": _TPL["file_acceptance"].format(path=path, gate=gate),
-        })
-
-    impl_emitted = len(discovered)
-    target_slices = cx["slices"]
-    n_generic = max(target_slices - impl_emitted, 1 if impl_emitted == 0 else 0)
-    for k in range(n_generic):
-        # Slice the implementation into independent vertical cuts so distinct
-        # agents can build them concurrently — a real fan-out, earned by the
-        # complexity signal, not a stub.
-        suffix = f" (slice {k + 1} of {n_generic})" if (n_generic > 1 or impl_emitted) else ""
-        units.append({
-            "id": "",
-            "deliverable": _TPL["slice_deliverable"].format(issue=issue, suffix=suffix),
+            "deliverable": _FTPL["foundation_deliverable"].format(issue=issue),
             "files": [],
-            "specialization": _spec("engineer", "general software"),
+            "specialization": _spec("engineer", "application scaffolding / platform"),
             "depends_on": [],
-            "phase": "implement",
-            "acceptance": _TPL["slice_acceptance"].format(gate=gate),
+            "phase": "foundation",
+            "acceptance": _FTPL["foundation_acceptance"].format(gate=gate),
         })
+        for feat in features:
+            fn, domain = _feature_spec(feat["name"])
+            route = feat.get("route") or ""
+            route_txt = f" ({route})" if route else ""
+            unit = {
+                "id": "",
+                "deliverable": _FTPL["feature_deliverable"].format(
+                    feature=feat["name"], route=route_txt, issue=issue),
+                "files": [],
+                "specialization": _spec(fn, domain),
+                "depends_on": ["A"],     # the foundation is emitted first -> id "A"
+                "phase": "feature",
+                "acceptance": _FTPL["feature_acceptance"].format(feature=feat["name"], gate=gate),
+            }
+            if route:
+                unit["route"] = route
+            units.append(unit)
+    else:
+        # Diagnosis phase (#134): a distinct investigation unit for deep/complex work
+        # (deep-bug label, or a high enough slice count). It relies ONLY on signals
+        # already on the item — root cause from the issue thread + referenced code —
+        # NOT on new intake history (that grounding is #133, separate and blocked).
+        if cx["diagnosis"]:
+            focus = ", ".join(f"`{p}`" for p in discovered[:4]) or "the referenced code paths"
+            units.append({
+                "id": "",
+                "deliverable": _TPL["diagnosis_deliverable"].format(issue=issue, focus=focus),
+                "files": list(discovered),
+                "specialization": _spec("analyst", "diagnostics / root-cause"),
+                "depends_on": [],
+                "phase": "diagnosis",
+                "acceptance": _TPL["diagnosis_acceptance"].format(),
+            })
 
-    # Letter the impl/diagnosis units now so the verify unit can depend on them.
+        # Implementation phase: one cohesive unit per referenced file, then — when
+        # complexity asks for more slices than there are files — generic slices to
+        # reach the target count. xs/s/m with no label/body signal => 1 slice, so a
+        # trivial issue keeps today's single implementation unit (zero inflation).
+        for path in discovered:
+            fn, domain = _spec_for(path)
+            units.append({
+                "id": "",
+                "deliverable": _TPL["file_deliverable"].format(path=path),
+                "files": [path],
+                "specialization": _spec(fn, domain),
+                "depends_on": [],
+                "phase": "implement",
+                "acceptance": _TPL["file_acceptance"].format(path=path, gate=gate),
+            })
+
+        impl_emitted = len(discovered)
+        target_slices = cx["slices"]
+        n_generic = max(target_slices - impl_emitted, 1 if impl_emitted == 0 else 0)
+        for k in range(n_generic):
+            # Slice the implementation into independent vertical cuts so distinct
+            # agents can build them concurrently — a real fan-out, earned by the
+            # complexity signal, not a stub.
+            suffix = f" (slice {k + 1} of {n_generic})" if (n_generic > 1 or impl_emitted) else ""
+            units.append({
+                "id": "",
+                "deliverable": _TPL["slice_deliverable"].format(issue=issue, suffix=suffix),
+                "files": [],
+                "specialization": _spec("engineer", "general software"),
+                "depends_on": [],
+                "phase": "implement",
+                "acceptance": _TPL["slice_acceptance"].format(gate=gate),
+            })
+
+    # Letter the impl/diagnosis/foundation/feature units now so verify can depend on them.
     for i, u in enumerate(units):
         u["id"] = chr(ord("A") + i)
 
@@ -266,6 +393,10 @@ def plan(job: Dict[str, Any], discovered: List[str],
         "capped": capped,
         "parallel": [u["id"] for u in units if not u["depends_on"]],
         "sequential_tail": [u["id"] for u in units if u["depends_on"]],
+        # The engineering execution order as a sequence of parallel waves: each
+        # inner list is a set of units whose deps are satisfied, run concurrently
+        # by team agents. For a feature build this reads [[foundation],[features…],[verify]].
+        "waves": _waves(units),
         # Why this many agents (#134): the complexity signal that drove the slice
         # count, surfaced for the work order / parallelization rationale.
         "complexity": cx,

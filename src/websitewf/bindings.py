@@ -37,22 +37,47 @@ def _field(job: Any, key: str, default: str = "") -> Any:
     return job.get(key, default) if isinstance(job, dict) else default
 
 
+def _feature_routes(body: str):
+    """Routes enumerated by a multi-feature build, via baseworkflow's feature
+    decomposition (so web and base agree on what the features are). ``[]`` when
+    the body has no feature/page/route section. Best-effort: a missing subsystem
+    degrades to the single-route path."""
+    try:
+        _SUB = os.path.join(_SRC, "baseworkflow", "subsystems")
+        if _SUB not in sys.path:
+            sys.path.insert(0, _SUB)
+        import decompose  # noqa: E402
+        return decompose.extract_features(body or "")
+    except Exception:
+        return []
+
+
 # -- web action bodies (pure: inputs -> {out_alias: value}) ------------------
 def generate_route_work_units(inputs: Dict[str, Any]) -> Dict[str, Any]:
     """A1 (web): the base work-unit classification *plus* an authored route spec.
 
     Composes baseworkflow's ``generate_work_units`` body (so ``purpose`` /
     ``work_unit`` keep the exact shape downstream base actions expect) and adds
-    ``web_route_spec`` (framework + path) for the proxy and the scaffold task."""
+    ``web_route_spec`` (framework + path). For a multi-feature build the spec also
+    carries a ``routes`` list (one per enumerated feature/page), so the scaffold
+    task lays down every route — the web extension of the foundation-first feature
+    decomposition baked into baseworkflow."""
     from src.baseworkflow.bindings.github import generate_work_units as _base
 
     out = dict(_base(inputs))
     job = inputs.get("job") or {}
-    out["web_route_spec"] = {
-        "framework": _field(job, "framework", "nextjs"),
+    framework = _field(job, "framework", "nextjs")
+    spec = {
+        "framework": framework,
         "path": _field(job, "route", "/new-page"),
         "title": _field(job, "title", "Add a page"),
     }
+    feats = _feature_routes(_field(job, "body", ""))
+    if len(feats) >= 2:
+        spec["routes"] = [{"path": f["route"], "title": f["name"]} for f in feats]
+        # Primary path tracks the first feature so single-route consumers still work.
+        spec["path"] = feats[0]["route"]
+    out["web_route_spec"] = spec
     return out
 
 
@@ -67,17 +92,36 @@ def classify_route_addendum(inputs: Dict[str, Any]) -> Dict[str, Any]:
     return {"strategy": out}
 
 
+def _page_file(framework: str, path: str) -> str:
+    return f"app{path}/page.tsx" if framework == "nextjs" else f"resources/views{path}.blade.php"
+
+
 def scaffold_route(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """Lay down + wire the page/route scaffold from the authored route spec."""
+    """Lay down + wire the page/route scaffold(s) from the authored route spec.
+
+    A multi-feature build (``web_route_spec.routes``) scaffolds every route; a
+    single-route spec scaffolds one page (unchanged)."""
     spec = inputs.get("web_route_spec") or {}
-    path = spec.get("path", "/new-page")
     framework = spec.get("framework", "nextjs")
-    page_file = f"app{path}/page.tsx" if framework == "nextjs" else f"resources/views{path}.blade.php"
+    routes = spec.get("routes")
+    if routes:
+        paths = [r.get("path", "/new-page") for r in routes]
+        files = [_page_file(framework, p) for p in paths]
+        return {
+            "scaffold_result": {
+                "framework": framework,
+                "paths": paths,
+                "files": files,
+                "count": len(paths),
+                "status": "scaffolded",
+            }
+        }
+    path = spec.get("path", "/new-page")
     return {
         "scaffold_result": {
             "framework": framework,
             "path": path,
-            "files": [page_file],
+            "files": [_page_file(framework, path)],
             "status": "scaffolded",
         }
     }

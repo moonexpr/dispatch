@@ -82,7 +82,14 @@ def author_orchestration(inputs: Dict[str, Any]) -> Dict[str, Any]:
     per_unit = int(budget.get("per_unit_budget", DEFAULT_ENGINEERING_BUDGET // 16))
     eng_budget = int(budget.get("engineering_budget", DEFAULT_ENGINEERING_BUDGET))
     units = plan.get("units", []) or []
-    parallel_ids = set((plan.get("staffing", {}) or {}).get("parallel", []) or [])
+    staffing = plan.get("staffing", {}) or {}
+    parallel_ids = set(staffing.get("parallel", []) or [])
+    # A unit is run in parallel when it shares its wave with siblings (a multi-unit
+    # parallel wave of team agents) OR it has no dependencies (the existing
+    # behaviour). So a feature build's foundation runs first, the feature units run
+    # as one parallel wave, then the verify tail runs last.
+    multi_wave_ids = {uid for wave in (staffing.get("waves", []) or [])
+                      if len(wave) > 1 for uid in wave}
 
     phases: List[PhaseSpec] = []
     if not units:
@@ -91,8 +98,10 @@ def author_orchestration(inputs: Dict[str, Any]) -> Dict[str, Any]:
         uid = str(u.get("id", f"u{len(phases)+1}"))
         deps = tuple(str(d) for d in (u.get("depends_on", []) or []))
         spec = u.get("specialization") or u.get("domain") or "general software"
+        route = u.get("route")
+        route_txt = f" Target route: {route}." if route else ""
         prompt = (
-            f"Implement unit {uid} ({spec}). Deliverable: {u.get('deliverable', 'see acceptance criteria')}. "
+            f"Implement unit {uid} ({spec}). Deliverable: {u.get('deliverable', 'see acceptance criteria')}.{route_txt} "
             f"Files: {', '.join(u.get('files', []) or []) or 'n/a'}. "
             "All context is inlined; assume zero shared state with sibling agents."
         )
@@ -101,7 +110,7 @@ def author_orchestration(inputs: Dict[str, Any]) -> Dict[str, Any]:
                 id=uid,
                 agent=AgentSpec(description=f"engineer:{spec}", prompt=prompt, tools=("Read", "Edit", "Bash"), model="gen-default"),
                 depends_on=deps,
-                parallel=(uid in parallel_ids) and not deps,
+                parallel=(uid in parallel_ids and not deps) or (uid in multi_wave_ids),
                 budget=per_unit,
                 abort_when=("budget_exceeded", "tests_red"),
             )

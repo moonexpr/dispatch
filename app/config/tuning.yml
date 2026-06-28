@@ -191,6 +191,45 @@ generation:
       slice_acceptance: '{gate} stays green and this slice''s portion of the acceptance criteria is met.'
       verify_deliverable: 'Integrate the units, run {gate}, and open the PR with `Closes #{issue}`.'
       verify_acceptance: '{gate} is green (0 FAIL); PR opened against `main`, not merged.'
+    features:
+      _doc: 'Feature decomposition for greenfield multi-feature builds. When a job is a "build an
+        app/website" ask that enumerates features/pages/routes AND references no existing files,
+        decompose.plan emits a foundation unit, then one unit PER FEATURE (a parallel wave of team
+        agents), then the verify tail — instead of generic slices. Tune the triggers + text here;
+        all of these are knobs for later refinement.'
+      headings:
+      - features
+      - pages
+      - routes
+      - screens
+      - modules
+      - milestones
+      - scope
+      build_signals:
+      - build
+      - create
+      - scaffold
+      - new app
+      - web app
+      - webapp
+      - website
+      - application
+      - full app
+      - from scratch
+      - greenfield
+      - vercel
+      - next.js
+      - nextjs
+      min_features: 2
+      max_features: 12
+      templates:
+        foundation_deliverable: 'Scaffold the foundation for #{issue}: project skeleton, the shared
+          data/model + persistence layer, and the app shell every feature builds on.'
+        foundation_acceptance: 'The project builds and runs, the shared foundation is in place, and
+          {gate} stays green.'
+        feature_deliverable: 'Build the "{feature}" feature{route} for #{issue} end-to-end per the
+          acceptance criteria.'
+        feature_acceptance: 'The "{feature}" feature works end-to-end and {gate} stays green.'
     specialization_rules:
     - any:
       - basename_contains: smoke

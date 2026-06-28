@@ -155,6 +155,44 @@ DEFAULTS: Dict[str, Any] = {
                 "verify_acceptance": (
                     "{gate} is green (0 FAIL); PR opened against `main`, not merged."),
             },
+            # Feature decomposition (greenfield multi-feature builds). When a job is
+            # a "build an app / website" ask that enumerates features/pages/routes
+            # AND references no existing files, decompose by FEATURE instead of by
+            # slice: a foundation unit first, then one unit PER FEATURE (a parallel
+            # wave of team agents), then the integration/verify tail. This is what
+            # turns "build a personal accounting app" into a foundation-first
+            # sequence of parallel work units. Falls back to the slice path when no
+            # feature list or build-intent signal is present (existing behaviour).
+            "features": {
+                # Markdown headings whose bullet list enumerates the features to
+                # build (lowercased substring match on the heading text).
+                "headings": ["features", "pages", "routes", "screens", "modules",
+                             "milestones", "scope"],
+                # Build-intent signals in the title/body that arm feature
+                # decomposition (substring, lowercased). Without one, the slice
+                # path runs unchanged.
+                "build_signals": ["build", "create", "scaffold", "new app",
+                                  "web app", "webapp", "website", "application",
+                                  "full app", "from scratch", "greenfield",
+                                  "vercel", "next.js", "nextjs"],
+                # Minimum feature bullets before the feature path engages.
+                "min_features": 2,
+                # Upper bound on feature units (foundation + verify are extra; the
+                # whole plan is still bounded by swarm_max).
+                "max_features": 12,
+                # Unit text templates (filled via str.format with issue/gate/feature/route).
+                "templates": {
+                    "foundation_deliverable": (
+                        "Scaffold the foundation for #{issue}: project skeleton, the shared "
+                        "data/model + persistence layer, and the app shell every feature builds on."),
+                    "foundation_acceptance": (
+                        "The project builds and runs, the shared foundation is in place, and {gate} stays green."),
+                    "feature_deliverable": (
+                        "Build the \"{feature}\" feature{route} for #{issue} end-to-end per the acceptance criteria."),
+                    "feature_acceptance": (
+                        "The \"{feature}\" feature works end-to-end and {gate} stays green."),
+                },
+            },
             "specialization_rules": [
                 {"any": [{"basename_contains": "smoke"}, {"path_contains": "test"},
                          {"path_contains": "/fixtures/"}],
@@ -437,6 +475,9 @@ DECOMPOSE_COMPLEXITY: Dict[str, Any] = dict(_GEN["decompose"]["complexity"])
 # Work-order UNIT TEXT templates (#144) — data filled by decompose.plan via
 # str.format; the classification/staffing logic stays Python.
 DECOMPOSE_TEMPLATES: Dict[str, str] = dict(_GEN["decompose"]["templates"])
+# Feature decomposition knobs — read by decompose.plan to turn a greenfield
+# multi-feature build into a foundation-first sequence of parallel feature units.
+DECOMPOSE_FEATURES: Dict[str, Any] = dict(_GEN["decompose"]["features"])
 SPEC_RULES: List[Dict[str, Any]] = list(_GEN["decompose"]["specialization_rules"])
 RES_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["resources"].items()}
 # Conversation + history embedding caps (#132) — read by src/intake/intake.py
