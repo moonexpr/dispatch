@@ -188,6 +188,10 @@ def main(argv: list) -> int:
     opts = _parse(argv)
     os.environ["PIPELINE_REPO"] = opts["repo"]
     os.environ["PIPELINE_DRY_RUN"] = "0" if opts["live"] else "1"
+    if opts["verbose"]:
+        # Stream the engine's per-action trace (engine/actions/action.py) so a long
+        # or hanging tick shows live progress, not just a post-run dump.
+        os.environ["DISPATCH_DEBUG"] = "1"
 
     engine = os.environ.get("DISPATCH_ENGINE", "baseworkflow")
     if engine not in _ENGINES:

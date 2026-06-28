@@ -26,6 +26,9 @@ Leaf module: imports only stdlib + sibling engine leaves.
 """
 from __future__ import annotations
 
+import os
+import sys
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional
@@ -34,6 +37,12 @@ from engine.runtime import Logger
 
 from .result import ActionError, Error, Output, ProgramError, Result
 from .shelf import Shelves
+
+
+def _debug_on() -> bool:
+    """Per-action streaming trace toggle (DISPATCH_DEBUG / -v). Read live so an
+    entry point can enable it after import."""
+    return os.environ.get("DISPATCH_DEBUG") not in (None, "", "0")
 
 
 class BudgetMeter:
@@ -136,6 +145,11 @@ class Action(ABC):
     def _invoke(self, payload: Any, ctx: Context) -> Any: ...
 
     def run(self, payload: Any, ctx: Context) -> Result:
+        dbg = _debug_on()
+        if dbg:
+            print(f"  → {'  ' * int(getattr(ctx, 'depth', 0))}{self.kind}:{self.name}",
+                  file=sys.stderr, flush=True)
+        t0 = time.monotonic()
         try:
             result = self._invoke(payload, ctx)
             if not isinstance(result, Result):
@@ -145,6 +159,12 @@ class Action(ABC):
         except Exception as exc:  # noqa: BLE001 — leaf boundary: failure becomes data
             result = Error(exc, detail=f"{self.kind}:{self.name} raised {type(exc).__name__}")
         ctx.record(self, result)
+        if dbg:
+            dt = time.monotonic() - t0
+            tag = "ok" if result.ok else "FAIL"
+            extra = "" if result.ok else f"  {getattr(result, 'detail', '')}"
+            print(f"  ← {'  ' * int(getattr(ctx, 'depth', 0))}{self.kind}:{self.name} "
+                  f"[{tag} {dt:.1f}s]{extra}", file=sys.stderr, flush=True)
         return result
 
     def __repr__(self) -> str:  # pragma: no cover — diagnostics only
