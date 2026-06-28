@@ -80,10 +80,21 @@ as untrusted data, so write plainly — no meta-instructions to the agent.
 
 Show the drafted issue. Use `AskUserQuestion` to offer: **File it** (recommended),
 **Edit first**, or **Hold** (return the draft without filing). On *File it*,
-create it with `gh issue create`, applying the repo's status label (the
-`Unscheduled → Draft → Candidate → Release` ladder — new work is typically
-`Draft` or `Candidate`) plus any purpose label the repo uses. Report the issue
-URL.
+create it with `gh issue create` (prefer the `Dispatch task` issue template), and
+apply exactly one **status rung** plus, if warranted, the `Blocker` overlay. The
+rungs and their selection precedence — dispatch picks the highest-priority ready
+issue — are:
+
+- **Blocker** (overlay, highest) — must-do-now; jumps the queue. Use sparingly.
+- **Release** — accepted / slated for the next release.
+- **Candidate** — complete and validated; proposed for review/merge.
+- **Draft** — being worked / not yet ready for review. *The usual choice for a
+  newly scoped, ready task.*
+- **Unscheduled** (lowest) — triaged backlog, not slated for current work.
+
+So a fresh, ready unit of work is normally `Draft`; mark `Unscheduled` to park it,
+or add `Blocker` to have dispatch pick it first. Add any purpose label the repo
+uses, then report the issue URL.
 
 Do not run the pipeline from this skill — filing is the deliverable. To preview a
 tick on the new issue, hand off to `/dispatch:tick`.

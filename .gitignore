@@ -10,6 +10,8 @@ tokens.txt
 .artifacts/
 # Claude Code session worktrees (transient).
 .claude/worktrees/
+# Local clone of the GitHub wiki for authoring (.claude/wiki is its own git repo).
+.claude/wiki/
 # Generated dispatch artifacts (e.g. the static issue DAG — regenerable via ./dispatch --dag).
 .claude/artifacts/
 # Demo harness per-round output (E8-3 replay.sh); snapshots/scenarios/seed ARE committed, only rounds/ is transient.

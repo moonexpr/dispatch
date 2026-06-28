@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Interact with dispatch via Claude skills
+    url: https://github.com/ReclaimByDesign/dispatch/wiki/Interacting-with-Dispatch
+    about: The recommended way to file well-scoped work — the /dispatch skill family interviews you and fills these templates.
+  - name: dispatch wiki (full guide)
+    url: https://github.com/ReclaimByDesign/dispatch/wiki
+    about: Getting started, configuration, strengths & limitations, architecture, and unattended deployment.
