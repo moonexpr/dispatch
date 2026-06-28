@@ -374,7 +374,7 @@ class ExecutionVisitor(StageVisitor):
         pr_number = inv.get("pr_number")
         pr_number = "" if pr_number is None else str(pr_number)
         summary = inv.get("summary") or ""
-        route_used = inv.get("route_used") or "gen-local"
+        route_used = inv.get("route_used") or "gen-local"  # policy-literal-ok: invoice-missing default
 
         if not status or not issue:
             print(

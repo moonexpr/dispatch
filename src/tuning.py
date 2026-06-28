@@ -292,6 +292,24 @@ DEFAULTS: Dict[str, Any] = {
         "reaper_timeout_hours": 4,
         "engineer_failure_policy": "architect-rescaffold",
     },
+    # Routing policy (#137, #144). The orchestration layer's scope->route map, the
+    # CI-failure fix-ladder (attempt -> model tier), the ladder cap, and the
+    # intake confidence floor — declarative DATA the Python interprets. The
+    # MATCHERS stay in code (common.py / fix_dispatch.py); only the values live
+    # here. scope_route mirrors selection.classify.scope_route (the classifier's
+    # copy, used at triage time); this one is the runtime route_for_scope fallback.
+    # fix_ladder maps the stringified attempt number to its model tier; an attempt
+    # past the last rung (or 0/invalid) yields needs_human_route. fix_attempt_cap
+    # is the highest attempt that still gets a tier (must equal the ladder length).
+    "routing": {
+        "scope_route": {"xs": "gen-local", "s": "gen-local",
+                        "m": "gen-default", "l": "gen-frontier"},
+        "default_route": "gen-default",
+        "fix_ladder": {"1": "gen-local", "2": "gen-default", "3": "gen-frontier"},
+        "fix_attempt_cap": 3,
+        "needs_human_route": "needs-human",
+        "confidence_threshold": 0.55,
+    },
 }
 
 
@@ -456,6 +474,30 @@ _REC = _CFG.get("recovery", {})
 RECOVERY_REAPER_TIMEOUT_HOURS: float = float(_REC.get("reaper_timeout_hours", 4))
 RECOVERY_ENGINEER_FAILURE_POLICY: str = str(
     _REC.get("engineer_failure_policy", "architect-rescaffold"))
+
+# routing (#137, #144) — the orchestration scope->route map, the CI fix-ladder,
+# its cap, and the intake confidence floor, read by src/orchestration/common.py
+# (route_for_scope / tier_for_attempt) and fix_dispatch.py (the cap message).
+# DATA here; the matchers stay Python.
+_ROUTING = _CFG.get("routing", {})
+ROUTING_SCOPE_ROUTE: Dict[str, str] = dict(_ROUTING.get("scope_route", {}))
+ROUTING_DEFAULT_ROUTE: str = str(_ROUTING.get("default_route", "gen-default"))
+FIX_LADDER: Dict[str, str] = {str(k): str(v) for k, v in (_ROUTING.get("fix_ladder") or {}).items()}
+FIX_ATTEMPT_CAP: int = int(_ROUTING.get("fix_attempt_cap", len(FIX_LADDER) or 3))
+NEEDS_HUMAN_ROUTE: str = str(_ROUTING.get("needs_human_route", "needs-human"))
+CONFIDENCE_THRESHOLD: float = float(_ROUTING.get("confidence_threshold", 0.55))
+
+
+def route_for_scope(scope: str) -> str:
+    """Classifier scope -> generation model group (§5.2/§5.3), per the config
+    routing.scope_route map. An unknown scope falls back to routing.default_route."""
+    return ROUTING_SCOPE_ROUTE.get(scope, ROUTING_DEFAULT_ROUTE)
+
+
+def tier_for_attempt(attempt) -> str:
+    """Fix-ladder (§5.5) per config routing.fix_ladder: attempt -> model tier.
+    An attempt past the last rung (or 0/invalid) yields the needs_human sentinel."""
+    return FIX_LADDER.get(str(attempt), NEEDS_HUMAN_ROUTE)
 
 
 # --------------------------------------------------------------------------

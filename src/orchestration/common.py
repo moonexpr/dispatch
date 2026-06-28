@@ -71,6 +71,13 @@ _default = runtime.default
 # Safety-critical: dry-run is ON unless explicitly disabled by the operator.
 _default("PIPELINE_DRY_RUN", "1")
 _default("PIPELINE_REPO", "")
+# The confidence floor is routing POLICY (#137/#144): its value lives in
+# app/config/tuning.yml (routing.confidence_threshold), resolved below once the
+# routing helpers (which lazily import tuning) are defined. An explicit env
+# export wins (operator override); otherwise the config value is promoted in
+# _reconcile_confidence_threshold(). The literal here is only the fail-safe
+# used when the config is unreachable.
+_CONFIDENCE_PINNED = "PIPELINE_CONFIDENCE_THRESHOLD" in os.environ
 _default("PIPELINE_CONFIDENCE_THRESHOLD", "0.55")
 _default("PIPELINE_CONCURRENCY", "1")
 
@@ -478,24 +485,94 @@ def claude_invoke(workflow: str, args_json: str) -> int:
 
 
 # ------------------------- Routing / ladder logic --------------------------
+# The scope->route map and the fix-ladder are POLICY DATA, not code (#137/#144):
+# they live in app/config/tuning.yml (routing.*) and are interpreted by tuning.py.
+# This module stays import-light at load time (it is on the classifier quarantine
+# path), so it reaches the config lazily, with a hard fail-safe: if tuning is
+# unimportable, _routing_tuning() returns None and the helpers degrade to the
+# documented defaults rather than breaking the tick.
+def _routing_tuning():
+    """Lazily import the tuning module (src/ on the path). None if unavailable."""
+    src_dir = str(PIPELINE_ROOT / "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    try:
+        import tuning  # noqa: PLC0415 — lazy by design (quarantine-safe)
+        return tuning
+    except Exception:  # noqa: BLE001 — routing must never break the tick
+        return None
+
+
+# Fail-safe fallbacks used ONLY when the config (app/config/tuning.yml routing.*)
+# is unreachable — the documented degrade path, mirroring tuning.py's DEFAULTS so
+# the tick never breaks on a config hiccup. These are the single sanctioned tier
+# literals in this module; the no-policy-in-code guard (smoke §7.31) allowlists
+# them via the marker below and FAILS on any OTHER governed tier/route literal.
+_FALLBACK_SCOPE_ROUTE = {"xs": "gen-local", "s": "gen-local", "m": "gen-default", "l": "gen-frontier"}  # policy-literal-ok: config fail-safe
+_FALLBACK_FIX_LADDER = {"1": "gen-local", "2": "gen-default", "3": "gen-frontier"}  # policy-literal-ok: config fail-safe
+_FALLBACK_DEFAULT_ROUTE = "gen-default"  # policy-literal-ok: config fail-safe
+_FALLBACK_NEEDS_HUMAN = "needs-human"  # policy-literal-ok: config fail-safe
+
+
+# needs-human sentinel route. The literal is the fail-safe; the live value comes
+# from app/config/tuning.yml (routing.needs_human_route) when the config loads.
+def _needs_human_route() -> str:
+    t = _routing_tuning()
+    return t.NEEDS_HUMAN_ROUTE if t is not None else _FALLBACK_NEEDS_HUMAN
+
+
+NEEDS_HUMAN_ROUTE = _needs_human_route()
+
+
+def fix_attempt_cap() -> int:
+    """Highest fix-attempt that still gets a model tier, per config
+    routing.fix_attempt_cap. Falls back to 3 (the historical ladder length)."""
+    t = _routing_tuning()
+    if t is not None:
+        return t.FIX_ATTEMPT_CAP
+    return 3
+
+
 def route_for_scope(scope: str) -> str:
-    """Classifier scope -> generation model group (§5.2 / §5.3)."""
-    if scope in ("xs", "s"):
-        return "gen-local"
-    if scope == "m":
-        return "gen-default"
-    if scope == "l":
-        return "gen-frontier"
-    return "gen-default"
+    """Classifier scope -> generation model group (§5.2 / §5.3).
+
+    Reads the route map from app/config/tuning.yml (routing.scope_route); on a
+    config-load failure, falls back to the historical hard-wired mapping."""
+    t = _routing_tuning()
+    if t is not None:
+        return t.route_for_scope(scope)
+    return _FALLBACK_SCOPE_ROUTE.get(scope, _FALLBACK_DEFAULT_ROUTE)
 
 
 def tier_for_attempt(attempt) -> str:
-    """Fix-ladder (§5.5). attempt>3 (or 0/invalid) => needs-human sentinel."""
-    return {
-        "1": "gen-local",
-        "2": "gen-default",
-        "3": "gen-frontier",
-    }.get(str(attempt), "needs-human")
+    """Fix-ladder (§5.5): attempt -> model tier per app/config/tuning.yml
+    (routing.fix_ladder). An attempt past the cap (or 0/invalid) yields the
+    needs-human sentinel. Falls back to the historical 3-rung ladder on a
+    config-load failure."""
+    t = _routing_tuning()
+    if t is not None:
+        return t.tier_for_attempt(attempt)
+    return _FALLBACK_FIX_LADDER.get(str(attempt), _FALLBACK_NEEDS_HUMAN)
+
+
+def _reconcile_confidence_threshold() -> None:
+    """Promote routing.confidence_threshold (config) into the env default unless
+    the operator pinned PIPELINE_CONFIDENCE_THRESHOLD explicitly. Keeps the config
+    the single source of the floor while honouring an explicit env override. The
+    env var defaults to '0.55' above, so an unreachable config is a safe no-op."""
+    if _CONFIDENCE_PINNED:
+        return
+    t = _routing_tuning()
+    if t is None:
+        return
+    try:
+        os.environ["PIPELINE_CONFIDENCE_THRESHOLD"] = (
+            f"{float(t.CONFIDENCE_THRESHOLD):g}")
+    except Exception:  # noqa: BLE001 — never break import on a config hiccup
+        pass
+
+
+_reconcile_confidence_threshold()
 
 
 # ------------------------- Engineer interface -------------------------------

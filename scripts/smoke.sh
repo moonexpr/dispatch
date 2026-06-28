@@ -61,6 +61,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 #   §7.24–§7.25  Day 3 · Research-mode ......... gap-detection · research order · DAG embed
 #   §7.26–§7.27  Day 3 · Integration & runbook . full-tick smoke · operator runbook
 #   §7.28        Pillar 5 · Demo bootstrap ..... demo-repo seed manifest + label provisioning (offline proxy)
+#   §7.31        Pillar 6 · Config governance .. no-policy-literals-in-code guard (#144, capstone of #141)
 #                (#47, Part of #25: the harness range §7.16–§7.18 was already full
 #                 when this straggler landed, so it draws a fresh id per the
 #                 "gaps allowed, no duplicates" rule above. The #47 body's "§7.11"
@@ -1637,6 +1638,76 @@ if PIPELINE_DRY_RUN=1 python3 "${ROOT}/src/orchestration/test_continuation.py" >
 else
   fail "continuation unit suite failed"
 fi
+
+section "§7.33 no-policy-literals-in-code guard (#144, capstone of #141): routing policy lives in config"
+# The policy→config migration (#136/#137/#138/#142/#144) moved the routing
+# DECISIONS — scope→route map, CI fix-ladder, the ladder cap, the confidence
+# floor — out of Python and into app/config/tuning.yml (routing.*). This guard
+# keeps them there: it FAILS if a model-tier / route policy literal reappears in
+# the governed route-decision modules (common.py / fix_dispatch.py) without an
+# explicit `policy-literal-ok:` marker (the sanctioned config fail-safe / default
+# escape hatch). tuning.py (the config mirror) and tests are intentionally NOT
+# governed — that is where the values legitimately live. Same shape as the
+# ponytail content-guard (#54): content has exactly one home; code interprets it.
+GOVERNED_ROUTING=("${ROOT}/src/orchestration/common.py" "${ROOT}/src/orchestration/fix_dispatch.py")
+# A model-tier / route policy token. Matched as a quoted/bare literal in code.
+TIER_TOKENS='gen-local|gen-default|gen-frontier'
+# Count tier-literal lines in a file that do NOT carry the allowlist marker.
+unmarked_tier_lits() {
+  grep -nE "${TIER_TOKENS}" "$1" 2>/dev/null | grep -v 'policy-literal-ok' || true
+}
+viol=""
+for f in "${GOVERNED_ROUTING[@]}"; do
+  hits="$(unmarked_tier_lits "$f")"
+  [[ -n "$hits" ]] && viol+="${f}:\n${hits}\n"
+done
+if [[ -z "$viol" ]]; then
+  pass "no unmarked routing-tier literals in governed route-decision modules (common.py, fix_dispatch.py)"
+else
+  fail "routing-tier policy literal(s) found in governed code — migrate to app/config/tuning.yml (routing.*)" \
+    "$(printf '%b' "$viol")"
+fi
+# The routing namespace actually CARRIES the migrated decisions (config is the home).
+rt_ok="$(python3 -c '
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1])) or {}
+r = d.get("routing", {})
+need = ("scope_route", "fix_ladder", "fix_attempt_cap", "confidence_threshold")
+sys.exit(0 if all(k in r for k in need) else 1)
+' "${ROOT}/app/config/tuning.yml" >/dev/null 2>&1 && echo ok)"
+[[ "$rt_ok" == "ok" ]] \
+  && pass "app/config/tuning.yml routing block carries scope_route + fix_ladder + cap + confidence_threshold" \
+  || fail "tuning.yml routing block missing a migrated decision (scope_route/fix_ladder/cap/confidence_threshold)"
+# The Python helpers READ the config (not a hard-wired map): tier_for_attempt /
+# route_for_scope must track a config edit. Patch the ladder in a temp copy and
+# confirm the helper follows it — proves the value is data, not code.
+route_follows_config="$(ROOT="${ROOT}" python3 - <<'PY' 2>/dev/null
+import os, sys, tempfile
+sys.path.insert(0, os.path.join(os.environ["ROOT"], "src"))
+cfg = os.path.join(os.environ["ROOT"], "app", "config", "tuning.yml")
+import yaml
+d = yaml.safe_load(open(cfg))
+d["routing"]["fix_ladder"]["1"] = "gen-frontier"   # flip rung 1 in an override file
+tmp = tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False)
+yaml.safe_dump(d, tmp); tmp.close()
+os.environ["DISPATCH_TUNING_FILE"] = tmp.name
+import tuning
+ok = (tuning.tier_for_attempt("1") == "gen-frontier")   # follows the edited config
+os.unlink(tmp.name)
+print("ok" if ok else "bad")
+PY
+)"
+[[ "$route_follows_config" == "ok" ]] \
+  && pass "tier_for_attempt() tracks a config edit (value is data, not code)" \
+  || fail "tier_for_attempt() did not follow a config edit — policy still hard-wired?" "got '$route_follows_config'"
+# Negative self-test: the guard MUST flag an unmarked tier literal when injected.
+inj="$(printf 'route = "gen-frontier"  # no marker\n' | grep -nE "${TIER_TOKENS}" | grep -v 'policy-literal-ok' || true)"
+[[ -n "$inj" ]] && pass "guard flags an injected unmarked tier literal" \
+  || fail "guard failed to detect an injected unmarked tier literal"
+# Negative self-test: a marked literal must NOT be flagged (the escape hatch works).
+mk="$(printf 'route = "gen-frontier"  # policy-literal-ok: x\n' | grep -nE "${TIER_TOKENS}" | grep -v 'policy-literal-ok' || true)"
+[[ -z "$mk" ]] && pass "guard allows a policy-literal-ok-marked literal (escape hatch)" \
+  || fail "guard wrongly flagged a marked literal"
 
 # ---------------------------------------------------------------------------
 section "§7 section-numbering authority — duplicate §7.x id guard (smoke-sections-v1)"

@@ -352,3 +352,24 @@ recovery:
     #137, now feeds the CI failure back as a revised diagnose-then-replan directive on each attempt —
     alongside the tier escalation — rather than retrying the identical work order) and from the reaper
     timeout above (which recovers silently crashed/stuck ''claimed'' issues).'
+routing:
+  _doc: 'Routing policy (#137/#144) — declarative DATA the orchestration layer interprets; the matchers
+    stay Python (src/orchestration/common.py route_for_scope/tier_for_attempt + fix_dispatch.py). scope_route:
+    runtime scope -> generation model group (mirrors selection.classify.scope_route, which the classifier
+    uses at triage time). default_route: fallback for an unknown scope. fix_ladder: stringified CI fix-attempt
+    number -> model tier; an attempt past the last rung (or 0/invalid) yields needs_human_route. fix_attempt_cap:
+    the highest attempt that still earns a tier (= the ladder length). confidence_threshold: the intake
+    floor below which an issue routes to needs-human (PIPELINE_CONFIDENCE_THRESHOLD env override wins).'
+  scope_route:
+    xs: gen-local
+    s: gen-local
+    m: gen-default
+    l: gen-frontier
+  default_route: gen-default
+  fix_ladder:
+    '1': gen-local
+    '2': gen-default
+    '3': gen-frontier
+  fix_attempt_cap: 3
+  needs_human_route: needs-human
+  confidence_threshold: 0.55

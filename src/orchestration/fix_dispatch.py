@@ -124,12 +124,13 @@ def main(argv=None) -> int:
     )
     common.ledger_emit("adversary-weigh-in", pr, json.dumps(wi, ensure_ascii=False))
 
-    if tier == "needs-human":
-        common.log(f"PR #{pr}: attempt {attempt} exceeds cap (3) -> escalating to operator.")
-        common.gh_mutate("pr", "edit", pr, "--add-label", "needs-human")
+    if tier == common.NEEDS_HUMAN_ROUTE:
+        cap = common.fix_attempt_cap()
+        common.log(f"PR #{pr}: attempt {attempt} exceeds cap ({cap}) -> escalating to operator.")
+        common.gh_mutate("pr", "edit", pr, "--add-label", common.NEEDS_HUMAN_ROUTE)
         common.gh_mutate(
             "pr", "comment", pr, "--body",
-            f"Pipeline: fix-attempt cap exceeded (attempt {attempt} > 3). "
+            f"Pipeline: fix-attempt cap exceeded (attempt {attempt} > {cap}). "
             f"Brief: {brief}. Needs human.",
         )
         common.log(f"operator-notification path taken for PR #{pr}.")
