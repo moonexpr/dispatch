@@ -31,6 +31,16 @@ import subprocess
 import sys
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# Line-buffer stdout/stderr so a long live tick streams progress in real time even
+# when redirected to a file (Python block-buffers non-TTY streams, so dispatch +
+# engine-logger + DRY-RUN lines would otherwise only appear at exit).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
+
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 os.environ["PYTHONPATH"] = _ROOT + (
     os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else ""
