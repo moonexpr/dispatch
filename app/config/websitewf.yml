@@ -1,0 +1,99 @@
+# websitewf.yml — WebsiteWF: an OVERLAY layer over baseworkflow, specialized for
+# web development. See docs/adr/002-websitewf-overlay-layer.md for the rationale.
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ SPEC / NOT-YET-EXECUTABLE.                                                 │
+# │ This document declares `extends:` + `overlays:`. The engine support for   │
+# │ those keys (the loader merge pass + the `kind: proxy` action) is the      │
+# │ mechanism increment described in ADR-002 §Action Items #1–#2 and is NOT   │
+# │ yet implemented. Loading this file with today's engine will not merge the │
+# │ overlay. This file is the reviewable design surface for that mechanism.   │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# WebsiteWF reuses baseworkflow's phases (spec → work → build), agents, budgets and
+# wiring verbatim, and applies a small, auditable diff. It is selected at runtime
+# with `WORKFLOW=websitewf` (orthogonal to DISPATCH_ENGINE; default is baseworkflow).
+name: websitewf
+
+extends: baseworkflow            # inherit baseworkflow's full WorkflowNode (the base
+                                 # document is never edited — this file is a diff)
+
+uses:
+  - actions/web/**/*.yml         # the new web:* action interface manifests, incl. the
+                                 # kind: proxy ones (see the manifest sketches below)
+
+# ── overlays ───────────────────────────────────────────────────────────────
+# Ordered, top-to-bottom. A later op observes earlier ops' effect. Conflicting
+# replace/proxy of the same token is an error; stacked `extend` composes.
+#
+# This first increment proves all four overlay verbs on ONE use case — "add a new
+# page or route" (ADR-002 §Decision.5). The other five web use cases are tracked as
+# the WebsiteWF epic's children and will land as further overlays.
+overlays:
+
+  # 1. REPLACE — substitute the generic work-unit generator with a route-aware one.
+  #    Same interface position in the `spec` phase; only the binding/manifest swaps.
+  - replace: github:generate_work_units
+    with: web:generate_route_work_units
+
+  # 2. EXTEND — augment (don't replace) the architect's strategy classifier. The base
+  #    classify_strategy still runs; web:classify_route_addendum runs AFTER it to tag
+  #    the target framework (Next.js | Laravel) and the route path onto the plan.
+  - extend: architect:classify_strategy
+    mode: after                  # before | after | wrap
+    with: web:classify_route_addendum
+
+  # 3. ADD — splice a new task into the `work` phase, right after the engineer runs,
+  #    to lay down + wire the page/route scaffold.
+  - add: web:scaffold_route
+    phase: work
+    after: engineer:execute_orchestration
+
+  # 4. PROXY — rewire the engineer's I/O via a proxy action (a new kind). The target
+  #    binding is untouched; the proxy remaps which shelf paths feed its interface.in
+  #    and where interface.out lands, so the engineer receives the authored route spec.
+  - proxy: engineer:execute_orchestration
+    rewire:
+      in:
+        route_spec: deliverables.web_route_spec
+      out:
+        engineering_result: deliverables.engineering_result
+
+# ── proposed web:* action manifests (sketch — full files live under actions/web/) ──
+# Shown here for review only; the executable manifests are part of mechanism increment
+# #5. Shapes follow the existing actions/<ns>/<name>.yml schema.
+#
+#   actions/web/generate_route_work_units.yml
+#     token: web:generate_route_work_units
+#     kind: inference            # route-aware decomposition of the page/route ask
+#     bind: generate_route_work_units
+#     budget: architect
+#     interface:
+#       in:  { job: input.job, triage: input.triage }
+#       out: { work_units: deliverables.work_units, web_route_spec: deliverables.web_route_spec }
+#
+#   actions/web/classify_route_addendum.yml
+#     token: web:classify_route_addendum
+#     kind: procedure            # tag framework + route path onto the plan/strategy
+#     bind: classify_route_addendum
+#     interface:
+#       in:  { plan: deliverables.plan, strategy: deliverables.strategy }
+#       out: { strategy: deliverables.strategy }     # augments, preserves base output
+#
+#   actions/web/scaffold_route.yml
+#     token: web:scaffold_route
+#     kind: inference            # lay down the page/route file(s) + wire into the app
+#     bind: scaffold_route
+#     permission: [Read, Write, Edit, Bash]
+#     budget: engineering
+#     interface:
+#       in:  { web_route_spec: deliverables.web_route_spec, engineering_result: deliverables.engineering_result }
+#       out: { scaffold_result: deliverables.scaffold_result }
+#
+#   actions/web/proxy_execute_orchestration.yml   (the kind: proxy manifest)
+#     token: web:proxy_execute_orchestration
+#     kind: proxy
+#     target: engineer:execute_orchestration
+#     rewire:
+#       in:  { route_spec: deliverables.web_route_spec }
+#       out: { engineering_result: deliverables.engineering_result }
