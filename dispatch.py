@@ -38,6 +38,26 @@ os.environ["PYTHONPATH"] = _ROOT + (
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+# Local secrets + overrides from pipeline.env (GITIGNORED) — e.g.
+# CLAUDE_CODE_OAUTH_TOKEN (subscription auth) and MODELS_BACKEND. Explicit shell env
+# wins over the file (the preserve list); a missing/garbled file must never block.
+try:
+    from engine import runtime as _runtime
+
+    _runtime.load_dotenv(
+        os.path.join(_ROOT, "pipeline.env"),
+        preserve=("PIPELINE_DRY_RUN", "PIPELINE_REPO", "DISPATCH_ENGINE",
+                  "MODELS_BACKEND", "CLAUDE_CODE_OAUTH_TOKEN"),
+    )
+except Exception:  # noqa: BLE001 — dotenv is optional.
+    pass
+
+# This project runs inference on the Claude **subscription** (Claude Code), not on
+# API billing: default the model backend to the ``claude -p`` CLI so every inference
+# (architect/admin/web actions) draws from the plan, authenticated headlessly by
+# CLAUDE_CODE_OAUTH_TOKEN. Override with MODELS_BACKEND=anthropic to use an API key.
+os.environ.setdefault("MODELS_BACKEND", "cli")
+
 _ENGINES = {
     "baseworkflow": "src.baseworkflow.baseworkflow",
     "websitewf": "src.websitewf.websitewf",
