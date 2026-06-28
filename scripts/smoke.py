@@ -2,16 +2,25 @@
 """smoke.py — workflow-engine smoke gate (CI).
 
 Tests ONLY the canonical workflow engine (``engine/`` + ``src/baseworkflow/``)
-and the authoring seam it drives. The legacy bash pipeline suite — the *visitor
-lineage* (orchestration / architect / intake / budget / classifier / ledger) —
-was parked in ``src/visitor/smoke.sh`` during the ``src/visitor/`` consolidation
-and is NOT run here until that lineage's callers are rewired. See that file.
+and the architect↔worker SEAM CONTRACT it owns. Carries **no reference to the
+parked legacy pipeline lineage**, which lives in a separate non-functional
+graveyard until its callers are rewired.
 
-Each check shells out to a self-asserting target (exit 0 == pass). Fully offline
-and dry-run: no network, no ``gh``/model calls.
+Checks:
+  1. workflow validator — engine/workflow over app/workflows/baseworkflow.yml
+     with the src.baseworkflow bindings registry.
+  2. BaseWorkflow engine e2e — src/baseworkflow/test_e2e.py.
+  3. architect↔worker v1 seam contracts — every versioned schema under schemas/
+     (WorkOrder / JobRequest / Invoice #143; Issue / Classification / RankedQueue
+     / PrEvent / LedgerRecord #145) validates its golden fixture. The schemas and
+     fixtures live at the repo root (schemas/, schemas/fixtures/), independent of
+     any lineage, so this validates the frozen contract without running producers.
+
+Fully offline + dry-run: no network, no gh/model calls.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -20,8 +29,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
 
-# (label, argv) — each subprocess must exit 0 to pass.
-CHECKS: list[tuple[str, list[str]]] = [
+# Subprocess checks — each self-asserting target must exit 0.
+SUBPROC_CHECKS: list[tuple[str, list[str]]] = [
     (
         "workflow validator (engine/workflow + bindings registry over app/workflows/baseworkflow.yml)",
         [PY, "-m", "engine.workflow", "workflows/baseworkflow.yml",
@@ -31,30 +40,79 @@ CHECKS: list[tuple[str, list[str]]] = [
         "BaseWorkflow engine e2e (src/baseworkflow/test_e2e.py)",
         [PY, "src/baseworkflow/test_e2e.py"],
     ),
-    (
-        "authoring seam: DISPATCH_ENGINE=baseworkflow bridge (src/baseworkflow ↔ engine)",
-        [PY, "src/visitor/orchestration/test_baseworkflow_bridge.py"],
-    ),
 ]
+
+# The frozen architect↔worker v1 seam: (schema stem, human label).
+SEAM_CONTRACTS: list[tuple[str, str]] = [
+    ("work-order", "WorkOrder v1 (#143)"),
+    ("job-request", "JobRequest v1 (#143)"),
+    ("invoice", "Invoice v1 (#143)"),
+    ("issue", "Issue v1 (#145)"),
+    ("classification", "Classification v1 (#145)"),
+    ("ranked-queue", "RankedQueue v1 (#145)"),
+    ("pr-event", "PrEvent v1 (#145)"),
+    ("ledger-record", "LedgerRecord v1 (#145)"),
+]
+
+
+def run_subproc(argv: list[str], env: dict) -> tuple[bool, str]:
+    proc = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True)
+    if proc.returncode == 0:
+        last = next((ln for ln in reversed((proc.stdout or "").splitlines()) if ln.strip()), "")
+        return True, last.strip()
+    tail = ((proc.stdout or "") + (proc.stderr or "")).splitlines()[-6:]
+    return False, "\n".join(f"          {t}" for t in tail) or f"          exit {proc.returncode}"
+
+
+def check_seam_contracts() -> tuple[bool, str]:
+    """Validate every v1 golden fixture against its schema. No lineage code."""
+    try:
+        import jsonschema
+    except ImportError:
+        return False, "          jsonschema not installed (required for the seam contract check)"
+    sd = ROOT / "schemas"
+    fd = sd / "fixtures"
+    bad: list[str] = []
+    for stem, label in SEAM_CONTRACTS:
+        schema_p = sd / f"{stem}.v1.json"
+        golden_p = fd / f"{stem}.v1.golden.json"
+        try:
+            jsonschema.validate(
+                json.loads(golden_p.read_text(encoding="utf-8")),
+                json.loads(schema_p.read_text(encoding="utf-8")),
+            )
+        except FileNotFoundError as exc:
+            bad.append(f"          {label}: missing {exc.filename}")
+        except Exception as exc:  # noqa: BLE001 — surface any validation failure
+            bad.append(f"          {label}: {type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
+    if bad:
+        return False, "\n".join(bad)
+    return True, f"{len(SEAM_CONTRACTS)}/{len(SEAM_CONTRACTS)} v1 schemas validate their golden fixtures"
 
 
 def main() -> int:
     env = {**os.environ, "PIPELINE_DRY_RUN": "1"}
     npass = nfail = 0
     print("== smoke.py — workflow-engine gate (offline, dry-run) ==")
-    for label, argv in CHECKS:
-        proc = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True)
-        last = next((ln for ln in reversed((proc.stdout or "").splitlines()) if ln.strip()), "")
-        if proc.returncode == 0:
+
+    results: list[tuple[str, bool, str]] = []
+    for label, argv in SUBPROC_CHECKS:
+        ok, detail = run_subproc(argv, env)
+        results.append((label, ok, detail))
+    ok, detail = check_seam_contracts()
+    results.append(("architect↔worker v1 seam contracts (schemas/ vs golden fixtures)", ok, detail))
+
+    for label, ok, detail in results:
+        if ok:
             npass += 1
             print(f"  PASS  {label}")
-            if last.strip():
-                print(f"          {last.strip()}")
+            if detail:
+                print(f"          {detail}")
         else:
             nfail += 1
-            print(f"  FAIL  {label}  (exit {proc.returncode})")
-            for ln in ((proc.stdout or "") + (proc.stderr or "")).splitlines()[-6:]:
-                print(f"          {ln}")
+            print(f"  FAIL  {label}")
+            if detail:
+                print(detail)
     print(f"\nsmoke.py: PASS={npass} FAIL={nfail}")
     return 1 if nfail else 0
 
