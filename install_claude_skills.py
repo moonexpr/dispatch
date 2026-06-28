@@ -38,6 +38,7 @@ SKILL_DIR_NAMES = [
     "dispatch-decompose",
     "dispatch-tick",
     "dispatch-review",
+    "deploy-oneshot",
 ]
 
 
@@ -92,7 +93,7 @@ def install(skills: list[Path], target: Path, force: bool) -> int:
         print("re-run with --force to overwrite the skipped skills.")
     if installed:
         print("invoke them in Claude Code as /dispatch, /dispatch:scope, "
-              "/dispatch:tick, /dispatch:decompose, /dispatch:review.")
+              "/dispatch:tick, /dispatch:decompose, /dispatch:review, /deploy:oneshot.")
     # A run that copied nothing and skipped nothing is a no-op worth flagging.
     return 0 if (installed or skipped) else 1
 

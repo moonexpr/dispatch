@@ -37,6 +37,7 @@ well — *before* anything reaches the queue.
 | `/dispatch:decompose` | A large ask → small, shippable leaf issues filed as a Draft epic. |
 | `/dispatch:tick` | Preview a tick in dry-run, then a deliberate go-live. |
 | `/dispatch:review` | Vet a pipeline pull request against its acceptance criteria before you approve. |
+| `/deploy:oneshot` | Interview a task, then feed it straight into the engine — bypassing GitHub issue intake. |
 
 The skills ship under [`.claude/skills/`](./.claude/skills/) and work automatically
 when this repo is your Claude Code workspace. To use them in **any** project, run
