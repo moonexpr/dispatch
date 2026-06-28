@@ -191,28 +191,27 @@ class ExecutionVisitor(StageVisitor):
                 "confidence": conf,
             }
         )
-        # Authoring engine. `baseworkflow` is the ONLY supported workorder authoring
-        # engine: it runs a BaseWorkflow over the Job Request and folds its authored
-        # orchestration_script / work_plan back in (fail-safe: on any error the
-        # request is returned unchanged). The historical `visitor` authoring engine —
-        # which left the Job Request byte-for-byte unchanged — is DEPRECATED and
-        # DISABLED for release: `DISPATCH_ENGINE=visitor` is no longer selectable. An
-        # explicit opt-in is ignored (with a warning) and baseworkflow runs anyway.
+        # Authoring engine, selected by DISPATCH_ENGINE: `baseworkflow` (default) or
+        # `websitewf` (the web-development overlay engine — BaseWorkflow + the
+        # websitewf.yml overlay, src/websitewf). Both run a workflow over the Job
+        # Request and fold the authored orchestration_script / work_plan / plan back
+        # in (fail-safe: on any error the request is returned unchanged). The
+        # historical `visitor` authoring engine is DEPRECATED and DISABLED — any
+        # unsupported value is ignored with a warning and baseworkflow runs instead.
         # The default literal mirrors common.py's
         # _default("DISPATCH_ENGINE", "baseworkflow").
-        if common.env("DISPATCH_ENGINE", "baseworkflow") != "baseworkflow":
+        engine = common.env("DISPATCH_ENGINE", "baseworkflow")
+        if engine not in ("baseworkflow", "websitewf"):
             common.warn(
-                "DISPATCH_ENGINE=visitor selects the deprecated visitor authoring "
-                "engine, which is DISABLED as of release. Ignoring it and using the "
-                "supported baseworkflow engine; unset DISPATCH_ENGINE to silence this."
+                f"DISPATCH_ENGINE={engine} is not a supported authoring engine "
+                "(the legacy `visitor` engine is disabled and removed); using the "
+                "default baseworkflow engine. Set DISPATCH_ENGINE=websitewf for the "
+                "web-development overlay."
             )
-        from .baseworkflow_bridge import author_via_baseworkflow
+            engine = "baseworkflow"
+        from .baseworkflow_bridge import author_via_workflow
 
-        ctx.job_request = author_via_baseworkflow(ctx.job_request)
-        # --- DEPRECATED / DISABLED: the legacy `visitor` authoring fallback once
-        # lived here as the `else` arm above — it left ctx.job_request byte-for-byte
-        # unchanged instead of running BaseWorkflow authoring. It is retained in
-        # history for reference only and is no longer reachable. ---
+        ctx.job_request = author_via_workflow(ctx.job_request, engine)
 
         # Freeze the seam on the LIVE path (#143): validate the Job Request's
         # seam projection against schemas/job-request.v1.json BEFORE it is handed to

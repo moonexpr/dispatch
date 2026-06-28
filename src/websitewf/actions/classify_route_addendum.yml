@@ -1,0 +1,13 @@
+# web:classify_route_addendum — augments architect:classify_strategy (via the
+# websitewf `extend ... mode: after` overlay). The base strategy classifier still
+# runs; this reads its result + the route spec and tags the target framework and
+# route path onto the strategy, writing the augmented strategy back.
+token: web:classify_route_addendum
+kind: procedure
+bind: classify_route_addendum
+interface:
+  in:
+    strategy: deliverables.strategy
+    web_route_spec: deliverables.web_route_spec
+  out:
+    strategy: deliverables.strategy

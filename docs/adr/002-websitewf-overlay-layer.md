@@ -1,10 +1,10 @@
 # ADR-002: WebsiteWF — an Overlay Layer that Specializes BaseWorkflow for Web Development
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-06-27
 **Deciders:** JC (architecture owner)
 **Supersedes:** —
-**Related:** [`ADR-001`](./001-hfsm-automata.md) (HFSM engine); `app/workflows/baseworkflow.yml`; `engine/workflow/loader.py`; `engine/actions/action.py`; the `WORKFLOW` runtime selector
+**Related:** [`ADR-001`](./001-hfsm-automata.md) (HFSM engine); `app/workflows/baseworkflow.yml`; `engine/workflow/loader.py`; `engine/actions/action.py`; `DISPATCH_ENGINE=websitewf` selection
 
 ---
 
@@ -86,31 +86,33 @@ requirement names explicitly. It is a fourth Action kind alongside `Procedure`,
 This maps onto ADR-001's construct table as a new row: **proxy action ← data-edge adapter
 on an Action's interface** (it touches the Shelf wiring, never the transition graph).
 
-### 3. Runtime selection — the `WORKFLOW` env var
+### 3. Runtime selection — `DISPATCH_ENGINE=websitewf`
 
-Which workflow runs is selected by a new **`WORKFLOW`** environment variable
-(`WORKFLOW=baseworkflow` default | `WORKFLOW=websitewf`), kept **orthogonal** to
-`DISPATCH_ENGINE` (which selects the *authoring engine* and whose only supported value is
-now `baseworkflow` after ADR-era cleanup). The authoring bridge
-(`src/orchestration/baseworkflow_bridge.py`) becomes workflow-agnostic: it reads
-`WORKFLOW`, imports that workflow module, and calls its `run_live`. Two orthogonal axes —
-*which workflow* (`WORKFLOW`) and *which authoring engine* (`DISPATCH_ENGINE`) — stay
-separable.
+The authoring engine is selected by the existing **`DISPATCH_ENGINE`** variable, extended
+with a new value: `baseworkflow` (default) | `websitewf`. Reusing the established seam
+keeps one selector rather than adding a parallel `WORKFLOW` axis. The authoring bridge
+(`src/visitor/orchestration/baseworkflow_bridge.py`) is workflow-agnostic — `author_via_workflow(req, engine)`
+imports the selected workflow module and calls its `run_live`; `visit_workorder` resolves
+`DISPATCH_ENGINE` and any unsupported value (the deprecated `visitor` engine, typos) is
+ignored with a warning and `baseworkflow` runs instead.
 
-### 4. WebsiteWF as a thin Python + config layer
+### 4. WebsiteWF as its own engine (a sibling of `src/baseworkflow`)
 
 - `app/workflows/websitewf.yml` — the overlay document (`extends: baseworkflow`).
-- `app/config/actions/web/*.yml` — the new `web:*` action interface manifests
-  (including the `kind: proxy` ones).
-- `src/websitewf/` — a `WebsiteWF` controller mirroring `BaseWorkflow` (loads
-  `workflows/websitewf.yml`) and a `bindings/` package whose `build_registry()` **reuses the
-  base bindings** and registers the `web:*` bodies on top. BaseWorkflow gains only a small
-  optional `_bindings_module` hook so it stays reusable; no base behavior changes.
+- `src/websitewf/actions/*.yml` — the `web:*` action interface manifests, colocated
+  with the WebsiteWF engine; pulled in by the overlay's `uses:`.
+- `src/websitewf/` — the WebsiteWF engine, a sibling of `src/baseworkflow`: `websitewf.py`
+  (a `WebsiteWF` controller that **subclasses `BaseWorkflow`**, overriding only the
+  `_load_doc` / `_build_registry` / `_total_budget` hooks) and `bindings.py` whose
+  `build_registry()` **reuses the base `build_registry`** and registers the `web:*` bodies
+  on top. BaseWorkflow gains only three small overridable hooks (`_load_doc` /
+  `_build_registry` / `_total_budget`, defaulting to the base doc/registry/budget) so it
+  stays reusable; no base behavior changes.
 
 ### 5. Scope: mechanism + one proof vertical
 
-The first increment lands the **mechanism** (overlay loader + proxy kind + `WORKFLOW`
-selector + WebsiteWF skeleton) proven end-to-end on **one** use case — **"add a new page
+The first increment lands the **mechanism** (overlay loader + proxy kind +
+`DISPATCH_ENGINE=websitewf` selection + WebsiteWF engine) proven end-to-end on **one** use case — **"add a new page
 or route"** (#3) — because it exercises all four overlay verbs at once:
 
 - **replace** `github:generate_work_units` → `web:generate_route_work_units`
@@ -179,12 +181,15 @@ kind with its compile-time I/O-rewire wrapper. Overlay-order semantics must be p
 
 ### Runtime-selection sub-decision
 
-- **`WORKFLOW` env var (chosen)** — a dedicated axis; keeps "which workflow" separate from
-  "which authoring engine" (`DISPATCH_ENGINE`).
-- *Reuse `DISPATCH_ENGINE=websitewf`* — rejected: conflates two distinct concepts on one
-  flag.
-- *Per-repo / per-issue config* — deferred as an additive convenience on top of `WORKFLOW`
-  (e.g. a `website` label resolves to `WORKFLOW=websitewf`) once the env path works.
+- **`DISPATCH_ENGINE=websitewf` (chosen)** — extend the existing authoring-engine selector
+  with a new value rather than add a second axis. One selector, one seam, less surface; the
+  authoring engine *is* the workflow that authors the workorder, so they are not truly
+  distinct concepts here.
+- *A dedicated `WORKFLOW` env var* — rejected: a parallel selector duplicates the seam for no
+  real separation of concerns at this stage.
+- *Per-repo / per-issue config* — deferred as an additive convenience on top of
+  `DISPATCH_ENGINE` (e.g. a `website` label resolves to `DISPATCH_ENGINE=websitewf`) once the
+  env path is proven.
 
 ---
 
@@ -216,7 +221,8 @@ the coupling ADR-001 externalized; scoping it to I/O keeps it safe.
   uniform semantics across every layer.
 - The engine gains two *generic* capabilities — workflow overlay/merge and a data-edge
   proxy adapter — reusable by future layers (AppWF, MobileWF) with no new engine work.
-- `WORKFLOW` cleanly separates "which lifecycle" from "which authoring engine."
+- `DISPATCH_ENGINE=websitewf` selects the web lifecycle through the existing seam — one
+  selector, no new flag surface.
 
 **Becomes harder**
 
@@ -234,7 +240,7 @@ the coupling ADR-001 externalized; scoping it to I/O keeps it safe.
   same token; allow stacked `extend`** (composition is associative).
 - **Deep nesting of layers.** If a third layer ever `extends: websitewf`, the merge must be
   transitive and depth-bounded (mirror `Program.MAX_DEPTH`).
-- **Per-repo selection.** Revisit promoting `WORKFLOW` from env to repo/issue config once
+- **Per-repo selection.** Revisit promoting `DISPATCH_ENGINE` selection from env to repo/issue config once
   more than one repo runs WebsiteWF.
 
 ---
@@ -243,19 +249,21 @@ the coupling ADR-001 externalized; scoping it to I/O keeps it safe.
 
 > Tracked as the **WebsiteWF epic** + child issues. The mechanism items gate the verticals.
 
-1. [ ] **Overlay loader:** `extends:` + `overlays:` merge in `engine/workflow/loader.py`
-   (verbs: `replace`, `extend`, `add`, `proxy`); pin top-to-bottom order; error on
-   conflicting `replace`/`proxy`.
-2. [ ] **Proxy action kind:** add `Proxy(Action)` (`kind: proxy`) + the CompileVisitor
-   I/O-rewire wrapper + manifest schema (`target:`, `rewire:`); validator support.
-3. [ ] **`WORKFLOW` selector:** make the authoring bridge workflow-agnostic; default
-   `baseworkflow`; document in PROJECT.md's flag table.
-4. [ ] **WebsiteWF skeleton:** `app/workflows/websitewf.yml` (this spec), `app/config/actions/web/`,
-   `src/websitewf/` (controller + bindings reusing base via `build_registry`); add the
-   `_bindings_module` hook to `BaseWorkflow`.
-5. [ ] **Proof vertical "add a page/route":** the four `web:*` bindings + manifests; a
-   `run_mock` e2e (roundabout green) + smoke section; validate the merged `websitewf.yml`.
-6. [ ] **Deferred use cases (epic children):** #1 UX-loop→issues, #2 scaffold-foundation,
-   #4 feedback→ticket, #5 new-backend-tech, #6 adopt-third-party (Stripe).
-7. [ ] **Overlay conflict + transitivity tests:** two ops on one token; `add` after
-   `replace`; (future) `extends: websitewf` depth bound.
+1. [x] **Overlay loader:** `extends:` + `overlays:` merge in `engine/workflow/overlay.py`
+   (verbs: `replace`, `extend`, `add`, `proxy`), applied top-to-bottom by the loader.
+2. [x] **Proxy action kind:** `Proxy(Action)` (`kind: proxy`) + `factory.proxy()` + the
+   CompileVisitor I/O-rewire wrapper + `proxy_manifest` (`target` + `rewire`); validator support.
+3. [x] **`DISPATCH_ENGINE=websitewf` selection:** workflow-agnostic `author_via_workflow`
+   bridge; default `baseworkflow`; `visitor` stays disabled.
+4. [x] **WebsiteWF engine:** `app/workflows/websitewf.yml`, `src/websitewf/actions/`,
+   `src/websitewf/{websitewf,bindings}.py` (controller subclassing `BaseWorkflow`, bindings
+   reusing base `build_registry`); the `_load_doc`/`_build_registry`/`_total_budget` hooks
+   on `BaseWorkflow`.
+5. [x] **Proof vertical "add a page/route":** the four `web:*` bindings + manifests; a
+   `run_mock` e2e + `src/websitewf/test_websitewf.py` (23/23); merged `websitewf.yml`
+   validates clean. (No smoke section — the harness is being rewritten.)
+6. [ ] **Deferred use cases (epic children #166–#170):** UX-loop→issues, scaffold-foundation,
+   feedback→ticket, new-backend-tech, adopt-third-party (Stripe).
+7. [ ] **Follow-ups:** fold web deliverables (`web_route_spec`, `scaffold_result`) in the
+   authoring bridge; overlay conflict policy + `extends: websitewf` transitivity tests;
+   `mode: wrap` for `extend`.

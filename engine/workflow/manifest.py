@@ -33,7 +33,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-VALID_KINDS = ("inference", "procedure")
+VALID_KINDS = ("inference", "procedure", "proxy")
 VALID_SHELVES = ("input", "deliverables", "shared")
 
 
@@ -56,7 +56,16 @@ class IORef:
 
 @dataclass(frozen=True)
 class ActionManifest:
-    """The parsed interface rule for one action token."""
+    """The parsed interface rule for one action token.
+
+    A ``kind == "proxy"`` manifest is special: it does not carry its own body.
+    Instead it *wraps* the action in :attr:`proxy_target` and reroutes that
+    target's shelf I/O via :attr:`rewire_in` / :attr:`rewire_out` (each an
+    ``alias -> new shelf.key`` remap of one of the target's interface aliases).
+    Proxy manifests are built by the overlay loader from a resolved target, not
+    parsed from a manifest file — see :func:`proxy_manifest`. ``bind`` mirrors the
+    target's bind so the validator's registration check still resolves.
+    """
 
     token: str
     kind: str
@@ -68,6 +77,10 @@ class ActionManifest:
     inputs: Tuple[IORef, ...] = ()
     outputs: Tuple[IORef, ...] = ()
     source: str = ""
+    # -- proxy-only (kind == "proxy") ---------------------------------------
+    proxy_target: Optional["ActionManifest"] = None
+    rewire_in: Tuple[IORef, ...] = ()
+    rewire_out: Tuple[IORef, ...] = ()
 
     @property
     def namespace(self) -> str:
@@ -115,6 +128,59 @@ def manifest_from_dict(d: Dict[str, Any], *, source: str = "") -> ActionManifest
         inputs=_parse_io(iface.get("in"), f"{token}.interface.in"),
         outputs=_parse_io(iface.get("out"), f"{token}.interface.out"),
         source=source,
+    )
+
+
+def proxy_manifest(
+    target: ActionManifest,
+    rewire_in_spec: Any,
+    rewire_out_spec: Any,
+    *,
+    source: str = "",
+) -> ActionManifest:
+    """Build a ``kind == "proxy"`` manifest that wraps ``target`` and reroutes its
+    shelf I/O. ``rewire_in_spec`` / ``rewire_out_spec`` are ``{target_alias ->
+    'shelf.key'}`` maps naming, for one of the target's interface aliases, a NEW
+    shelf location to source the input from (``in``) or write the output to
+    (``out``). The target's body is untouched; the reroute happens around it at the
+    shelf level (so it works for ``raw`` targets too). Used by the overlay loader's
+    ``proxy:`` op."""
+    rin = _parse_io(rewire_in_spec, f"{target.token}.proxy.rewire.in")
+    rout = _parse_io(rewire_out_spec, f"{target.token}.proxy.rewire.out")
+    in_aliases = {r.alias for r in target.inputs}
+    out_aliases = {r.alias for r in target.outputs}
+    for r in rin:
+        if r.alias not in in_aliases:
+            raise ManifestError(
+                f"{target.token}: proxy rewire.in alias {r.alias!r} is not an input of the "
+                f"target (inputs: {sorted(in_aliases)})"
+            )
+    for r in rout:
+        if r.alias not in out_aliases:
+            raise ManifestError(
+                f"{target.token}: proxy rewire.out alias {r.alias!r} is not an output of the "
+                f"target (outputs: {sorted(out_aliases)})"
+            )
+    rin_by_alias = {r.alias: r for r in rin}
+    # Effective interface for the data-flow validator: a rewired input now reads
+    # from its NEW source; the target's default outputs stay produced and the
+    # rewired sinks are produced too.
+    eff_inputs = tuple(rin_by_alias.get(r.alias, r) for r in target.inputs)
+    eff_outputs = target.outputs + rout
+    return ActionManifest(
+        token=target.token,
+        kind="proxy",
+        bind=target.bind,
+        fmt=target.fmt,
+        raw=target.raw,
+        permission=None,
+        budget=None,
+        inputs=eff_inputs,
+        outputs=eff_outputs,
+        source=source or target.source,
+        proxy_target=target,
+        rewire_in=rin,
+        rewire_out=rout,
     )
 
 

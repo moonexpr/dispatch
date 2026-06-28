@@ -210,3 +210,45 @@ class Program(Action):
                 name=self.name,
             )
         return self.controller.run(payload, ctx.descend())
+
+
+class Proxy(Action):
+    """I/O-reroute wrapper — the fourth Action kind, for workflow overlays.
+
+    Wraps a target ``Action`` and reroutes shelf entries *around* its run: before
+    running the target it copies each ``pre`` ``(src_shelf, src_key) ->
+    (dst_shelf, dst_key)``; after, each ``post`` likewise. The target's body and
+    its governors are untouched — the proxy only rewires the data edges, so it
+    works even when the target self-manages its I/O (a ``raw`` action). Pure
+    mechanism: identical under the mock and real factories. The wrapped target's
+    ``Result`` is returned verbatim."""
+
+    kind = "proxy"
+
+    # Each pre/post entry is a 4-tuple (src_shelf, src_key, dst_shelf, dst_key).
+    def __init__(
+        self,
+        name: str,
+        inner: Action,
+        *,
+        pre: Any = (),
+        post: Any = (),
+        adapter: Any = None,
+    ) -> None:
+        super().__init__(name, adapter=adapter)
+        self.inner = inner
+        self.pre = tuple(pre)
+        self.post = tuple(post)
+
+    @staticmethod
+    def _copy(ctx: Context, src_shelf: str, src_key: str, dst_shelf: str, dst_key: str) -> None:
+        value = getattr(ctx.shelves, src_shelf).get(src_key)
+        getattr(ctx.shelves, dst_shelf).put(dst_key, value)
+
+    def _invoke(self, payload: Any, ctx: Context) -> Result:
+        for src_shelf, src_key, dst_shelf, dst_key in self.pre:
+            self._copy(ctx, src_shelf, src_key, dst_shelf, dst_key)
+        result = self.inner.run(payload, ctx)
+        for src_shelf, src_key, dst_shelf, dst_key in self.post:
+            self._copy(ctx, src_shelf, src_key, dst_shelf, dst_key)
+        return result

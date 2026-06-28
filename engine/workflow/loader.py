@@ -138,10 +138,30 @@ def parse_document(doc: Dict[str, Any], manifests: Dict[str, ActionManifest], *,
     )
 
 
+def _apply_header(merged: WorkflowNode, doc: Dict[str, Any], base: WorkflowNode) -> WorkflowNode:
+    """Carry the overlay document's own header onto the merged tree: its ``name``
+    wins, and its ``seed`` / ``budgets`` *extend* the base's (overlay keys override
+    same-named base keys). ``inputs`` and ``terminal_when`` are inherited from the
+    base unless the overlay restates them."""
+    from dataclasses import replace
+
+    return replace(
+        merged,
+        name=str(doc.get("name") or merged.name),
+        seed={**base.seed, **(doc.get("seed") or {})},
+        budgets={**base.budgets, **(doc.get("budgets") or {})},
+        inputs=(tuple(str(k) for k in doc["inputs"]) if doc.get("inputs") else merged.inputs),
+        terminal_when=(str(doc["terminal_when"]) if doc.get("terminal_when") else merged.terminal_when),
+    )
+
+
 def load_workflow(relpath: str) -> WorkflowNode:
     """Read + parse a workflow YAML into a ``WorkflowNode``. ``relpath`` resolves
     via :func:`_resolve_path`; ``uses:`` manifest globs resolve relative to the
-    workflow file's directory."""
+    workflow file's directory. A document that declares ``extends: <base>`` is an
+    *overlay*: the sibling ``<base>.yml`` is loaded and parsed, this document's
+    ``overlays:`` ops are folded onto it (see :mod:`engine.workflow.overlay`), and
+    the merged tree carries this document's header."""
     import yaml
 
     path = _resolve_path(relpath)
@@ -149,4 +169,13 @@ def load_workflow(relpath: str) -> WorkflowNode:
         doc = yaml.safe_load(fh) or {}
     wf_dir = os.path.dirname(os.path.abspath(path))
     manifests = load_manifests(wf_dir, doc.get("uses") or [])
+
+    extends = doc.get("extends")
+    if extends:
+        from .overlay import apply_overlays
+
+        base = load_workflow(os.path.join(wf_dir, f"{extends}.yml"))
+        merged = apply_overlays(base, doc.get("overlays") or [], manifests, source=relpath)
+        return _apply_header(merged, doc, base)
+
     return parse_document(doc, manifests, source=relpath)

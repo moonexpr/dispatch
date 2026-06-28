@@ -129,6 +129,12 @@ class CompileVisitor(WorkflowVisitor):
 
     def visit_action_ref(self, node: Any) -> Any:
         m = node.manifest
+        if m.kind == "proxy":
+            return self._build_proxy(m)
+        return self._build_action(m)
+
+    def _build_action(self, m: Any) -> Any:
+        """Compile one (non-proxy) action manifest into a governed Action."""
         binding = self.registry.action_binding(m.bind)
         body = self._interface_body(m, binding)
         if m.kind == "inference":
@@ -146,6 +152,21 @@ class CompileVisitor(WorkflowVisitor):
             estimate = _MOCK_USAGE if m.kind == "inference" else 0
             act = self.factory.governor("budget", act, cap=cap, estimate=estimate, phase=m.budget)
         return act
+
+    def _build_proxy(self, m: Any) -> Any:
+        """Compile a ``kind == "proxy"`` manifest: build the wrapped target action
+        (with its own governors) and wrap it in a Proxy that reroutes the target's
+        shelf I/O per the rewire maps (the target's default I/O locations are read
+        from its own interface; the rewire names the NEW source/sink)."""
+        target = m.proxy_target
+        inner = self._build_action(target)
+        in_by_alias = {r.alias: r for r in target.inputs}
+        out_by_alias = {r.alias: r for r in target.outputs}
+        # pre: NEW source -> the target's default input location (before it runs).
+        pre = [(r.shelf, r.key, in_by_alias[r.alias].shelf, in_by_alias[r.alias].key) for r in m.rewire_in]
+        # post: the target's default output location -> NEW sink (after it runs).
+        post = [(out_by_alias[r.alias].shelf, out_by_alias[r.alias].key, r.shelf, r.key) for r in m.rewire_out]
+        return self.factory.proxy(f"proxy:{target.token}", inner, pre=pre, post=post)
 
     def _interface_body(self, manifest: Any, binding: Any) -> Callable[[Any, Any], Any]:
         fn = binding.fn

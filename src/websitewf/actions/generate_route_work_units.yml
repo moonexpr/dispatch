@@ -1,0 +1,17 @@
+# web:generate_route_work_units — route-aware work-unit generation. Substitutes
+# github:generate_work_units (via the websitewf `replace` overlay): in addition to
+# the base purpose + work_unit, it authors a route spec (web_route_spec) describing
+# the page/route to add (framework + path), consumed downstream by the proxy and
+# the scaffold task.
+token: web:generate_route_work_units
+kind: inference
+bind: generate_route_work_units
+permission: []                  # deny-by-default
+budget: architect
+interface:
+  in:
+    job: input.job
+  out:
+    purpose: deliverables.purpose
+    work_unit: deliverables.work_unit
+    web_route_spec: deliverables.web_route_spec

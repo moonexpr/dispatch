@@ -1,11 +1,13 @@
-"""baseworkflow_bridge.py — the live-tick seam onto the BaseWorkflow engine.
+"""baseworkflow_bridge.py — the live-tick seam onto the workflow engine.
 
-Wires the dispatch live tick onto ``src/baseworkflow``. BaseWorkflow is the only
-supported workorder authoring engine: on every tick :func:`author_via_baseworkflow`
-runs a :class:`~baseworkflow.BaseWorkflow` over the Job Request the workorder
-stage just built, and folds the workflow's authored ``orchestration_script`` and
-``work_plan`` deliverables back into the Job Request dict so the downstream
-``engineer`` stage (``engineer_sdk.py``) can consume the Architect decomposition.
+Wires the dispatch live tick onto a workflow engine selected by ``DISPATCH_ENGINE``:
+``baseworkflow`` (default, ``src/baseworkflow``) or ``websitewf`` (the web-development
+overlay engine, ``src/websitewf`` — BaseWorkflow + the ``websitewf.yml`` overlay). On
+every tick :func:`author_via_workflow` runs the chosen workflow's ``run_live`` over the
+Job Request the workorder stage just built, and folds the authored
+``orchestration_script`` / ``work_plan`` / ``plan`` deliverables back into the Job
+Request dict so the downstream ``engineer`` stage (``engineer_sdk.py``) can consume the
+Architect decomposition.
 
 The historical ``DISPATCH_ENGINE=visitor`` authoring fallback (which left the Job
 Request unchanged) is DEPRECATED and DISABLED for release — it is no longer
@@ -71,14 +73,36 @@ def _job_from_request(req: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def author_via_baseworkflow(job_request_json: str) -> str:
-    """Enrich a Job Request via a BaseWorkflow run; fail-safe to the original.
+def _workflow_module(engine: str) -> Any:
+    """Import and return the workflow module for ``engine`` (``run_live`` lives on
+    it). ``websitewf`` -> ``src/websitewf/websitewf.py``; anything else ->
+    baseworkflow. Both self-manage their own ``sys.path`` for ``import bindings``."""
+    import os as _os
+
+    root = str(common.PIPELINE_ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    if engine == "websitewf":
+        from src.websitewf import websitewf as wf_mod  # noqa: WPS433
+
+        return wf_mod
+    bw_dir = _os.path.join(root, "src", "baseworkflow")
+    if bw_dir not in sys.path:
+        sys.path.insert(0, bw_dir)
+    import baseworkflow as wf_mod  # noqa: WPS433 (intentional local import)
+
+    return wf_mod
+
+
+def author_via_workflow(job_request_json: str, engine: str = "baseworkflow") -> str:
+    """Enrich a Job Request via a workflow run; fail-safe to the original.
 
     Parses ``job_request_json`` (the compact JSON the workorder stage produced),
-    runs a ``BaseWorkflow`` over it (dry-run gated by ``PIPELINE_DRY_RUN``), and
-    merges the authored ``orchestration_script``, ``work_plan`` and ``plan``
-    deliverables into the request dict. Returns the enriched request as compact
-    JSON.
+    runs the ``engine`` workflow's ``run_live`` over it (dry-run gated by
+    ``PIPELINE_DRY_RUN``), and merges the authored ``orchestration_script``,
+    ``work_plan`` and ``plan`` deliverables into the request dict. Returns the
+    enriched request as compact JSON. ``engine`` is ``baseworkflow`` (default) or
+    ``websitewf``.
 
     The ``plan`` deliverable (``decompose.plan()`` output:
     ``{"units": [...], "staffing": {...}, "criteria": [...]}``) is what unlocks
@@ -98,21 +122,13 @@ def author_via_baseworkflow(job_request_json: str) -> str:
         if not isinstance(req, dict):
             raise ValueError("job request is not a JSON object")
 
-        # Import lazily so the default (visitor) path never pays the import cost
-        # and a broken baseworkflow tree can't break module import of the tick.
-        # ``baseworkflow`` itself does ``import bindings`` (the package under
-        # src/baseworkflow/), so that dir must be on sys.path — mirror what the
-        # roundabout demo does.
-        import os as _os
-
-        _bw_dir = _os.path.join(str(common.PIPELINE_ROOT), "src", "baseworkflow")
-        if _bw_dir not in sys.path:
-            sys.path.insert(0, _bw_dir)
-        import baseworkflow as bw  # noqa: WPS433 (intentional local import)
+        # Import lazily so a broken workflow tree can't break module import of the
+        # tick, and only the selected engine pays the import cost.
+        wf_mod = _workflow_module(engine)
 
         job = _job_from_request(req)
         triage = _triage_from_request(req)
-        summary = bw.run_live(job, triage, dry_run=common.is_dry_run())
+        summary = wf_mod.run_live(job, triage, dry_run=common.is_dry_run())
         deliv = summary.get("deliverables") or {}
 
         enriched = dict(req)
@@ -131,9 +147,15 @@ def author_via_baseworkflow(job_request_json: str) -> str:
         except Exception:  # noqa: BLE001
             pass
         print(
-            f"baseworkflow-bridge: authoring failed for issue #{issue or '?'} "
+            f"workflow-bridge[{engine}]: authoring failed for issue #{issue or '?'} "
             f"({type(exc).__name__}: {exc}); returning original job request "
             f"unchanged (fail-safe)",
             file=sys.stderr,
         )
         return job_request_json
+
+
+def author_via_baseworkflow(job_request_json: str) -> str:
+    """Back-compat shim: author via the default ``baseworkflow`` engine. New callers
+    should use :func:`author_via_workflow` and pass the engine explicitly."""
+    return author_via_workflow(job_request_json, "baseworkflow")

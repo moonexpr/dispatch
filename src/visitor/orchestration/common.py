@@ -123,12 +123,13 @@ _default("CLASSIFIER_OFFLINE", "")
 # Engineer backend (live-path requirement; empty in tests/dry-run).
 _default("ENGINEER_BIN", "")
 
-# Authoring engine for the workorder stage. ``baseworkflow`` (the only supported
-# value) runs a BaseWorkflow over the visitor-built Job Request and folds the
-# authored orchestration_script / work_plan into the request. The historical
-# ``visitor`` authoring fallback is deprecated and disabled for release: it is no
-# longer selectable (an explicit ``DISPATCH_ENGINE=visitor`` is ignored with a
-# warning — see visitors.py ``visit_workorder``). Read live at call time.
+# Authoring engine for the workorder stage. ``baseworkflow`` (default) runs a
+# BaseWorkflow over the visitor-built Job Request and folds the authored
+# orchestration_script / work_plan into the request; ``websitewf`` runs the
+# web-development overlay engine (BaseWorkflow + the websitewf.yml overlay,
+# src/websitewf) instead. The historical ``visitor`` authoring fallback is
+# deprecated and disabled: any unsupported value is ignored with a warning and
+# baseworkflow runs (see visitors.py ``visit_workorder``). Read live at call time.
 _default("DISPATCH_ENGINE", "baseworkflow")
 
 LEDGER_PY = os.environ.get("LEDGER_PY", str(PIPELINE_ROOT / "src" / "visitor" / "ledger" / "ledger.py"))

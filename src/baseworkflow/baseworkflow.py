@@ -67,7 +67,29 @@ ADMIN_BUDGET = int(_BUDGETS["admin"])
 class BaseWorkflow(YamlController):
     """One work-unit cycle across spec/work/build, compiled from the YAML. The
     constructor signature is unchanged; ``job``/``triage`` are seeded onto the
-    input shelf at run time."""
+    input shelf at run time.
+
+    Subclassable into a sibling *engine* (e.g. ``WebsiteWF``): override
+    :meth:`_load_doc` (the parsed workflow — e.g. an overlay), :meth:`_build_registry`
+    (the token bind layer) and :meth:`_total_budget` (the workflow meter cap), and
+    inherit everything else BaseWorkflow builds. The base implementations return the
+    module-level baseworkflow doc / registry / budget, so base behaviour is
+    unchanged."""
+
+    WORKFLOW_PATH = WORKFLOW_PATH  # class-visible; overridden by subclasses
+
+    # -- engine hooks (override in a sibling engine) ------------------------
+    def _load_doc(self) -> Any:
+        """The parsed ``WorkflowNode`` to compile. Base: the module-level doc."""
+        return _DOC
+
+    def _build_registry(self) -> Any:
+        """The token bind layer. Base: baseworkflow's ``bindings.build_registry``."""
+        return bindings.build_registry()
+
+    def _total_budget(self) -> int:
+        """The workflow meter cap. Base: ``TOTAL_BUDGET`` from the YAML."""
+        return TOTAL_BUDGET
 
     def __init__(
         self,
@@ -78,11 +100,12 @@ class BaseWorkflow(YamlController):
         admin_spec_split: float = 0.5,
         shelves: Any = None,
     ) -> None:
-        registry = bindings.build_registry()
-        errors = validate(_DOC, registry)
+        doc = self._load_doc()
+        registry = self._build_registry()
+        errors = validate(doc, registry)
         if errors:
             raise WorkflowValidationError(errors)
-        compiled = CompileVisitor(factory, registry).visit(_DOC)
+        compiled = CompileVisitor(factory, registry).visit(doc)
         super().__init__(
             factory,
             name=compiled.name,
@@ -94,7 +117,7 @@ class BaseWorkflow(YamlController):
         self.job = dict(job)
         self.triage = dict(triage)
         self.admin_spec_split = float(admin_spec_split)
-        self._seed_static = dict(_DOC.seed or {})
+        self._seed_static = dict(doc.seed or {})
 
     # -- budget helpers (API-compat) ----------------------------------------
     @property
@@ -113,7 +136,7 @@ class BaseWorkflow(YamlController):
             shelves.input.put(key, value)
 
     def context(self, **kw: Any) -> Context:
-        kw.setdefault("meter", BudgetMeter(TOTAL_BUDGET, label="workflow"))
+        kw.setdefault("meter", BudgetMeter(self._total_budget(), label="workflow"))
         return super().context(**kw)
 
     def run(self, payload: Any = None, ctx: Optional[Context] = None, *, until: str = ""):

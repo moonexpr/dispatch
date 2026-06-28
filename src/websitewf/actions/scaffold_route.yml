@@ -1,0 +1,14 @@
+# web:scaffold_route — lays down + wires the page/route scaffold. Added into the
+# `work` phase after the engineer loop (via the websitewf `add` overlay). Reads the
+# authored route spec + the engineering result and emits a scaffold result.
+token: web:scaffold_route
+kind: inference
+bind: scaffold_route
+permission: [Read, Write, Edit, Bash]
+budget: engineering
+interface:
+  in:
+    web_route_spec: deliverables.web_route_spec
+    engineering_result: deliverables.engineering_result
+  out:
+    scaffold_result: deliverables.scaffold_result
