@@ -361,11 +361,15 @@ engine/                  the dispatch workflow engine
   actions/               action · control · governor · interpreter · shelf · statechart
   models.py · proc.py · filesys.py · runtime.py
 app/config/              baseworkflow.yml · actions/** · agents/*.yaml · models.yml · state_machine.yml
-src/architect/           work-order generation (decompose · strategy · verify · resources …)
-src/baseworkflow/        baseworkflow.py — loads app/config into a Controller · bindings/
-src/classifier/          classify.py (deterministic keyword triage)
-src/budget/              oracle · guard · reconcile (soft-cap)
-src/intake/              intake.py · pipeline.py
+src/baseworkflow/        baseworkflow.py — loads app/config into a Controller · bindings/  [WORKFLOW]
+src/tuning.py            shared tuning surface (used by both the engine and the visitor lineage)
+src/visitor/             the legacy visitor-pattern lineage (non-workflow), consolidated:  [VISITOR]
+  orchestration/         StageVisitor tick driver (visitors · stages · statemachine · pipeline …)
+  architect/             work-order generation (decompose · strategy · verify · resources …)
+  classifier/            classify.py (deterministic keyword triage)
+  budget/                oracle · guard · reconcile (soft-cap)
+  intake/                intake.py · pipeline.py · ranker.py
+  ledger/ · reports/     run-ledger · reporting
 scripts/                 claude-engineer.sh · mock-engineer.sh · smoke.sh · debug-classify.sh
 examples/                dispatch.crontab · dispatch.launchd.plist (schedulers)
 .github/workflows/       ci.yml
