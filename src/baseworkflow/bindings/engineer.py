@@ -1006,17 +1006,56 @@ def _cleanup(ctx: Context) -> None:
 # (the depth operator), returning the program's Result so the monitor loop can read
 # success/abort. The two loop predicates the monitor uses are registered here too.
 def build_execute_orchestration(factory: Any):
-    """M4 — return the raw body that deserializes the orchestration script (via the
-    factory) into a Program and runs it. Self-manages its shelf I/O; returns the
-    program's Result."""
+    """M4 — the work-phase engineering seam. Two modes, gated on ``ctx.dry_run``:
+
+    * **dry-run / mock** (``ctx.dry_run`` True — ``run_mock`` and
+      ``run_live(dry_run=True)``) — deserialize the architect's authored
+      ``orchestration_script`` into a Program and run it in-process (the depth
+      operator). No repo is cloned, no branch pushed; the nested program records
+      the decomposition's execution and writes a placeholder ``engineering_result``.
+      This is the path the e2e/mock suites pin (no real model call; depth>0).
+    * **live** (``ctx.dry_run`` False — ``dispatch --live``) — drive the real
+      ``engineer.yml`` lifecycle via :func:`run_live`: clone the target repo, cut
+      ``pipeline/issue-<n>``, run the engineer agent on the subscription,
+      judge/commit/contamination-scan, and PUSH the branch. The returned Invoice
+      (pushed branch + canonical status) becomes ``engineering_result`` so the
+      Administrator's build phase opens ONE PR from the branch. ``orchestration_script``
+      is not read here (so the WebsiteWF proxy's in-rewire is harmless live).
+
+    Returns a Result so the monitor loop predicates read success/abort.
+    """
 
     def _execute(payload: Any, ctx: Any) -> Any:
-        script = ctx.shelves.deliverables.get("orchestration_script")
+        deliv = ctx.shelves.deliverables
+        if not getattr(ctx, "dry_run", True):
+            # LIVE engineering: the engineer.yml lifecycle pushes a real branch.
+            job = dict(ctx.shelves.input.get("job") or {})
+            plan = deliv.get("plan")
+            if isinstance(plan, dict) and plan.get("units") and "plan" not in job:
+                job["plan"] = plan  # carry the architect's decomposition into the units
+            invoice = run_live(job)
+            status = str(invoice.get("status") or "failed")
+            deliv.put("invoice", invoice)
+            deliv.put("engineering_result", {
+                "ok": status == "completed",
+                "value": invoice,
+                "meta": {
+                    "status": status,
+                    "branch": invoice.get("branch"),
+                    "summary": invoice.get("summary"),
+                },
+            })
+            # The work phase ran to a verdict; the canonical status (carried in
+            # engineering_result) drives the build phase's PR / fix-ladder decision.
+            return ok(invoice)
+
+        # DRY-RUN / MOCK: run the architect's in-process orchestration program.
+        script = deliv.get("orchestration_script")
         if not script:
             raise RuntimeError("no orchestration_script on deliverables; author_orchestration must run first")
         program = factory.deserialize(script, name="engineering")
         result = program.run(payload, ctx)
-        ctx.shelves.deliverables.put(
+        deliv.put(
             "engineering_result", {"ok": result.ok, "value": result.value, "meta": result.meta}
         )
         return result

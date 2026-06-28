@@ -54,24 +54,30 @@ Dry-run is fully green end-to-end (all 4 overlay verbs, 2-agent decomposition, f
 
 ## OPEN ISSUES / NEXT STEPS (priority order)
 
-1. **Engineering phase is a NO-OP under live → no branch → PR-create fails → `partial`.**
-   Last live tick: `ok=True` in ~8s but `program:engineering [ok 0.0s]` did nothing, then
-   `consolidate-pr: PR creation failed for #1 (rc=1) — partial`, and `intake_invoice` labeled
-   issue #1 `fix-attempt-1`. Two root causes:
-   - **(a) The websitewf proxy feeds a non-script to the engineer.** The proof-vertical proxy
-     rewires `orchestration_script ← deliverables.web_route_spec` (a `{framework,path,title}`
-     dict), so `execute_orchestration` deserializes garbage → empty program → 0.0s no-op. The
-     proxy was a *mechanism demo*; for real use, remove/rework that rewire (make it additive,
-     or proxy a different edge). Test real engineering with **baseworkflow** first (no proxy).
-   - **(b) Even with a valid script, `engineer:execute_orchestration` runs the orchestration
-     agents in-process (inference) but does NOT clone/commit/push a real `pipeline/issue-<n>`
-     branch.** The Admin build phase (`admin:consolidate_pr`) does `gh pr create --head
-     pipeline/issue-<n>`, which needs that branch to exist. Wire the work phase to actually
-     produce a pushed branch (the `engineer.yml` lifecycle — clone/branch/run/judge/push —
-     exists in `src/baseworkflow/bindings/engineer.py`; `execute_orchestration` needs to invoke
-     it, or the architecture needs the engineer.yml path to run). NOTE: "engineering doesn't
-     produce PRs" is correct — engineering pushes a branch, Admin opens the PR; the gap is the
-     branch isn't pushed.
+1. **✅ RESOLVED (2026-06-27) — Engineering phase now does real work under live; full live
+   tick engineers a change + opens (and auto-merges) a PR.** Fix: `build_execute_orchestration`
+   in `src/baseworkflow/bindings/engineer.py` is now gated on `ctx.dry_run`:
+   - **live** (`dispatch --live`, `ctx.dry_run` False) → drives the real `engineer.yml`
+     lifecycle via the module's `run_live(job)` (clone → cut `pipeline/issue-<n>` → run the
+     engineer agent on the subscription → judge/commit/contamination-scan → PUSH), then writes
+     the Invoice as `engineering_result = {ok, value: invoice, meta:{status, branch, summary}}`
+     so `admin:consolidate_pr` opens ONE PR from the pushed branch and `admin:intake_invoice`
+     arms `--squash` auto-merge. The work phase enriches `job` with the architect's
+     `deliverables.plan` units before calling `run_live`.
+   - **dry-run / mock** (`run_mock`, `run_live(dry_run=True)`, `ctx.dry_run` True) → unchanged:
+     deserialize the architect's `orchestration_script` and run it in-process (the depth
+     operator; the path the e2e/mock suites pin — no real model call, depth>0).
+   - **(a) the websitewf proxy** rewires `orchestration_script ← web_route_spec`; the live
+     path **no longer reads `orchestration_script`**, so that broken in-rewire is now harmless
+     (the out-rewire still mirrors `engineering_result → web_engineering_result`). The proxy
+     remains a mechanism demo; no rework needed for the live path to work.
+   - **VERIFIED LIVE** on `ReclaimByDesign/dispatch-testrepo-c`:
+     - `baseworkflow` engine, issue #14 → **PR #16 MERGED**, issue #14 CLOSED (index.html
+       metadata + favicon.svg + og.png).
+     - `websitewf` engine, issue #13 → all 4 overlay verbs ran → **PR #17 MERGED**, issue #13
+       CLOSED (index.html responsiveness). e2e 57/58, websitewf 23/23 (no regression).
+   - Single engineer agent per tick (no runaway fan-out). NOTE: the test repo has no branch
+     protection, so intake's `--squash --auto` merges immediately.
 
 2. **Admin "request project info" early gate (DESIGNED, NOT BUILT).** Operator-approved:
    *base admin* action, *spec-phase early gate*. When the target repo is **sparse / new /
