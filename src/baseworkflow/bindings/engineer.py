@@ -90,7 +90,7 @@ except Exception:  # pragma: no cover - defensive
 
 # Seam contract version (#143): every Invoice this module builds carries it as
 # ``schema_version`` (schemas/invoice.v1.json), sourced from the seam single source
-# of truth. ``seam`` (src/orchestration/seam.py) resolves via the bindings-package /
+# of truth. ``seam`` (src/baseworkflow/subsystems/seam.py) resolves via the bindings-package /
 # engineer_sdk path bootstrap; a literal fallback keeps the standalone ENGINEER_BIN
 # path robust if the import shape differs.
 try:

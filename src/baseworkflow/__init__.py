@@ -4,7 +4,8 @@ catalog that makes each existing dispatch subsystem a composable Action.
 
 ``BaseWorkflow`` fills spec/work/build with the Architect sub-actions (A1-A8),
 the Engineering Program, and the Administrator's env/doc/store steps. ``catalog``
-adapter-wraps ``src/architect/*`` and ``src/budget/*`` as Action bodies without
+adapter-wraps the engine's own subsystems (``src/baseworkflow/subsystems/*`` —
+lifted out of the retired ``src/visitor/`` lineage) as Action bodies without
 editing those modules — they become independent, composable Actions reachable
 through the factory.
 """

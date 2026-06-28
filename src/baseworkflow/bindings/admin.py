@@ -13,12 +13,12 @@ import json
 import os
 from typing import Any, Dict
 
-import prep  # src/architect/prep.py
-import rescaffold  # src/architect/rescaffold.py — the shared #137 directive
+import prep  # src/baseworkflow/subsystems/prep.py
+import rescaffold  # src/baseworkflow/subsystems/rescaffold.py — the shared #137 directive
 
 # common carries the dry-run-aware gh wrapper + run-ledger (orchestration policy).
 # bindings/__init__ puts src/orchestration on sys.path, so this is a flat import.
-import common  # src/orchestration/common.py
+import common  # src/baseworkflow/subsystems/common.py
 from engine import proc  # engine.proc — capturing subprocess wrapper (PR-create stdout)
 
 

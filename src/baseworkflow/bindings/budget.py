@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import approval  # src/architect/approval.py
+import approval  # src/baseworkflow/subsystems/approval.py
 
 DEFAULT_ENGINEERING_BUDGET = 450_000
 

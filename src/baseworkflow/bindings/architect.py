@@ -11,11 +11,11 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
-import adversary  # src/orchestration/adversary.py — #111 cross-model weigh-in
-import characteristics  # src/architect/characteristics.py
-import decompose  # src/architect/decompose.py
-import resources  # src/architect/resources.py
-import strategy  # src/architect/strategy.py
+import adversary  # src/baseworkflow/subsystems/adversary.py — #111 cross-model weigh-in
+import characteristics  # src/baseworkflow/subsystems/characteristics.py
+import decompose  # src/baseworkflow/subsystems/decompose.py
+import resources  # src/baseworkflow/subsystems/resources.py
+import strategy  # src/baseworkflow/subsystems/strategy.py
 
 from engine.actions import AgentSpec, OrchestrationScript, PhaseSpec
 

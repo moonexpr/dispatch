@@ -11,10 +11,10 @@ The bodies are **pure** and **interface-driven**: an ordinary body is
 ``fn(inputs) -> {out_alias: value}`` (or ``fn(inputs, ctx)`` when it needs the run
 Context), with no shelf access — the engine reads each action's declared
 ``interface.in`` into ``inputs`` and writes the returned dict to ``interface.out``.
-The bodies compose the existing dispatch subsystems (``src/architect/*``,
-``src/budget/*``) as independent, clean-interface functions: this is the
-non-invasive realisation of the ``TODO(John)`` "all subsystems become independent,
-composable systems."
+The bodies compose the engine's own subsystems (``src/baseworkflow/subsystems/*``,
+lifted out of the retired ``src/visitor/`` lineage so the engine is self-contained)
+as independent, clean-interface functions: this is the non-invasive realisation of
+the ``TODO(John)`` "all subsystems become independent, composable systems."
 
 ``build_registry()`` returns a fully-populated registry; ``src/baseworkflow``
 hands it to ``engine.workflow.compile_workflow``.
@@ -26,22 +26,19 @@ import sys
 
 # Bootstrap the repo paths the subsystem modules expect (repo idiom: src is not a
 # package, subsystems import each other by bare name). Done before importing the
-# namespace modules below, which import the architect/budget subsystems.
+# namespace modules below, which import the engine's own subsystems.
 _HERE = os.path.dirname(os.path.abspath(__file__))            # src/baseworkflow/bindings
 _BW = os.path.dirname(_HERE)                                  # src/baseworkflow
 _SRC = os.path.dirname(_BW)                                   # src
 _ROOT = os.path.dirname(_SRC)                                 # repo root
-# The non-workflow subsystems (architect/budget/orchestration/ledger/…) were
-# consolidated under src/visitor/ (see src/visitor/__init__.py). The workflow
-# bind layer is unchanged; only these bootstrap paths track the relocation so the
-# bare-name sibling imports (``import common`` / ``import strategy`` / …) and the
-# package-qualified ones (``from architect import approval``,
-# ``from ledger.ledger import emit``) still resolve. ``src/tuning.py`` stays at
-# src/ (shared by both lineages), reached via _SRC.
-_VISITOR = os.path.join(_SRC, "visitor")                      # src/visitor
-for _p in (_ROOT, _SRC, _VISITOR,
-           os.path.join(_VISITOR, "architect"), os.path.join(_VISITOR, "budget"),
-           os.path.join(_VISITOR, "orchestration"), _BW):
+# The subsystems the bind layer composes (prep / rescaffold / common / seam /
+# adversary / decompose / strategy / resources / purpose / approval / …) now live
+# in src/baseworkflow/subsystems/ — lifted out of the retired src/visitor/ lineage
+# so the workflow engine owns its logic and is self-contained. They still import
+# each other by bare name, so the subsystems dir goes on sys.path. ``src/tuning.py``
+# stays at src/ (engine-wide tunables), reached via _SRC; ``engine`` via _ROOT.
+_SUBSYS = os.path.join(_BW, "subsystems")                     # src/baseworkflow/subsystems
+for _p in (_ROOT, _SRC, _SUBSYS, _BW):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

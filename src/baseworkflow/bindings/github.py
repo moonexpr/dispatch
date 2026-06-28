@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import purpose  # src/architect/purpose.py — clean, pure interface
+import purpose  # src/baseworkflow/subsystems/purpose.py — clean, pure interface
 
 
 def generate_work_units(inputs: Dict[str, Any]) -> Dict[str, Any]:

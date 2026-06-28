@@ -32,9 +32,18 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict
 
-from . import common
+# ``common`` (the dry-run-aware gh wrapper + run-ledger) was lifted out of this
+# retired visitor lineage into src/baseworkflow/subsystems/ so the workflow engine
+# owns its logic. This bridge is itself dead-lineage glue (only the deprecated
+# visitor tick + tests reach it); it resolves ``common`` from the new home via the
+# same bare-name idiom it uses for ``import baseworkflow`` below.
+_SUBSYS = str(Path(__file__).resolve().parents[3] / "src" / "baseworkflow" / "subsystems")
+if _SUBSYS not in sys.path:
+    sys.path.insert(0, _SUBSYS)
+import common  # noqa: E402  src/baseworkflow/subsystems/common.py
 
 
 def _triage_from_request(req: Dict[str, Any]) -> Dict[str, Any]:
