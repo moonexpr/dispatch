@@ -169,9 +169,27 @@ def publish(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     deployments = []
     for cmd in commands:
         provider = cmd["provider"]
-        # common.run is dry-run aware (PIPELINE_DRY_RUN): under dry-run it prints the
-        # greppable ``DRY-RUN: <tokens>`` line and returns 0 without a network call.
-        rc = common.run(*cmd["args"])
+        binary = str(cmd["args"][0])
+        # Fail-safe: deploy is the LAST build-phase step but runs BEFORE
+        # consolidate_pr, so a crash here would abort the tick before the branch is
+        # pushed. A provider's CLI is optional infra — when it is absent (not on
+        # PATH) skip that provider with a recorded skip, and when present guard the
+        # launch against a ProcError (unauthed / broken CLI) so it is a recorded
+        # failure, never an exception that breaks the pipeline. The dry-run path is
+        # unaffected (common.run records the intended command without launching).
+        if not dry and not common.have_tool(binary):
+            common.log(f"publish: {provider} CLI '{binary}' not found — skipping deploy for #{issue}")
+            deployments.append({"provider": provider, "ok": False, "returncode": None, "skipped": True})
+            continue
+        try:
+            # common.run is dry-run aware (PIPELINE_DRY_RUN): under dry-run it prints
+            # the greppable ``DRY-RUN: <tokens>`` line and returns 0 (no network call).
+            rc = common.run(*cmd["args"])
+        except proc.ProcError as exc:
+            common.log(f"publish: {provider} deploy could not launch for #{issue} ({exc})")
+            deployments.append({"provider": provider, "ok": False, "returncode": None,
+                                "error": str(exc)})
+            continue
         ok = rc == 0
         deployments.append({"provider": provider, "ok": ok, "returncode": rc})
         if not ok and not dry:
