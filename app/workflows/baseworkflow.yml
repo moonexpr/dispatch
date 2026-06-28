@@ -53,12 +53,19 @@ phases:
         until: engineering_succeeded
         abort_when: engineering_failed
         max_iterations: 3
-        body: engineer:execute_orchestration
-    # M5.5 — pre-flight the repo's CI gate against the engineer's LOCAL branch
-    # before any PR is opened. A gate failure downgrades engineering_result to
-    # `failed`, so the build phase skips the PR and runs the fix ladder instead of
-    # shipping a branch CI would reject. No-op under dry-run / in-process.
-    - admin:verify_ci
+        # The attempt: run the engineering orchestration, then pre-flight the repo's
+        # CI gate against the engineer's LOCAL branch (admin:verify_ci) — both INSIDE
+        # the monitor loop, so a CI failure is a failed attempt the loop RETRIES
+        # (verify_ci downgrades engineering_result to `failed`; `engineering_succeeded`
+        # reads that off the shelf, so `until` only fires when the gate is green). After
+        # `max_iterations` red attempts the loop stops on the cap and the build phase
+        # runs the fix ladder over the last failed result.
+        body:
+          sequence:
+            name: M5.attempt
+            steps:
+              - engineer:execute_orchestration
+              - admin:verify_ci
 
   # build — the Administrator's documentation + persistence, then the squash-
   # consolidation (open ONE PR for the engineering branch — engineers commit, the

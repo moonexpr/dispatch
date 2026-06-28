@@ -539,9 +539,15 @@ def verify_ci(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
         return {"ci": ci, "engineering_result": engineering_result}
 
     # Gate failed: downgrade so consolidate_pr skips the PR and intake_invoice drives
-    # the fix ladder rather than shipping a branch CI will reject.
+    # the fix ladder rather than shipping a branch CI will reject. This runs INSIDE
+    # the monitor loop, so the loop retries the attempt (up to max_iterations); tear
+    # down this attempt's clone and drop its now-stale path from the meta so a retry's
+    # fresh clone is the only one on disk (the next execute_orchestration replaces the
+    # result; a final failed result ships no PR, so the clone is never needed again).
     common.log(f"verify-ci: issue=#{issue} gate FAILED (rc={rc}) — downgrading completed -> failed")
+    _cleanup_clone(clone_dir)
     meta = dict(engineering_result.get("meta") or {})
+    meta.pop("clone_dir", None)
     prior = str(meta.get("summary") or "")
     meta["status"] = "failed"
     meta["summary"] = (

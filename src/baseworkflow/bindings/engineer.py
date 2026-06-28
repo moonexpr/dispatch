@@ -922,13 +922,50 @@ def build_execute_orchestration(factory: Any):
     return _execute
 
 
+# Canonical four-way Invoice status (mirrors admin._invoice_status). Used to read
+# the work-phase verdict off the deliverables shelf so the monitor loop's success
+# predicate reflects the WHOLE attempt — engineering + the admin:verify_ci CI gate
+# that runs after it inside the loop body — not just the immediate body Result.
+_CANONICAL_STATUSES = ("completed", "partial", "failed", "needs-human")
+
+
+def _engineering_status(engineering_result: Any) -> Optional[str]:
+    """Derive the canonical status of the engineering result on the shelf: an
+    explicit ``meta.status`` (verify_ci downgrades a CI failure to ``failed`` this
+    way), else ``completed``/``partial``/``failed`` from the ``{ok, value}`` shape.
+    ``None`` when no result is present yet."""
+    er = engineering_result
+    if not isinstance(er, dict):
+        return None
+    meta = er.get("meta") or {}
+    explicit = meta.get("status")
+    if isinstance(explicit, str) and explicit in _CANONICAL_STATUSES:
+        return explicit
+    if not er.get("ok", False):
+        return "failed"
+    return "completed" if er.get("value") else "partial"
+
+
 def engineering_succeeded(result: Any, ctx: Any) -> bool:
-    """The monitor's success predicate: the program completed with a truthy value."""
+    """The monitor's success predicate: the attempt is ``completed`` — engineering
+    finished AND ``admin:verify_ci``'s CI gate passed. verify_ci is the LAST step of
+    the loop body, so the verdict lives in ``deliverables.engineering_result`` (a CI
+    failure is recorded there as ``failed``); we read it off the shelf rather than the
+    immediate body Result so a red gate is NOT mistaken for success and the loop
+    retries. Falls back to the body Result when the shelf is unset (no verify_ci)."""
+    er = ctx.shelves.deliverables.get("engineering_result")
+    status = _engineering_status(er)
+    if status is not None:
+        return status == "completed"
     return result.ok and bool(result.value)
 
 
 def engineering_failed(result: Any, ctx: Any) -> bool:
-    """The monitor's abort predicate: the program errored."""
+    """The monitor's abort predicate: the attempt errored at the engine level. A CI
+    gate failure is NOT an abort — verify_ci records it as ``failed`` on the shelf and
+    the loop retries it (success is gated by ``engineering_succeeded`` + the iteration
+    cap), so this stays keyed on the immediate body Result, which verify_ci leaves
+    ``ok`` even when it downgrades the verdict."""
     return not result.ok
 
 
