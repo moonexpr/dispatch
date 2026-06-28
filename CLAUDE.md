@@ -5,9 +5,7 @@ engine of Controllers and Actions (see [`README.md`](./README.md) and
 [`docs/adr/001-hfsm-automata.md`](./docs/adr/001-hfsm-automata.md)). If you are a
 worker session invoked by it (via `/implement-task`, `/fix-ci`, or
 `/update-docs`), this contract is binding.
-Read it before acting. The full design is in
-[`HANDOFF-pipeline-v0.md`](./HANDOFF-pipeline-v0.md); the spec there wins on
-any detail this summary omits.
+Read it before acting.
 
 ## Development mode (current — solo dev)
 

@@ -7,7 +7,7 @@
 # scope->route map, the fix-ladder, dry-run semantics, and the thin wrappers
 # around `gh` / `claude` that make those engines honour PIPELINE_DRY_RUN.
 #
-# Design rules (see HANDOFF-pipeline-v0.md §2):
+# Design rules:
 #   - We do NOT build engines. These helpers only *shape calls* to existing
 #     engines (gh, claude, python).
 #   - Dry-run defaults ON (§8). Nothing mutates unless PIPELINE_DRY_RUN=0.
@@ -94,7 +94,7 @@ unset _pre_dry_run _pre_concurrency _pre_repo _pre_engineer
 # (verified against code.claude.com/docs); the documented headless form embeds
 # the args in the prompt and the workflow reads the `args` global. We default
 # to that ("prompt"); set CLAUDE_ARGS_MODE=flag to use `--args` if/when the
-# flag ships. See OPEN-QUESTIONS.md.
+# flag ships.
 : "${CLAUDE_ARGS_MODE:=prompt}"
 
 # Worktree isolation root for worker sessions (§5.1 / §5.4 step 3).

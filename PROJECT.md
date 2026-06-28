@@ -6,7 +6,7 @@ Project-specific conventions established during spec phase. Fill in each section
 
 ## Development Status
 
-**`Development Status: development`** (solo dev).
+**`Development Status: 1.0`** (released).
 
 This line is the authoritative signal for the push policy in [`CLAUDE.md`](./CLAUDE.md)
 → "Development mode": while it reads `development`, operator *and* pipeline sessions may
@@ -23,7 +23,7 @@ The pipeline is pure Python; the unit-of-work lifecycle is the YAML **BaseWorkfl
 (`app/workflows/baseworkflow.yml`, engine in `engine/workflow/`), driven through the
 orchestration tick in `src/orchestration/`. Entry points:
 
-- `python3 dispatch.py [FLAGS]` — canonical entry; defaults the Engineer to the Claude
+- `./dispatch [FLAGS]` — canonical entry; defaults the Engineer to the Claude
   Agent SDK engineer (`src/orchestration/engineer_sdk.py`).
 - `./pipeline [FLAGS]` — bash wrapper to the same `python3 -m src.orchestration`.
 
@@ -58,7 +58,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
    early with `--until` to inspect a stage's artifact:
    ```bash
    DISPATCH_ARTIFACTS_DIR=.dispatch/test-artifacts \
-     python3 dispatch.py -r OWNER/REPO --until workorder
+     ./dispatch -r OWNER/REPO --until workorder
    ```
    Artifacts (`workorder.txt`, `job-request.json`, `invoice.json`) land under
    `${DISPATCH_ARTIFACTS_DIR}/<tick-id>/`.
@@ -66,9 +66,9 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 4. **Live tick** — opts in to mutate GitHub (claim labels, open the PR) and run the real
    Engineer:
    ```bash
-   python3 dispatch.py -r OWNER/REPO --live              # one ready issue
-   python3 dispatch.py -b -r OWNER/REPO --live           # provision pipeline labels first
-   PIPELINE_CONCURRENCY=2 python3 dispatch.py -r OWNER/REPO --live
+   ./dispatch -r OWNER/REPO --live              # one ready issue
+   ./dispatch -b -r OWNER/REPO --live           # provision pipeline labels first
+   PIPELINE_CONCURRENCY=2 ./dispatch -r OWNER/REPO --live
    ```
 
 ### Flags & env

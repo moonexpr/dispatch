@@ -28,7 +28,7 @@ before running so the user is not surprised. Confirm the engine if it matters
 Run the tick in its default dry-run mode (mutating nothing):
 
 ```bash
-python3 dispatch.py --repo <owner/repo> [<issue>]
+python3 dispatch --repo <owner/repo> [<issue>]
 ```
 
 Dry-run prints the actions the pipeline *would* take. Capture that output. If the
@@ -62,7 +62,7 @@ Going live is the one consequential step, so make it explicit. Use
 On *Run live now*:
 
 ```bash
-python3 dispatch.py --repo <owner/repo> <issue> --live
+python3 dispatch --repo <owner/repo> <issue> --live
 ```
 
 Report what the live tick did and the resulting pull-request URL. Remind the user

@@ -65,11 +65,11 @@ cp pipeline.env.example pipeline.env
 python3 scripts/smoke.py
 
 # 3. Dry-run a tick — prints what it would do, mutates nothing.
-python3 dispatch.py -r owner/repo
+./dispatch -r owner/repo
 
 # 4. When ready, provision labels and go live.
 bash scripts/bootstrap-labels.sh        # requires gh authed + a live run
-python3 dispatch.py -r owner/repo --live
+./dispatch -r owner/repo --live
 ```
 
 Dry-run is the default; `--live` is the only switch that lets dispatch mutate
@@ -122,7 +122,6 @@ The wiki is the complete reference:
 - [Creating your own workflow](https://github.com/ReclaimByDesign/dispatch/wiki/Creating-Your-Own-Workflow)
 - [Unattended Linux server installation](https://github.com/ReclaimByDesign/dispatch/wiki/Unattended-Linux-Server-Installation)
 
-In-repo references: [`RUNBOOK.md`](./RUNBOOK.md) (operate it) ·
-[`CLAUDE.md`](./CLAUDE.md) (worker contract) ·
+In-repo references: [`CLAUDE.md`](./CLAUDE.md) (worker contract) ·
 [`docs/adr/`](./docs/adr) (architecture decisions) ·
 [`schemas/`](./schemas) (Job Request / Invoice).

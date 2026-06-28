@@ -5,7 +5,7 @@ This module is the single source of truth for the contract that crosses the
 architect↔worker boundary. It pins the **version** every seam artifact carries
 and exposes a thin validator over the v1 JSON schemas in ``schemas/``:
 
-  * ``schemas/work-order.v1.json``  — the full ``dispatch.py --json`` envelope.
+  * ``schemas/work-order.v1.json``  — the full ``dispatch --json`` envelope.
   * ``schemas/job-request.v1.json`` — the worker-facing strict subset/projection.
   * ``schemas/invoice.v1.json``     — the Engineer's return artifact.
 

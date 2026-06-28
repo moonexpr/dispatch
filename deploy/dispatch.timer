@@ -1,0 +1,15 @@
+# dispatch.timer — fire an unattended tick every 2 hours (12 times a day).
+#
+# OnCalendar fires at 00:00, 02:00, 04:00 … 22:00 local time = 12 ticks/day.
+# Persistent=true catches up one missed run after downtime; RandomizedDelaySec
+# jitters the start so ticks don't all land on the exact minute.
+[Unit]
+Description=dispatch unattended tick — every 2h (12x/day)
+
+[Timer]
+OnCalendar=*-*-* 00/2:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
