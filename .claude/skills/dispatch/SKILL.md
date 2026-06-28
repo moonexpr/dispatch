@@ -57,6 +57,9 @@ Cover, adapted to the domain:
 - **Inputs and unknowns** — content, data, credentials, designs, or decisions
   the work depends on; surface what is missing now rather than letting the
   pipeline guess later.
+- **Target repository** — the `owner/repo` the work lands in. Generate a sensible
+  default slug and confirm it (see *Naming the target repository* below); never
+  route without a settled target.
 
 ### Worked example: "make a Vercel website"
 
@@ -80,22 +83,51 @@ decomposition, interview:
 Only once these are answered is "make a Vercel website" specified enough to
 break down responsibly.
 
+### Naming the target repository
+
+Every routed unit lands in a GitHub repository, so the skill must settle one
+`owner/repo` target before routing — generate a name, then let the user keep or
+change it. Do **not** make the user invent a slug from nothing.
+
+1. **Generate a default slug from the agreed outcome.** Kebab-case, lowercase,
+   hyphen-separated, concise and descriptive — e.g. a personal accounting app →
+   `accounting-app`, a CTTB events site → `cttb-events`. Strip filler ("the",
+   "app", "website") only when the remainder still reads clearly. Avoid dates and
+   redundant suffixes.
+2. **Resolve the owner.** Default to the configured pipeline owner (`PIPELINE_REPO`'s
+   org, else the operator's default GitHub org); only ask when none is known.
+3. **Ask once with `AskUserQuestion`**, offering the generated `owner/repo` as the
+   recommended default, plus: **Use an existing repo** (the user names it), **Edit
+   the name**, and visibility (private default — it matches what the pipeline
+   creates). If the user gave a repo in their original ask, skip generation and
+   confirm that one.
+
+The target may be a **new** repo: the pipeline's `admin:prep` stage creates it
+(`gh repo create … --private --add-readme`) on the first live tick if it is
+missing, so a generated name that does not yet exist is fine — it does not have to
+be created by hand first. Record the settled `owner/repo` so Step 3 can play it
+back and Step 4 can hand it onward.
+
 ## Step 3 — confirm the specification
 
 Play back a short, structured summary of what was agreed — outcome, scope,
-stack, constraints, and explicit non-goals. Use one `AskUserQuestion` to
+stack, constraints, explicit non-goals, and the **target `owner/repo`**. Use one
+`AskUserQuestion` to
 confirm: **Looks right — proceed**, **Adjust** (reopen the interview), or
 **Stop**. Do not proceed on assumptions the user has not confirmed.
 
 ## Step 4 — route
 
-With a confirmed specification:
+With a confirmed specification (including the settled `owner/repo`):
 
 - **Large / multi-unit** → invoke `/dispatch:decompose`, handing it the
-  confirmed specification so it can produce small leaf issues (each via
-  `/dispatch:scope`) under a Draft epic.
+  confirmed specification *and the target `owner/repo`* so it can produce small
+  leaf issues (each via `/dispatch:scope`) under a Draft epic in that repo.
 - **Single unit** → invoke `/dispatch:scope` directly to file one well-formed
-  issue.
+  issue against the target repo.
+
+Always pass the target `owner/repo` downstream — never let scope/decompose
+re-ask or default it silently.
 
 Then offer, with `AskUserQuestion`, to preview the first issue with
 `/dispatch:tick` (dry-run) or to stop and let the user review the filed work.
