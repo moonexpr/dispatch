@@ -68,11 +68,12 @@ class ProcError(RuntimeError):
     want richer handling than the helpers provide can inspect them.
     """
 
-    def __init__(self, message, *, cmd=None, returncode=None, stderr=""):
+    def __init__(self, message, *, cmd=None, returncode=None, stderr="", timed_out=False):
         super().__init__(message)
         self.cmd = cmd
         self.returncode = returncode
         self.stderr = stderr or ""
+        self.timed_out = timed_out
 
 
 class ProcTimeout(ProcError):

@@ -1,5 +1,7 @@
-# A6 — emit the SERIALIZED Program: an orchestration script (a serialized
-# statechart fragment), one phase per plan unit, each carrying its budget share.
+# A6 — emit the SERIALIZED Program: an orchestration script (a serialized statechart
+# fragment), one phase per plan unit (agent DEFINITIONS only, no budgets). Budget
+# allocation is decoupled: budget:scope_orchestration stamps the per-phase + engineering
+# budgets afterward, so this action never touches budget scoping.
 token: architect:author_orchestration
 kind: procedure
 bind: author_orchestration
@@ -8,6 +10,5 @@ budget: architect
 interface:
   in:
     plan: deliverables.plan
-    budget: deliverables.budget
   out:
     orchestration_script: deliverables.orchestration_script

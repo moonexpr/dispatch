@@ -1,0 +1,14 @@
+# A6.5 — the budget-scoping seam. DETERMINISTIC: stamp the engineering bucket onto the
+# orchestration script and the per-unit budget onto every phase the architect authored.
+# Decoupled from architect:author_orchestration (which emits agent definitions with no
+# budgets) so agent definition and budget allocation never touch the same function.
+token: budget:scope_orchestration
+kind: procedure
+bind: scope_orchestration
+budget: architect
+interface:
+  in:
+    orchestration_script: deliverables.orchestration_script
+    budget: deliverables.budget
+  out:
+    orchestration_script: deliverables.orchestration_script

@@ -39,6 +39,7 @@ phases:
     - architect:select_bucket
     - budget:compute
     - architect:author_orchestration
+    - budget:scope_orchestration
     - architect:draft_work_plan
     - architect:submit
     - admin:prepare_env

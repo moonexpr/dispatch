@@ -2,7 +2,11 @@
 """bindings/budget — budget-arithmetic tokens (the budget: namespace).
 
 Composes the ``approval`` subsystem (the authorization handshake) into the
-``budget:compute`` body. Needs the run Context for the dry-run flag.
+``budget:compute`` body, and owns ALL budget allocation — including stamping budgets
+onto the architect's orchestration script (``budget:scope_orchestration``). This is the
+budget-scoping seam: ``architect:author_orchestration`` emits agent DEFINITIONS with no
+budgets; this namespace allocates them, so agent definition and budget allocation never
+touch the same function. Needs the run Context for the dry-run flag (compute only).
 """
 from __future__ import annotations
 
@@ -32,5 +36,21 @@ def compute_budget(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     }
 
 
+def scope_orchestration(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """A6.5 — the budget-scoping seam: stamp the engineering bucket onto the orchestration
+    script and the per-unit budget onto every phase. ``architect:author_orchestration``
+    emits the script with ``budget=0`` everywhere (agent definitions only); this reads
+    the ``budget`` deliverable (from ``budget:compute``) and fills the allocations in,
+    keeping agent definition and budget allocation in separate functions/namespaces."""
+    script = dict(inputs.get("orchestration_script") or {})
+    budget = inputs.get("budget") or {}
+    eng = int(budget.get("engineering_budget", DEFAULT_ENGINEERING_BUDGET))
+    per_unit = int(budget.get("per_unit_budget", eng // 16))
+    script["budget"] = eng
+    script["phases"] = [{**p, "budget": per_unit} for p in (script.get("phases") or [])]
+    return {"orchestration_script": script}
+
+
 def register(reg: Any) -> None:
     reg.register_action("compute_budget", compute_budget, needs_ctx=True)
+    reg.register_action("scope_orchestration", scope_orchestration)

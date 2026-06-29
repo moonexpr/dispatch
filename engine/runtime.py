@@ -86,7 +86,16 @@ class Logger:
 
     ``subsys`` is a string or a zero-arg callable resolved per line, so the tag
     can follow ``argv`` / an env override without rebuilding the logger.
+
+    ``atomic_flush`` (class variable) flushes stderr on every line so a log entry
+    lands as one atomic write — concurrent workers (agents and procs running in
+    parallel) never interleave partial lines. Set ``Logger.atomic_flush = False``
+    once, at startup, to opt back into buffered I/O.
     """
+
+    #: flush stderr on every emitted line (atomic, interleave-safe). Class-level so a
+    #: single assignment governs every Logger instance process-wide.
+    atomic_flush: bool = True
 
     def __init__(self, subsys: Union[str, Callable[[], str]]) -> None:
         self._subsys = subsys
@@ -95,13 +104,13 @@ class Logger:
         return self._subsys() if callable(self._subsys) else self._subsys
 
     def log(self, msg: str) -> None:
-        print(f"[{utc_hms()}] {self._tag()}: {msg}", file=sys.stderr)
+        print(f"[{utc_hms()}] {self._tag()}: {msg}", file=sys.stderr, flush=self.atomic_flush)
 
     def warn(self, msg: str) -> None:
-        print(f"[{utc_hms()}] {self._tag()}: WARN: {msg}", file=sys.stderr)
+        print(f"[{utc_hms()}] {self._tag()}: WARN: {msg}", file=sys.stderr, flush=self.atomic_flush)
 
     def err(self, msg: str) -> None:
-        print(f"[{utc_hms()}] {self._tag()}: ERROR: {msg}", file=sys.stderr)
+        print(f"[{utc_hms()}] {self._tag()}: ERROR: {msg}", file=sys.stderr, flush=self.atomic_flush)
 
     def die(self, msg: str, *, exc: type = Die, code: int = 1):
         """Emit an ERROR line then raise ``exc(code)`` (defaults to :class:`Die`)."""

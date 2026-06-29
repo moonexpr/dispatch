@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
-"""agent_sdk.py — a generic, agent-agnostic Claude Agent runner.
+"""agent_sdk.py — a generic, agent-agnostic Claude Agent backend.
 
 This is the *agentic, tool-using* layer, distinct from ``engine.models`` (the
 request/response LLM API abstraction). Where ``models.chat`` sends one prompt and
-reads one completion, an :class:`AgentRunner` drives a **headless agent session** —
+reads one completion, an :class:`AgentBackend` drives a **headless agent session** —
 the ``claude`` CLI or ``claude_agent_sdk`` — inside a working directory, with a tool
 set, subscription-auth isolation, and optional sub-agents (multi-agent fan-out).
 
-The runner is agent-agnostic: the engineer, the architect, or any future agent
-binds a runner via the :func:`make_runner` **factory** and feeds it an
+The backend is agent-agnostic: the engineer, the architect, or any future agent
+binds a backend via the :func:`make_backend` **factory** and feeds it an
 :class:`AgentRunSpec`. The agent-specific contract — what prompt to send, how to
 read the result (an engineer Invoice, an architect work plan, …), and the git/gh
 lifecycle around the run — stays in the caller, not here.
+
+This is the **backend** (implementation) side of a Bridge: the reusable *agent
+archetypes* (``src/agents/`` — :class:`agents.Agent` and its ``EngineerAgent`` /
+``ArchitectAgent`` / ``AdminAgent`` subclasses) are the *abstraction* side. An
+archetype owns the role identity (system prompt + tool access + default route) and
+is backend-agnostic; it reaches one of these backends through :func:`make_backend`,
+so the same agent definition runs on the ``claude`` CLI, the Agent SDK, or — via
+:class:`ChatBackend` over ``engine.models.chat`` — a single-shot OpenRouter /
+HuggingFace / litellm model. The ``system_prompt`` carried on the spec is the
+archetype's persona, sent distinctly from the per-session ``prompt``.
 
 Subscription auth: every backend copies ``os.environ`` with ``ANTHROPIC_API_KEY``
 removed, so the spawned ``claude`` uses the logged-in subscription rather than API
@@ -20,7 +30,7 @@ with ONLY the login + credential (see :func:`seed_config_auth`) so the operator'
 ``~/.claude`` (CLAUDE.md / memory / hooks) never poisons the session (issue #159).
 
 Leaf-module discipline: stdlib only at import time; ``claude_agent_sdk`` is imported
-lazily inside the SDK runner so the OFFLINE / CLI path never needs it installed.
+lazily inside the SDK backend so the OFFLINE / CLI path never needs it installed.
 """
 from __future__ import annotations
 
@@ -34,15 +44,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from engine import proc  # capturing subprocess wrapper (ProcError/ProcTimeout on failure)
 
-# TODO(John): Refine the agent_sdk and runners with a better abstraction later to
-# make this machinery less cumbersome. Today each caller (EngineerFactory's
-# _engineer_runner, ArchitectFactory's _architect_runner) hand-rolls the same
-# shape — read structured inputs off the shelf, build a prompt, make_runner().run(),
-# parse the result, write outputs, fail-safe — around this runner. A cleaner
-# abstraction (e.g. a declarative "agent action" that owns prompt-build + parse +
-# shelf I/O, with the factory only injecting the backend) would let a new agent be
-# added with a prompt + a parser instead of a bespoke factory + runner pair.
-
 # The default agent tool set (the SDK path passes this explicitly; the CLI path
 # runs under --permission-mode bypassPermissions and lets the lead use every tool).
 DEFAULT_TOOLS: List[str] = ["Read", "Edit", "Write", "Bash", "Agent", "Task"]
@@ -51,20 +52,25 @@ DEFAULT_TOOLS: List[str] = ["Read", "Edit", "Write", "Bash", "Agent", "Task"]
 @dataclass
 class AgentResult:
     """A backend-uniform result shim so callers read one shape regardless of which
-    runner produced it (mirrors the SDK ``ResultMessage`` surface)."""
+    backend produced it (mirrors the SDK ``ResultMessage`` surface)."""
 
     result: str = ""
     usage: Dict[str, Any] = field(default_factory=dict)
     total_cost_usd: Optional[float] = None
     is_error: bool = False
     num_turns: Optional[int] = None
+    # True when the session was killed by the wall-clock cap. A backend sets this (not
+    # the caller) so timeout handling lives in ONE place — the backend — and never
+    # scaffolds back up into the agents/bindings. On ``is_error`` the message is in
+    # ``result``.
+    timed_out: bool = False
 
 
 @dataclass
 class AgentRunSpec:
-    """One agent session's parameters — everything a runner needs, nothing
+    """One agent session's parameters — everything a backend needs, nothing
     agent-specific. ``subagents`` is a plain ``{name: {description, prompt, tools}}``
-    map (the SDK runner builds ``AgentDefinition`` objects from it lazily), so callers
+    map (the SDK backend builds ``AgentDefinition`` objects from it lazily), so callers
     never import ``claude_agent_sdk`` to request multi-agent fan-out."""
 
     cwd: str
@@ -74,6 +80,11 @@ class AgentRunSpec:
     allowed_tools: List[str] = field(default_factory=lambda: list(DEFAULT_TOOLS))
     permission_mode: str = "bypassPermissions"
     subagents: Optional[Dict[str, Dict[str, Any]]] = None
+    # The agent archetype's persona, sent distinctly from the per-session ``prompt``
+    # (CLI: ``--append-system-prompt``; SDK: ``ClaudeAgentOptions.system_prompt``;
+    # chat: the ``system`` message). Empty -> no custom system prompt (the caller put
+    # everything in ``prompt``, the pre-archetype behaviour).
+    system_prompt: str = ""
 
 
 def usage_tokens(usage: Optional[Dict[str, Any]]) -> Tuple[int, int]:
@@ -141,11 +152,13 @@ def seed_config_auth(cfg_dir: str) -> None:
             pass
 
 
-class AgentRunner(ABC):
-    """Strategy interface: run one agent session and return an :class:`AgentResult`.
-    Timeouts/errors propagate as exceptions (``engine.proc.ProcTimeout`` for the CLI
-    backend, ``asyncio.TimeoutError`` for the SDK backend) so the caller decides how to
-    record them — the runner never invents a verdict."""
+class AgentBackend(ABC):
+    """Strategy interface: run one agent session and ALWAYS return an
+    :class:`AgentResult` — never raise for a handled failure. A wall-clock timeout or a
+    backend error is recorded as ``is_error=True`` (``timed_out=True`` for the former)
+    with the message in ``result``, so timeout/error handling lives HERE, in the
+    backend, and never scaffolds up into the agents or bindings (failures-as-data). Only
+    genuinely unexpected exceptions (programmer error) propagate, to surface as bugs."""
 
     name: str = "agent"
 
@@ -153,8 +166,17 @@ class AgentRunner(ABC):
     def run(self, spec: AgentRunSpec) -> AgentResult:  # pragma: no cover - interface
         ...
 
+    @staticmethod
+    def _timeout_result(seconds: int) -> AgentResult:
+        return AgentResult(is_error=True, timed_out=True,
+                           result=f"agent session timed out after {seconds}s")
 
-class CliAgentRunner(AgentRunner):
+    @staticmethod
+    def _error_result(exc: Exception) -> AgentResult:
+        return AgentResult(is_error=True, result=f"agent backend error: {exc}")
+
+
+class CliBackend(AgentBackend):
     """Backend via the ``claude`` CLI headless on the subscription. Used because
     ``claude_agent_sdk`` 0.2.x hangs under this env (CLI 2.1.x / Python 3.14: anyio
     stream stalls after the system-init messages) while the CLI runs fine. The lead
@@ -183,11 +205,19 @@ class CliAgentRunner(AgentRunner):
             "--model", spec.model,
             "--add-dir", spec.cwd,
         ]
+        if spec.system_prompt:
+            # Append (not replace) so the archetype persona layers onto the CLI's
+            # default system prompt rather than discarding it.
+            cmd += ["--append-system-prompt", spec.system_prompt]
         try:
             cp = proc.run(
                 cmd, cwd=spec.cwd, env=sub_env, capture=True,
                 timeout=spec.timeout,
             )
+        except proc.ProcTimeout:
+            return self._timeout_result(spec.timeout)
+        except proc.ProcError as exc:  # launch failure (CLI missing, etc.) — handled as data
+            return self._error_result(exc)
         finally:
             _shutil.rmtree(iso_cfg, ignore_errors=True)
         res = AgentResult()
@@ -208,7 +238,7 @@ class CliAgentRunner(AgentRunner):
         return res
 
 
-class SdkAgentRunner(AgentRunner):
+class SdkBackend(AgentBackend):
     """Backend via ``claude_agent_sdk.query`` over asyncio. Subscription auth:
     ``options.env`` is a copy of ``os.environ`` with ``ANTHROPIC_API_KEY`` removed so
     the spawned CLI uses the logged-in subscription, not API billing. ``subagents``
@@ -235,6 +265,8 @@ class SdkAgentRunner(AgentRunner):
             allowed_tools=list(spec.allowed_tools),
             env=sub_env,
         )
+        if spec.system_prompt:
+            opts_kwargs["system_prompt"] = spec.system_prompt
         if spec.subagents:
             opts_kwargs["agents"] = {
                 name: AgentDefinition(**cfg) for name, cfg in spec.subagents.items()
@@ -248,7 +280,12 @@ class SdkAgentRunner(AgentRunner):
                     result = message
             return result
 
-        rm = asyncio.run(asyncio.wait_for(_drive(), timeout=spec.timeout))
+        try:
+            rm = asyncio.run(asyncio.wait_for(_drive(), timeout=spec.timeout))
+        except asyncio.TimeoutError:
+            return self._timeout_result(spec.timeout)
+        except Exception as exc:  # noqa: BLE001 — SDK/transport errors handled as data
+            return self._error_result(exc)
         if rm is None:
             return AgentResult()
         usage = getattr(rm, "usage", None)
@@ -261,18 +298,47 @@ class SdkAgentRunner(AgentRunner):
         )
 
 
-# The factory registry: backend name -> runner class. Extend by registering a new
-# AgentRunner subclass here; every agent reaches it through make_runner().
-_RUNNERS: Dict[str, type] = {
-    CliAgentRunner.name: CliAgentRunner,
-    SdkAgentRunner.name: SdkAgentRunner,
+class ChatBackend(AgentBackend):
+    """Backend via ``engine.models.chat`` — a SINGLE-SHOT, non-tool-using completion.
+    This is how a backend-agnostic agent archetype reaches a plain chat model
+    (OpenRouter / HuggingFace / litellm / the Anthropic API), selected by
+    ``engine.models`` from the resolved model id / ``MODELS_BACKEND``. There is no
+    agent session and no tool use, so ``allowed_tools``/``subagents``/``cwd`` are
+    ignored; it suits the single-shot agents (planner, test author) whose whole job
+    is to emit one structured (usually JSON) answer. The archetype's
+    ``system_prompt`` becomes the ``system`` message; ``prompt`` the ``user``
+    message. A transport error is recorded as ``is_error`` (failures-as-data), like the
+    other backends — never raised."""
+
+    name = "chat"
+
+    def run(self, spec: AgentRunSpec) -> AgentResult:
+        from engine import models  # local import: keep stdlib-only at module import
+
+        messages: List[Dict[str, str]] = []
+        if spec.system_prompt:
+            messages.append({"role": "system", "content": spec.system_prompt})
+        messages.append({"role": "user", "content": spec.prompt})
+        try:
+            text = models.chat(spec.model, messages)
+        except Exception as exc:  # noqa: BLE001 — transport/model errors handled as data
+            return self._error_result(exc)
+        return AgentResult(result=str(text or "").strip())
+
+
+# The factory registry: backend name -> backend class. Extend by registering a new
+# AgentBackend subclass here; every agent reaches it through make_backend().
+_BACKENDS: Dict[str, type] = {
+    CliBackend.name: CliBackend,
+    SdkBackend.name: SdkBackend,
+    ChatBackend.name: ChatBackend,
 }
 
 
-def make_runner(backend: Optional[str] = None) -> AgentRunner:
-    """Factory: return the :class:`AgentRunner` for ``backend`` (``"cli"`` |
+def make_backend(backend: Optional[str] = None) -> AgentBackend:
+    """Factory: return the :class:`AgentBackend` for ``backend`` (``"cli"`` |
     ``"sdk"``). Resolution: explicit arg -> ``$AGENT_BACKEND`` -> ``"cli"`` (the
     default, since the SDK hangs under the current env). Unknown names fall back to
-    the CLI runner."""
+    the CLI backend."""
     name = (backend or os.environ.get("AGENT_BACKEND") or "cli").strip().lower()
-    return _RUNNERS.get(name, CliAgentRunner)()
+    return _BACKENDS.get(name, CliBackend)()
