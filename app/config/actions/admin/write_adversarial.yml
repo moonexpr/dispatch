@@ -1,12 +1,22 @@
-# M2 — author adversarial tests against the work plan's acceptance criteria. A
-# judgment, so an inference; mock yields a deterministic test outline per criterion.
+# M2 — author adversarial tests against the work plan's acceptance criteria.
+#
+# An INFERENCE (not a procedure): the deterministic `bind: write_adversarial` body is
+# the dry-run/mock ORACLE and the live fail-safe baseline; under ArchitectFactory the
+# LIVE runner drives a real Claude agent to author rigorous, failure-SEEKING tests for
+# THIS unit — required config/env present (a missing secret must fail the build, not
+# 500 at runtime), auth/registration flows that do not server-error, primary routes
+# that never return 5xx, and negative/edge cases — rather than the happy-path echo of
+# the acceptance criteria a procedure produced. Emitted as JSON (fmt). Issue text is
+# carried as untrusted DATA. Any model/parse failure falls back to the baseline.
 token: admin:write_adversarial
-kind: procedure
+kind: inference
+fmt: json
 bind: write_adversarial
 permission: []
 budget: admin
 interface:
   in:
     work_plan: deliverables.work_plan
+    job: input.job
   out:
     adversarial_tests: deliverables.adversarial_tests

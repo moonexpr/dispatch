@@ -355,19 +355,40 @@ def _architect_runner(spec: Any, payload: Any, ctx: Any) -> Any:
     return Output(work_plan, meta={"model": model, "source": "architect-agent"})
 
 
+# Live inference dispatch: bind name -> live runner. ArchitectFactory routes each
+# kind:inference action to its runner under LIVE; dry-run / mock keep the compiled-in
+# deterministic oracle. Other bindings modules register their own runners here at
+# register() time (e.g. bindings.admin adds "write_adversarial"), so a second
+# inference no longer collides with the architect's.
+LIVE_INFERENCE_RUNNERS: Dict[str, Any] = {"draft_work_plan": _architect_runner}
+
+
 class ArchitectFactory(RealActionFactory):
     """Production factory for the baseworkflow family: a RealActionFactory in every
-    respect except the one model-driven step. Under dry-run it defers to the parent
-    (the draft_work_plan body runs as the compiled-in oracle, so offline + CI are
-    unchanged); LIVE, the sole baseworkflow inference — architect:draft_work_plan —
-    is driven by the architect SDK agent. (engineer:run lives in engineer.yml under
-    EngineerFactory; engineer:execute_orchestration is a procedure — neither reaches
-    this runner.)"""
+    respect except the model-driven steps. Under dry-run it defers to the parent (each
+    inference's body runs as the compiled-in oracle, so offline + CI are unchanged);
+    LIVE, each ``kind: inference`` action is routed by bind name through
+    ``LIVE_INFERENCE_RUNNERS`` — architect:draft_work_plan to the architect SDK agent,
+    admin:write_adversarial to the adversary agent, etc. (engineer:run lives in
+    engineer.yml under EngineerFactory; engineer:execute_orchestration is a procedure —
+    neither reaches this runner.)"""
+
+    def inference(self, name: Any, spec: Any, *, adapter: Any = None) -> Any:
+        # Stash the action token on the spec so _inference_runner can dispatch by bind.
+        try:
+            setattr(spec, "live_token", name)
+        except Exception:  # noqa: BLE001 — dispatch falls back to the parent runner
+            pass
+        return super().inference(name, spec, adapter=adapter)
 
     def _inference_runner(self, spec: Any, payload: Any, ctx: Any) -> Any:
         if getattr(ctx, "dry_run", True):
             return super()._inference_runner(spec, payload, ctx)
-        return _architect_runner(spec, payload, ctx)
+        bind = str(getattr(spec, "live_token", "")).split(":")[-1]
+        runner = LIVE_INFERENCE_RUNNERS.get(bind)
+        if runner is not None:
+            return runner(spec, payload, ctx)
+        return super()._inference_runner(spec, payload, ctx)
 
 
 def register(reg: Any) -> None:
