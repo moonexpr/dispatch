@@ -98,17 +98,31 @@ def author_orchestration(inputs: Dict[str, Any]) -> Dict[str, Any]:
         uid = str(u.get("id", f"u{len(phases)+1}"))
         deps = tuple(str(d) for d in (u.get("depends_on", []) or []))
         spec = u.get("specialization") or u.get("domain") or "general software"
-        route = u.get("route")
-        route_txt = f" Target route: {route}." if route else ""
-        prompt = (
-            f"Implement unit {uid} ({spec}). Deliverable: {u.get('deliverable', 'see acceptance criteria')}.{route_txt} "
-            f"Files: {', '.join(u.get('files', []) or []) or 'n/a'}. "
-            "All context is inlined; assume zero shared state with sibling agents."
-        )
+        if u.get("phase") == "research":
+            # A research unit runs its /deep-research or /research skill with web
+            # tools; it gathers findings rather than editing the tree.
+            skill = u.get("skill") or "/research"
+            prompt = (
+                f"Research unit {uid} ({spec}). Run {skill}. "
+                f"Deliverable: {u.get('deliverable', 'resolve the open questions')}. "
+                "Record findings + decisions for the implementation units; do not edit source."
+            )
+            agent = AgentSpec(description=f"researcher:{skill}", prompt=prompt,
+                              tools=("Read", "WebSearch", "WebFetch", "Bash"), model="gen-frontier")
+        else:
+            route = u.get("route")
+            route_txt = f" Target route: {route}." if route else ""
+            prompt = (
+                f"Implement unit {uid} ({spec}). Deliverable: {u.get('deliverable', 'see acceptance criteria')}.{route_txt} "
+                f"Files: {', '.join(u.get('files', []) or []) or 'n/a'}. "
+                "All context is inlined; assume zero shared state with sibling agents."
+            )
+            agent = AgentSpec(description=f"engineer:{spec}", prompt=prompt,
+                              tools=("Read", "Edit", "Bash"), model="gen-default")
         phases.append(
             PhaseSpec(
                 id=uid,
-                agent=AgentSpec(description=f"engineer:{spec}", prompt=prompt, tools=("Read", "Edit", "Bash"), model="gen-default"),
+                agent=agent,
                 depends_on=deps,
                 parallel=(uid in parallel_ids and not deps) or (uid in multi_wave_ids),
                 budget=per_unit,

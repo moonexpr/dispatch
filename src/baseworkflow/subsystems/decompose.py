@@ -52,6 +52,16 @@ _BACKEND_HINT = re.compile(
 _FEATURE_HEADINGS = [str(h).lower() for h in (_FEAT.get("headings") or [])]
 _BUILD_SIGNALS = [str(s).lower() for s in (_FEAT.get("build_signals") or [])]
 
+# Research-slice knobs (generation.decompose.research). When an issue has an
+# information gap, the architect schedules a RESEARCH unit (deep /deep-research or
+# surface /research) ahead of implementation; the implementation units depend on it.
+_RES = tuning.DECOMPOSE_RESEARCH
+_RTPL = dict(_RES.get("templates") or {})
+_RESEARCH_LABELS = [str(s).lower() for s in (_RES.get("labels") or [])]
+_DEEP_RESEARCH_LABELS = [str(s).lower() for s in (_RES.get("deep_labels") or [])]
+_RESEARCH_HEADINGS = [str(h).lower() for h in (_RES.get("headings") or [])]
+_DEEP_SCOPES = [str(s).lower() for s in (_RES.get("deep_scopes") or [])]
+
 
 def _spec_for(path: str):
     """Map a file/area to a (function, domain) specialization.
@@ -243,6 +253,36 @@ def _detect_features(job: Dict[str, Any], discovered: List[str]) -> List[Dict[st
     return feats[:cap]
 
 
+def _detect_research(job: Dict[str, Any]) -> Dict[str, str]:
+    """Return ``{depth, skill, focus}`` when the issue carries an information gap
+    the architect should resolve before building — a research label or a
+    Research / Open-questions / Unknowns section. ``{}`` otherwise (no research
+    unit; existing behaviour). Depth escalates to the ``/deep-research`` harness on
+    a deep label or an l/xl scope, else a surface ``/research`` pass. Issue text is
+    parsed as untrusted data only."""
+    labels = _label_names(job)
+    body = job.get("body") or ""
+    scope = str(job.get("scope") or "").lower()
+
+    focus_items: List[str] = []
+    for h in _RESEARCH_HEADINGS:
+        pat = re.compile(r"^\s*(?:#{1,6}\s*|\*\*\s*)?" + re.escape(h) + r"\b", re.IGNORECASE)
+        focus_items = _capture_under(body, pat, 6)
+        if focus_items:
+            break
+
+    has_label = any(any(sig in name for name in labels) for sig in _RESEARCH_LABELS)
+    if not has_label and not focus_items:
+        return {}
+
+    deep = (any(any(sig in name for name in labels) for sig in _DEEP_RESEARCH_LABELS)
+            or scope in _DEEP_SCOPES)
+    skill = _RES.get("deep_skill", "/deep-research") if deep else _RES.get("surface_skill", "/research")
+    focus = "; ".join(focus_items[:4]) if focus_items else \
+        "the unfamiliar libraries, APIs, and concepts the issue references"
+    return {"depth": "deep" if deep else "surface", "skill": str(skill), "focus": focus[:200]}
+
+
 def _waves(units: List[Dict[str, Any]]) -> List[List[str]]:
     """Topological waves over ``depends_on``: each wave is the set of units whose
     dependencies are satisfied by earlier waves — a parallel wave of team agents.
@@ -269,8 +309,26 @@ def plan(job: Dict[str, Any], discovered: List[str],
     cx = _complexity(job)
 
     # Units are assembled WITHOUT ids, then lettered A,B,C… in emission order at
-    # the end — so a prepended diagnosis/foundation phase keeps ids contiguous.
+    # the end — so a prepended research/diagnosis/foundation phase keeps ids
+    # contiguous. Cross-unit dependencies are resolved by phase after lettering.
     units: List[Dict[str, Any]] = []
+
+    # Research slice: scheduled FIRST when the issue has an information gap, so the
+    # /deep-research (deep) or /research (surface) findings ground every later unit.
+    research = _detect_research(job)
+    if research:
+        units.append({
+            "id": "",
+            "deliverable": _RTPL["deliverable"].format(
+                issue=issue, focus=research["focus"], skill=research["skill"]),
+            "files": [],
+            "specialization": _spec("researcher", "research / investigation"),
+            "depends_on": [],
+            "phase": "research",
+            "acceptance": _RTPL["acceptance"].format(skill=research["skill"]),
+            "skill": research["skill"],
+            "depth": research["depth"],
+        })
 
     features = _detect_features(job, discovered)
     if features:
@@ -299,7 +357,7 @@ def plan(job: Dict[str, Any], discovered: List[str],
                     feature=feat["name"], route=route_txt, issue=issue),
                 "files": [],
                 "specialization": _spec(fn, domain),
-                "depends_on": ["A"],     # the foundation is emitted first -> id "A"
+                "depends_on": [],        # resolved to the foundation id after lettering
                 "phase": "feature",
                 "acceptance": _FTPL["feature_acceptance"].format(feature=feat["name"], gate=gate),
             }
@@ -357,9 +415,34 @@ def plan(job: Dict[str, Any], discovered: List[str],
                 "acceptance": _TPL["slice_acceptance"].format(gate=gate),
             })
 
-    # Letter the impl/diagnosis/foundation/feature units now so verify can depend on them.
+    # A research unit added ahead of the build can push the plan past swarm_max;
+    # trim trailing implementation/feature units to fit, never the research,
+    # foundation, or verify units. (No research -> the swarm cap below is the only
+    # gate, so existing capping behaviour is unchanged.)
+    if research and len(units) + 1 > _SWARM_MAX:
+        head = [u for u in units if u["phase"] in ("research", "foundation")]
+        body_units = [u for u in units if u["phase"] not in ("research", "foundation")]
+        keep = max(1, _SWARM_MAX - 1 - len(head))
+        units = head + body_units[:keep]
+
+    # Letter the research/diagnosis/foundation/feature units now so verify can depend on them.
     for i, u in enumerate(units):
         u["id"] = chr(ord("A") + i)
+
+    # Resolve cross-unit dependencies by phase now that ids are assigned: the
+    # research unit gates the build (implementation depends on its findings); the
+    # foundation gates the features. With no research/foundation this is a no-op
+    # (deps stay empty), so non-research and slice plans are byte-identical.
+    research_id = next((u["id"] for u in units if u["phase"] == "research"), None)
+    foundation_id = next((u["id"] for u in units if u["phase"] == "foundation"), None)
+    for u in units:
+        if u["phase"] == "research":
+            u["depends_on"] = []
+        elif u["phase"] == "feature":
+            u["depends_on"] = [foundation_id] if foundation_id else (
+                [research_id] if research_id else [])
+        elif u["phase"] in ("foundation", "implement", "diagnosis"):
+            u["depends_on"] = [research_id] if research_id else []
 
     # Always-present integration + verification unit; depends on every prior unit.
     impl_ids = [u["id"] for u in units]

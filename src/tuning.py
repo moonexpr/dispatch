@@ -193,6 +193,37 @@ DEFAULTS: Dict[str, Any] = {
                         "The \"{feature}\" feature works end-to-end and {gate} stays green."),
                 },
             },
+            # Research slice. When an issue carries an information gap — a research
+            # label, or a Research/Open-questions/Unknowns section — the architect
+            # schedules a RESEARCH unit FIRST that every implementation unit depends
+            # on, so findings ground the build. Depth picks the skill: a deep signal
+            # (deep label, or l/xl scope) runs the `/deep-research` harness; otherwise
+            # a surface-level `/research` pass. No signal -> no research unit (existing
+            # behaviour).
+            "research": {
+                # Labels (substring, lowercased) that request a research slice.
+                "labels": ["research", "needs-research", "spike", "investigate",
+                           "investigation", "rfc", "unknown", "discovery"],
+                # Labels that escalate to the deep-research harness.
+                "deep_labels": ["deep-research", "deep-dive", "unfamiliar", "novel",
+                                "greenfield", "architecture"],
+                # Body headings whose section enumerates the open questions to research.
+                "headings": ["research", "open questions", "unknowns", "questions",
+                             "investigation", "unknowns / risks", "risks"],
+                # Triage scopes that escalate to deep research even without a deep label.
+                "deep_scopes": ["l", "xl"],
+                # The skills the research unit dispatches to (surfaced in its prompt).
+                "deep_skill": "/deep-research",
+                "surface_skill": "/research",
+                "templates": {
+                    "deliverable": (
+                        "Research {focus} for #{issue} via {skill}: gather sources, resolve the open "
+                        "questions, and record the findings + decisions the implementation units rely on."),
+                    "acceptance": (
+                        "The open questions are answered with cited sources and a concrete, recorded "
+                        "decision the implementation units can build on."),
+                },
+            },
             "specialization_rules": [
                 {"any": [{"basename_contains": "smoke"}, {"path_contains": "test"},
                          {"path_contains": "/fixtures/"}],
@@ -478,6 +509,9 @@ DECOMPOSE_TEMPLATES: Dict[str, str] = dict(_GEN["decompose"]["templates"])
 # Feature decomposition knobs — read by decompose.plan to turn a greenfield
 # multi-feature build into a foundation-first sequence of parallel feature units.
 DECOMPOSE_FEATURES: Dict[str, Any] = dict(_GEN["decompose"]["features"])
+# Research-slice knobs — read by decompose.plan to schedule a /deep-research or
+# surface /research unit ahead of implementation when the issue has a gap.
+DECOMPOSE_RESEARCH: Dict[str, Any] = dict(_GEN["decompose"]["research"])
 SPEC_RULES: List[Dict[str, Any]] = list(_GEN["decompose"]["specialization_rules"])
 RES_CAPS: Dict[str, int] = {k: int(v) for k, v in _GEN["resources"].items()}
 # Conversation + history embedding caps (#132) — read by src/intake/intake.py

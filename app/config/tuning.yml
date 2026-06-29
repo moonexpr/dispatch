@@ -230,6 +230,46 @@ generation:
         feature_deliverable: 'Build the "{feature}" feature{route} for #{issue} end-to-end per the
           acceptance criteria.'
         feature_acceptance: 'The "{feature}" feature works end-to-end and {gate} stays green.'
+    research:
+      _doc: 'Research slice. When an issue carries an information gap (a research label, or a
+        Research/Open-questions/Unknowns section), decompose.plan schedules a RESEARCH unit FIRST that
+        every implementation unit depends on, so findings ground the build. Depth picks the skill: a
+        deep signal (deep_labels, or a deep_scopes scope) dispatches the /deep-research harness;
+        otherwise a surface /research pass. No signal -> no research unit (existing behaviour). Knobs
+        for later refinement.'
+      labels:
+      - research
+      - needs-research
+      - spike
+      - investigate
+      - investigation
+      - rfc
+      - unknown
+      - discovery
+      deep_labels:
+      - deep-research
+      - deep-dive
+      - unfamiliar
+      - novel
+      - greenfield
+      - architecture
+      headings:
+      - research
+      - open questions
+      - unknowns
+      - questions
+      - investigation
+      - risks
+      deep_scopes:
+      - l
+      - xl
+      deep_skill: /deep-research
+      surface_skill: /research
+      templates:
+        deliverable: 'Research {focus} for #{issue} via {skill}: gather sources, resolve the open
+          questions, and record the findings + decisions the implementation units rely on.'
+        acceptance: 'The open questions are answered with cited sources and a concrete, recorded
+          decision the implementation units can build on.'
     specialization_rules:
     - any:
       - basename_contains: smoke
