@@ -37,6 +37,8 @@ from typing import Any, Dict
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))  # src/ — for tuning
+# repo root carries the `engine` package (for the lazy `from engine import proc`).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(_HERE))))
 import tuning  # noqa: E402
 
 _FRACTION_DP = 4
@@ -102,17 +104,17 @@ def _from_fixture(path: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _from_claude_monitor(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Live path: consume claude-monitor for the global usage window. subprocess
-    is imported lazily so the fixture path never touches it and module import is
-    exec-free. Not exercised in smoke (no monitor there)."""
-    import subprocess  # noqa: E402  (lazy: live path only — D2 reuse, not reimplement)
+    """Live path: consume claude-monitor for the global usage window. The proc
+    wrapper is imported lazily so the fixture path never touches it and module
+    import stays light. Not exercised in smoke (no monitor there)."""
+    from engine import proc  # noqa: E402  (lazy: live path only)
 
     window = cfg.get("window", {}) or {}
     plan = str(window.get("plan_tier") or "custom")
     limit = _resolve_limit(plan, cfg)
-    out = subprocess.run(
+    out = proc.run(
         [os.environ.get("CLAUDE_MONITOR_BIN", "claude-monitor"), "--json"],
-        capture_output=True, text=True, check=True,
+        check=True,
     ).stdout
     data = json.loads(out)
     # claude-monitor is the authority for the live used-token tally and window

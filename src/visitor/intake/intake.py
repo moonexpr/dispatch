@@ -59,10 +59,15 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+
+# Make `from engine import proc` resolve whether this module is imported via the
+# package or run as a script: the repo root (4 levels up) carries `engine/`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))))))
+from engine import proc  # noqa: E402  (capturing subprocess wrapper)
 
 
 # ---------------------------------------------------------------------------
@@ -101,15 +106,10 @@ def _gh(*args: str, gh_bin: str = "gh") -> Any:
     """Run `gh <args>` and return parsed JSON. Raises RuntimeError on failure."""
     cmd = [gh_bin, *args]
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except subprocess.CalledProcessError as exc:
+        result = proc.run(cmd, check=True)
+    except proc.ProcError as exc:
         raise RuntimeError(
-            f"gh command failed ({exc.returncode}): {' '.join(cmd)}\n{exc.stderr.strip()}"
+            f"gh command failed ({exc.returncode}): {' '.join(cmd)}\n{(exc.stderr or '').strip()}"
         ) from exc
     return json.loads(result.stdout)
 

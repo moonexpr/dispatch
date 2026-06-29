@@ -29,8 +29,9 @@ from __future__ import annotations
 import base64
 import json
 import os
-import subprocess
 from typing import Dict, Optional
+
+from engine import proc  # capturing subprocess wrapper (ProcError on launch/non-zero)
 
 GENERIC = "run the repository's test/build gate and make it green"
 
@@ -82,12 +83,8 @@ def _detect_local(repo_root: str) -> Optional[str]:
 
 def _gh_contents(repo_slug: str, path: str, gh_bin: str) -> Optional[str]:
     """Decoded text of ``repo_slug:path`` via ``gh api``, or None if absent."""
-    try:
-        out = subprocess.run(
-            [gh_bin, "api", f"repos/{repo_slug}/contents/{path}", "--jq", ".content"],
-            capture_output=True, text=True, check=True).stdout.strip()
-    except (subprocess.CalledProcessError, OSError):
-        return None
+    out = proc.run_text(
+        [gh_bin, "api", f"repos/{repo_slug}/contents/{path}", "--jq", ".content"])
     if not out:
         return None
     try:

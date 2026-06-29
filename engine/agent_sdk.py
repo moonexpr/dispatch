@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+
+from engine import proc  # capturing subprocess wrapper (ProcError/ProcTimeout on failure)
 
 # TODO(John): Refine the agent_sdk and runners with a better abstraction later to
 # make this machinery less cumbersome. Today each caller (EngineerFactory's
@@ -128,12 +129,12 @@ def seed_config_auth(cfg_dir: str) -> None:
             pass
     if sys.platform == "darwin":  # credential lives in the login keychain, not a file
         try:
-            cred = subprocess.run(
+            cred = proc.run(
                 ["security", "find-generic-password", "-s", "Claude Code-credentials",
                  "-a", os.environ.get("USER", ""), "-w"],
-                capture_output=True, text=True, timeout=10,
+                capture=True, timeout=10,
             )
-            if cred.returncode == 0 and cred.stdout.strip():
+            if cred.ok and cred.stdout.strip():
                 with open(dst_cred, "w", encoding="utf-8") as fh:
                     fh.write(cred.stdout)
         except Exception:  # noqa: BLE001 — best-effort; auth failure surfaces downstream
@@ -142,7 +143,7 @@ def seed_config_auth(cfg_dir: str) -> None:
 
 class AgentRunner(ABC):
     """Strategy interface: run one agent session and return an :class:`AgentResult`.
-    Timeouts/errors propagate as exceptions (``subprocess.TimeoutExpired`` for the CLI
+    Timeouts/errors propagate as exceptions (``engine.proc.ProcTimeout`` for the CLI
     backend, ``asyncio.TimeoutError`` for the SDK backend) so the caller decides how to
     record them — the runner never invents a verdict."""
 
@@ -183,15 +184,15 @@ class CliAgentRunner(AgentRunner):
             "--add-dir", spec.cwd,
         ]
         try:
-            proc = subprocess.run(
-                cmd, cwd=spec.cwd, env=sub_env, capture_output=True, text=True,
+            cp = proc.run(
+                cmd, cwd=spec.cwd, env=sub_env, capture=True,
                 timeout=spec.timeout,
             )
         finally:
             _shutil.rmtree(iso_cfg, ignore_errors=True)
         res = AgentResult()
-        res.is_error = proc.returncode != 0
-        out = (proc.stdout or "").strip()
+        res.is_error = not cp.ok
+        out = (cp.stdout or "").strip()
         try:
             obj = json.loads(out)
             if isinstance(obj, dict):
@@ -203,7 +204,7 @@ class CliAgentRunner(AgentRunner):
         except (ValueError, TypeError):
             res.result = out  # non-JSON stdout: treat as the result text
         if res.is_error and not res.result:
-            res.result = (proc.stderr or "").strip()[:500]
+            res.result = (cp.stderr or "").strip()[:500]
         return res
 
 

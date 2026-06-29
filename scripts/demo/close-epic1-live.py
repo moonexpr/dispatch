@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 
 REPO = "ReclaimByDesign/dispatch-testrepo-a"
@@ -30,10 +29,12 @@ EPIC = 1
 CHILDREN = [4, 5]
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (scripts/demo/..)
 ENGINEER = os.path.join(ROOT, "src", "orchestration", "engineer_sdk.py")
+sys.path.insert(0, ROOT)  # repo root carries the `engine` package
+from engine import proc  # noqa: E402  (capturing subprocess wrapper)
 
 
 def sh(*args, **kw):
-    return subprocess.run(args, capture_output=True, text=True, **kw)
+    return proc.run(list(args), capture=True, **kw)
 
 
 def gh_state(num: int) -> str:
@@ -67,15 +68,15 @@ def run_child(num: int) -> dict:
     env["PIPELINE_REPO"] = REPO
 
     log(f"#{num}: running Engineer LIVE ({meta.get('title','')!r})")
-    proc = subprocess.run(
+    cp = proc.run(
         [sys.executable, ENGINEER], input=json.dumps(job),
-        capture_output=True, text=True, env=env, cwd=ROOT,
+        env=env, cwd=ROOT,
     )
     inv = {}
     try:
-        inv = json.loads((proc.stdout or "").strip().splitlines()[-1])
+        inv = json.loads((cp.stdout or "").strip().splitlines()[-1])
     except Exception:
-        log(f"#{num}: engineer produced no parseable Invoice; stderr tail: {(proc.stderr or '')[-400:]}")
+        log(f"#{num}: engineer produced no parseable Invoice; stderr tail: {(cp.stderr or '')[-400:]}")
         return {"status": "failed", "issue": num}
     log(f"#{num}: invoice status={inv.get('status')} pr={inv.get('pr_number')} scope={inv.get('scope_actual')}")
 

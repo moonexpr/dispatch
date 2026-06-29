@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,14 +22,15 @@ _ROOT = os.path.dirname(os.path.dirname(_HERE))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "src", "baseworkflow"))
 
+from engine import proc  # noqa: E402  (capturing subprocess wrapper)
 import baseworkflow as bw  # noqa: E402  (the YAML-driven thin loader)
 
 
 def _fetch_issue(repo: str, num: int) -> dict:
-    out = subprocess.check_output(
+    out = proc.run(
         ["gh", "issue", "view", str(num), "-R", repo, "--json", "number,title,body,labels"],
-        text=True,
-    )
+        check=True,
+    ).stdout
     d = json.loads(out)
     return {
         "issue": d["number"],

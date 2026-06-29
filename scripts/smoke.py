@@ -22,12 +22,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
+sys.path.insert(0, str(ROOT))  # repo root carries the `engine` package
+from engine import proc  # noqa: E402  (capturing subprocess wrapper)
 
 # Subprocess checks — each self-asserting target must exit 0.
 SUBPROC_CHECKS: list[tuple[str, list[str]]] = [
@@ -56,12 +57,12 @@ SEAM_CONTRACTS: list[tuple[str, str]] = [
 
 
 def run_subproc(argv: list[str], env: dict) -> tuple[bool, str]:
-    proc = subprocess.run(argv, cwd=ROOT, env=env, capture_output=True, text=True)
-    if proc.returncode == 0:
-        last = next((ln for ln in reversed((proc.stdout or "").splitlines()) if ln.strip()), "")
+    cp = proc.run(argv, cwd=ROOT, env=env)
+    if cp.returncode == 0:
+        last = next((ln for ln in reversed((cp.stdout or "").splitlines()) if ln.strip()), "")
         return True, last.strip()
-    tail = ((proc.stdout or "") + (proc.stderr or "")).splitlines()[-6:]
-    return False, "\n".join(f"          {t}" for t in tail) or f"          exit {proc.returncode}"
+    tail = ((cp.stdout or "") + (cp.stderr or "")).splitlines()[-6:]
+    return False, "\n".join(f"          {t}" for t in tail) or f"          exit {cp.returncode}"
 
 
 def check_seam_contracts() -> tuple[bool, str]:

@@ -55,7 +55,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -65,7 +64,7 @@ from typing import Any, Dict, List, Optional
 # `engine.models` or run as a script (`python3 engine/models.py --route ...`),
 # where sys.path[0] is engine/ rather than the repo root.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from engine import filesys  # noqa: E402
+from engine import filesys, proc  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -293,15 +292,18 @@ def _backend_cli(
     # Strip ANTHROPIC_API_KEY so claude uses its OAuth subscription, not API credits.
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     try:
-        result = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True,
-            check=True, timeout=300, env=env,
-        )
+        result = proc.run(cmd, input=prompt, check=True, timeout=300, env=env)
         return result.stdout.strip()
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"claude CLI failed ({exc.returncode}): {exc.stderr.strip()}") from exc
-    except FileNotFoundError:
-        raise RuntimeError(f"claude CLI not found at {claude_bin!r}; set CLAUDE_BIN or use a different backend")
+    except proc.ProcTimeout:
+        raise  # timeout propagates, as it did before (was subprocess.TimeoutExpired)
+    except proc.ProcError as exc:
+        if exc.returncode is None:  # launch failure — e.g. the binary is missing
+            raise RuntimeError(
+                f"claude CLI not found at {claude_bin!r}; set CLAUDE_BIN or use a different backend"
+            ) from exc
+        raise RuntimeError(
+            f"claude CLI failed ({exc.returncode}): {(exc.stderr or '').strip()}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

@@ -59,13 +59,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from engine import agent_sdk, models
+from engine import agent_sdk, models, proc
 from engine.actions import (
     AbstractActionFactory,
     Action,
@@ -370,8 +369,8 @@ def offline_invoice(job: Dict[str, Any]) -> Dict[str, Any]:
 # generic, agent-agnostic ``engine.agent_sdk`` — reached via its make_runner()
 # factory so the architect (or any agent) drives the same runners.
 # ---------------------------------------------------------------------------
-def _git(clone_dir: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=clone_dir, capture_output=True, text=True)
+def _git(clone_dir: str, *args: str) -> proc.Completed:
+    return proc.run(["git", *args], cwd=clone_dir, capture=True)
 
 
 # ===========================================================================
@@ -448,9 +447,9 @@ def act_clone(_inputs: Any, ctx: Context) -> Any:
     _log(f"cloning {repo} -> {clone_dir}")
     clone = None
     for attempt in range(3):  # resilient to transient TLS/network flakiness
-        clone = subprocess.run(
+        clone = proc.run(
             [gh_bin, "repo", "clone", repo, clone_dir, "--", "--depth", "1"],
-            capture_output=True, text=True,
+            capture=True,
         )
         if clone.returncode == 0 and os.path.isdir(clone_dir):
             break
@@ -502,7 +501,7 @@ def _engineer_runner(spec: InferenceSpec, payload: Any, ctx: Context) -> Output:
     )
     try:
         result = runner.run(run_spec)
-    except subprocess.TimeoutExpired:
+    except proc.ProcTimeout:
         _sh(ctx).update({"is_error": True, "result_text": "",
                          "summary": f"Engineer session timed out after {timeout}s on #{s['issue']}."})
         return Output("", meta={"is_error": True})

@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +37,7 @@ for _p in (_ROOT, _SRC, _HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from engine import proc  # noqa: E402  (capturing subprocess wrapper)
 from src.orchestration import boundaries  # noqa: E402
 
 _FIX = os.path.join(_ROOT, "schemas", "fixtures")
@@ -105,12 +105,12 @@ def test_golden_fixtures_validate() -> None:
 # (c) PRODUCED artifacts validate (real producers).
 # --------------------------------------------------------------------------- #
 def test_produced_classification_validates() -> None:
-    proc = subprocess.run(
+    cp = proc.run(
         [sys.executable, _CLASSIFY, "--title", "Add a --json flag to foo",
          "--body", "Emit a stable machine envelope. Acceptance: smoke stays green."],
-        capture_output=True, text=True, check=True,
+        check=True,
     )
-    verdict = json.loads(proc.stdout)
+    verdict = json.loads(cp.stdout)
     boundaries.validate_classification(boundaries.stamp(verdict))
     _ok("a Classification produced by classify.py validates against classification.v1")
 

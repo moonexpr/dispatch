@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +41,7 @@ for _p in (_ROOT, _SRC, _HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from engine import proc  # noqa: E402  (capturing subprocess wrapper)
 from src.orchestration import seam  # noqa: E402
 
 _FIX = os.path.join(_ROOT, "schemas", "fixtures")
@@ -125,11 +125,11 @@ def test_job_request_is_projection_of_work_order() -> None:
 # --------------------------------------------------------------------------- #
 def _produce_work_order() -> dict:
     env = {**os.environ, "PIPELINE_DRY_RUN": "1", "RANKER_OFFLINE": "1"}
-    proc = subprocess.run(
+    cp = proc.run(
         [sys.executable, _DISPATCH, "--fixture", _PLAY_QUEUE, "--issue", "2", "--json"],
-        capture_output=True, text=True, env=env, check=True,
+        env=env, check=True,
     )
-    return json.loads(proc.stdout)
+    return json.loads(cp.stdout)
 
 
 def test_produced_work_order_validates() -> None:
@@ -153,11 +153,11 @@ def _produce_invoice() -> dict:
         "route": "gen-default", "scope": "m", "confidence": 0.8,
     })
     env = {**os.environ, "PIPELINE_DRY_RUN": "1"}
-    proc = subprocess.run(
+    cp = proc.run(
         [sys.executable, _ENGINEER],
-        input=job, capture_output=True, text=True, env=env, check=True,
+        input=job, env=env, check=True,
     )
-    return json.loads(proc.stdout)
+    return json.loads(cp.stdout)
 
 
 def test_produced_invoice_validates() -> None:

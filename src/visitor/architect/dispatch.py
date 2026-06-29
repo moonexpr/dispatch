@@ -43,7 +43,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
@@ -56,7 +55,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(_HERE)))  # repo root for the
 
 import intake as _intake          # noqa: E402
 import ranker as _ranker          # noqa: E402
-from engine import structures as _dag    # noqa: E402
+from engine import proc, structures as _dag    # noqa: E402
 import approval as _approval      # noqa: E402
 import resources as _resources    # noqa: E402
 import decompose as _decompose    # noqa: E402
@@ -127,10 +126,10 @@ def _dump_stage_artifacts(text: str, envelope: Dict[str, Any]) -> None:
 
 def _classify(item: Dict[str, Any], python_bin: str) -> Dict[str, Any]:
     """Run the deterministic classifier as a subprocess (quarantine reader)."""
-    result = subprocess.run(
+    result = proc.run(
         [python_bin, _CLASSIFIER, "--title", item.get("title", ""),
          "--body", item.get("body") or ""],
-        capture_output=True, text=True, check=True,
+        check=True,
     )
     return json.loads(result.stdout)
 
@@ -330,7 +329,7 @@ def _eligibility_map(ranked: List[Dict[str, Any]], python_bin: str,
         n = int(item["number"])
         try:
             triage = _classify(item, python_bin)
-        except (subprocess.CalledProcessError, json.JSONDecodeError):
+        except (proc.ProcError, json.JSONDecodeError):
             out[n] = "classify-error"
             continue
         action, conf = triage.get("action"), triage.get("confidence", 0.0)
@@ -418,7 +417,7 @@ def _decompose_epic(args: argparse.Namespace, ranked: List[Dict[str, Any]],
         c = int(child["number"])
         try:
             ctri = _classify(child, python_bin)
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        except (proc.ProcError, json.JSONDecodeError) as exc:
             print(f"   #{c}: classify failed ({exc}) — skipping", file=sys.stderr)
             continue
         if ctri.get("action") != "implement":
@@ -458,7 +457,7 @@ def _run_issue(args: argparse.Namespace, ranked: List[Dict[str, Any]],
         return 3
     try:
         triage = _classify(item, python_bin)
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+    except (proc.ProcError, json.JSONDecodeError) as exc:
         print(f"dispatch: classify failed for #{target} ({exc})", file=sys.stderr)
         return 1
 
@@ -499,7 +498,7 @@ def _run_dispatch(args: argparse.Namespace, ranked: List[Dict[str, Any]],
         n = item["number"]
         try:
             triage = _classify(item, python_bin)
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        except (proc.ProcError, json.JSONDecodeError) as exc:
             print(f"  {pos}. #{n}: classify failed ({exc}) — skipping", file=sys.stderr)
             continue
         action, conf = triage.get("action"), triage.get("confidence", 0.0)

@@ -47,7 +47,6 @@ import datetime
 import json
 import os
 import re
-import subprocess
 import sys
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
@@ -59,7 +58,7 @@ sys.path.insert(0, os.path.dirname(_HERE))   # src/ (tuning)
 sys.path.insert(0, os.path.dirname(os.path.dirname(_HERE)))  # repo root for the engine package
 import intake as _intake    # noqa: E402
 import ranker as _ranker    # noqa: E402
-from engine import structures as _dag  # noqa: E402
+from engine import proc, structures as _dag  # noqa: E402
 import tuning               # noqa: E402
 
 CLASSIFIER = os.path.join(
@@ -150,18 +149,16 @@ def _dispatchable(enabled: set, graph) -> set:
 def _classify(item: _intake.IntakeItem, python_bin: str) -> Dict[str, Any]:
     """Call classify.py as a subprocess. Returns {action, scope, route, confidence}."""
     try:
-        result = subprocess.run(
+        result = proc.run(
             [python_bin, CLASSIFIER, "--title", item.title, "--body", item.body],
-            capture_output=True,
-            text=True,
             check=True,
         )
         verdict = json.loads(result.stdout)
         _validate_classification_boundary(verdict, item.number)
         return verdict
-    except subprocess.CalledProcessError as exc:
+    except proc.ProcError as exc:
         raise RuntimeError(
-            f"classifier failed for #{item.number}: {exc.stderr.strip()}"
+            f"classifier failed for #{item.number}: {(exc.stderr or '').strip()}"
         ) from exc
 
 
