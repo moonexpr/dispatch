@@ -221,9 +221,19 @@ class VercelProvider(DeployProvider):
 
     def steps(self, project: str, project_dir: Optional[str]) -> List[Dict[str, Any]]:
         cwd = ["--cwd", project_dir] if project_dir else []
+        # A token with access to more than one Vercel team must disambiguate with
+        # --scope, else `vercel link` errors. Resolve the team slug from the broad
+        # env (VERCEL_SCOPE, then VERCEL_TEAM_ID / VERCEL_ORG_ID); omit when unset
+        # (single-team tokens don't need it). Not a secret, so it rides the args.
+        env = _environment()
+        scope = (env.get("VERCEL_SCOPE") or env.get("VERCEL_TEAM_ID")
+                 or env.get("VERCEL_ORG_ID"))
+        scope_args = ["--scope", scope] if scope else []
         return [
-            {"label": "link", "args": [self.bin, "link", "--yes", "--project", project, *cwd]},
-            {"label": "deploy", "args": [self.bin, "deploy", "--prod", "--yes", *cwd]},
+            {"label": "link",
+             "args": [self.bin, "link", "--yes", "--project", project, *scope_args, *cwd]},
+            {"label": "deploy",
+             "args": [self.bin, "deploy", "--prod", "--yes", *scope_args, *cwd]},
         ]
 
 
