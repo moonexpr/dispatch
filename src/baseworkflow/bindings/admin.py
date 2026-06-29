@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 import prep  # src/baseworkflow/subsystems/prep.py
 import rescaffold  # src/baseworkflow/subsystems/rescaffold.py — the shared #137 directive
 import verify  # src/baseworkflow/subsystems/verify.py — CI-gate resolver
+import deploy  # src/baseworkflow/subsystems/deploy.py — provider deploy strategies
 
 # common carries the dry-run-aware gh wrapper + run-ledger (orchestration policy).
 # bindings/__init__ puts src/orchestration on sys.path, so this is a flat import.
@@ -109,43 +110,28 @@ def update_docs(inputs: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # M6.5 — publish the delivered app to its hosting providers.                    #
 #                                                                               #
-# Runs in the build phase immediately after admin:update_docs: once a unit is   #
-# delivered and its docs are refreshed, ship the running app. Two providers:    #
-#   * Supabase — push the database schema / migrations (`supabase db push`);    #
-#   * Vercel   — deploy the frontend to production (`vercel deploy --prod`).     #
+# Runs in the build phase immediately after admin:update_docs and BEFORE        #
+# consolidate_pr: once a unit is delivered, ship the running app. The provider  #
+# specifics live in the ``deploy`` subsystem as Strategy objects (Supabase:     #
+# create/link project + push migrations; Vercel: create/link project + deploy   #
+# to prod); this action just COMPOSES them via ``deploy.ship`` — adding a        #
+# provider is a new Strategy, not an edit here.                                  #
 #                                                                               #
 # Only a `completed` engineering result ships — partial/failed/needs-human has   #
 # nothing deployable, so we record a skip and let intake_invoice drive the       #
-# fix-ladder / escalation. Like consolidate_pr / intake_invoice this is a        #
-# network-MUTATING action: every deploy is gated on ``ctx.dry_run``. Under       #
-# dry-run the action records the intended commands (greppable DRY-RUN lines) and #
-# makes no network call. Binaries are overridable (VERCEL_BIN / SUPABASE_BIN);   #
-# the deploy runs from the engineer's local clone when one is present, else the  #
-# pipeline root.                                                                 #
+# fix-ladder / escalation. Network-MUTATING, so gated on ``ctx.dry_run``: under  #
+# dry-run ``deploy.ship`` records the intended (redacted) commands as greppable  #
+# DRY-RUN lines and makes no network call. Fail-safe + secret-safe discipline    #
+# lives in the deploy subsystem (a missing CLI / unauthed provider is a recorded #
+# skip/failure, never an exception; tokens ride the env, never the arg vector).  #
 # --------------------------------------------------------------------------- #
-def _publish_commands(project_dir: Optional[str]) -> list:
-    """The provider deploy command vectors, in ship order (DB first, then frontend
-    so the deployed app meets an up-to-date backend). ``-C <dir>`` / ``--workdir``
-    target the engineer's clone when present."""
-    vercel = os.environ.get("VERCEL_BIN", "vercel")
-    supabase = os.environ.get("SUPABASE_BIN", "supabase")
-    supabase_cmd = [supabase, "db", "push"]
-    vercel_cmd = [vercel, "deploy", "--prod", "--yes"]
-    if project_dir:
-        supabase_cmd += ["--workdir", project_dir]
-        vercel_cmd += ["--cwd", project_dir]
-    return [
-        {"provider": "supabase", "args": supabase_cmd},
-        {"provider": "vercel", "args": vercel_cmd},
-    ]
-
-
 def publish(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
-    """M6.5 — push Supabase + deploy Vercel for a completed unit (or record a skip).
+    """M6.5 — ship a completed unit to its hosting providers (or record a skip).
 
-    Network-mutating, so every deploy is gated on ``ctx.dry_run``: under dry-run
-    the intended provider commands are recorded only (greppable DRY-RUN lines), no
-    network call. Writes ``published`` to the deliverables shelf."""
+    Composes the ``deploy`` provider Strategies (Supabase then Vercel) over the
+    engineer's clone, deriving a deterministic per-app project name from the target
+    repo slug. Writes ``published`` to the deliverables shelf; ``mutations`` and
+    every provider record are secret-redacted."""
     engineering_result = inputs.get("engineering_result") or {}
     job = inputs.get("job") or {}
     issue = job.get("issue")
@@ -161,47 +147,22 @@ def publish(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
         }}
 
     project_dir = _clone_dir(engineering_result)
-    commands = _publish_commands(project_dir)
-    mutations = [[str(a) for a in c["args"]] for c in commands]
-    common.log(f"publish: issue=#{issue} providers=supabase,vercel "
+    repo = job.get("repo") or os.environ.get("PIPELINE_REPO", "")
+    # Deterministic project name (the repo slug) so reruns link the SAME provider
+    # project instead of creating duplicates.
+    project = (repo.rsplit("/", 1)[-1] if repo else "").strip() or f"issue-{issue}"
+    common.log(f"publish: issue=#{issue} project={project} "
                f"dir={project_dir or '<root>'} dry_run={dry}")
 
-    deployments = []
-    for cmd in commands:
-        provider = cmd["provider"]
-        binary = str(cmd["args"][0])
-        # Fail-safe: deploy is the LAST build-phase step but runs BEFORE
-        # consolidate_pr, so a crash here would abort the tick before the branch is
-        # pushed. A provider's CLI is optional infra — when it is absent (not on
-        # PATH) skip that provider with a recorded skip, and when present guard the
-        # launch against a ProcError (unauthed / broken CLI) so it is a recorded
-        # failure, never an exception that breaks the pipeline. The dry-run path is
-        # unaffected (common.run records the intended command without launching).
-        if not dry and not common.have_tool(binary):
-            common.log(f"publish: {provider} CLI '{binary}' not found — skipping deploy for #{issue}")
-            deployments.append({"provider": provider, "ok": False, "returncode": None, "skipped": True})
-            continue
-        try:
-            # common.run is dry-run aware (PIPELINE_DRY_RUN): under dry-run it prints
-            # the greppable ``DRY-RUN: <tokens>`` line and returns 0 (no network call).
-            rc = common.run(*cmd["args"])
-        except proc.ProcError as exc:
-            common.log(f"publish: {provider} deploy could not launch for #{issue} ({exc})")
-            deployments.append({"provider": provider, "ok": False, "returncode": None,
-                                "error": str(exc)})
-            continue
-        ok = rc == 0
-        deployments.append({"provider": provider, "ok": ok, "returncode": rc})
-        if not ok and not dry:
-            common.log(f"publish: {provider} deploy failed for #{issue} (rc={rc})")
-
+    result = deploy.ship(project, project_dir, dry_run=dry)
     return {"published": {
         "issue": issue,
         "status": status,
+        "project": project,
         "skipped": False,
         "dry_run": dry,
-        "deployments": deployments,
-        "mutations": mutations,
+        "deployments": result["deployments"],
+        "mutations": result["mutations"],
     }}
 
 
