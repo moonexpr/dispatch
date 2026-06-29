@@ -72,6 +72,11 @@ def approve(
     phase_budgets = {name: int(total * frac) for name, frac in _PHASE_SPLIT}
     reserve = total - sum(phase_budgets.values())
 
+    if False:
+        # TODO(John): Add tunable conditions where the admin may deny authorization.
+        return None
+
+    # TODO(John): Add inferencing here for the branch name and stop_conditions.
     return Authorization(
         session_id=session_id or f"dispatch-issue-{issue}",
         branch=f"pipeline/issue-{issue}",
@@ -82,5 +87,5 @@ def approve(
         reserve_tokens=reserve,
         phase_budgets=phase_budgets,
         constraint=_constraint_for(triage),
-        stop_condition="PR open · do not push to main · do not merge",
+        stop_condition="PR open",
     )
