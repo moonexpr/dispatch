@@ -34,7 +34,7 @@ _CSS = """\
         --sans:"Comic Sans MS","Comic Sans","Chalkboard SE","Comic Neue",cursive; }
 * { box-sizing: border-box; }
 body { font: 15px/1.65 var(--sans); color: var(--fg); background: var(--bg); margin: 0; }
-.wrap { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+.wrap { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; position: relative; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .muted { color: var(--muted); }
@@ -89,6 +89,32 @@ table.mods td.k { white-space: nowrap; color: var(--muted); font-size: .85em; }
 .doc pre code { background: none; border: 0; padding: 0; }
 .doc code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: .03rem .3rem; }
 .doc.muted { font-style: italic; }
+
+/* Clickable code/signatures feed the Finder */
+pre, code, .sig { cursor: pointer; }
+
+/* Finder — symbol search, floated top-right of the container (right of the header) */
+.finder { position: absolute; top: 1.4rem; right: 1.25rem; width: 280px; max-width: calc(100% - 2.5rem); z-index: 30; }
+#finder-q { width: 100%; padding: .5rem .65rem; font-family: var(--sans); font-size: .92rem;
+            border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
+            box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.finder-panel { position: absolute; top: calc(100% + .35rem); right: 0; width: 340px; max-width: 92vw;
+                background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+                box-shadow: 0 8px 24px rgba(0,0,0,.12); overflow: hidden; }
+.finder-head { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+               font-weight: 700; padding: .5rem .65rem; border-bottom: 1px solid var(--border); }
+.finder-results { max-height: 60vh; overflow-y: auto; }
+.finder-item { display: block; padding: .4rem .65rem; border-bottom: 1px solid var(--border); }
+.finder-item:last-child { border-bottom: 0; }
+.finder-item:hover { background: var(--hover); }
+.finder-item code { background: none; border: 0; padding: 0; color: var(--accent); font-size: .82rem; }
+.finder-item .fk { display: block; color: var(--muted); font-size: .73rem; margin-top: .1rem;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.finder-empty { padding: .55rem .65rem; color: var(--muted); font-size: .85rem; }
+@media (max-width: 820px) {
+  .finder { position: static; width: 100%; margin: 0 0 1rem; }
+  .finder-panel { position: static; width: 100%; margin-top: .4rem; box-shadow: none; }
+}
 """
 
 _JS = """\
@@ -114,6 +140,39 @@ document.querySelectorAll('table.mods').forEach(t=>{
     });
   });
 });
+
+// Finder — symbol search fed by the embedded index (window.APIDOCS_INDEX) and
+// by clicking any code/signature on the page.
+(function(){
+  const fq=document.getElementById('finder-q');
+  const fpanel=document.getElementById('finder-panel');
+  const fres=document.getElementById('finder-results');
+  if(!fq||!fpanel||!fres) return;
+  const INDEX=window.APIDOCS_INDEX||[];
+  const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function run(){
+    const q=(fq.value||'').trim().toLowerCase();
+    if(!q){ fpanel.hidden=true; fres.innerHTML=''; return; }
+    const hits=INDEX.filter(r=>r.path.toLowerCase().includes(q)||(r.summary||'').toLowerCase().includes(q)).slice(0,60);
+    fres.innerHTML = hits.length
+      ? hits.map(r=>`<a class="finder-item" href="${esc(r.url)}"><code>${esc(r.path)}</code>`+
+          `<span class="fk">${esc(r.kind)}${r.summary?' — '+esc(r.summary):''}</span></a>`).join('')
+      : '<div class="finder-empty">no matches</div>';
+    fpanel.hidden=false;
+  }
+  fq.addEventListener('input',run);
+  // Click any code/signature/code-block to drop its text into the Finder.
+  document.querySelectorAll('pre, code').forEach(el=>{
+    if(el.closest('#finder')) return;          // skip the Finder's own results
+    el.addEventListener('click',e=>{
+      const t=(el.innerText||el.textContent||'').trim();
+      if(!t) return;
+      e.stopPropagation();                       // innermost code wins over its <pre>
+      fq.value=t; run();
+      document.getElementById('finder').scrollIntoView({behavior:'smooth',block:'start'});
+    });
+  });
+})();
 """
 
 # --------------------------------------------------------------------------- #
@@ -230,6 +289,16 @@ def _esc(s: str) -> str:
     return html.escape(s or "")
 
 
+_FINDER = (
+    '<aside class="finder" id="finder">'
+    '<input id="finder-q" placeholder="Finder — search symbols…" autocomplete="off" spellcheck="false">'
+    '<div class="finder-panel" id="finder-panel" hidden>'
+    '<div class="finder-head">Finder</div>'
+    '<div class="finder-results" id="finder-results"></div>'
+    "</div></aside>"
+)
+
+
 def _page(title: str, body: str) -> str:
     root = "./"
     return f"""<!doctype html>
@@ -237,10 +306,10 @@ def _page(title: str, body: str) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(title)}</title>
 <link rel="stylesheet" href="{root}apidocs.css"></head>
-<body><div class="wrap">{body}
+<body><div class="wrap">{_FINDER}{body}
 <footer>Generated by <code>api_docs</code> — dispatch API reference.
 Static, derived from source docstrings. <a href="{root}index.html">Index</a></footer>
-</div><script src="{root}apidocs.js"></script></body></html>
+</div><script src="{root}search.js"></script><script src="{root}apidocs.js"></script></body></html>
 """
 
 
@@ -362,10 +431,14 @@ def build_site(out_dir: str | Path, index: Index | None = None, **index_kwargs) 
         index = build_index(**index_kwargs)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    records = search_records(index)
     (out / "apidocs.css").write_text(_CSS, encoding="utf-8")
     (out / "apidocs.js").write_text(_JS, encoding="utf-8")
     (out / "index.html").write_text(_render_index_page(index), encoding="utf-8")
-    (out / "search.json").write_text(json.dumps(search_records(index), indent=1), encoding="utf-8")
+    (out / "search.json").write_text(json.dumps(records, indent=1), encoding="utf-8")
+    # Embedded index the Finder reads (a <script src>, so it works on file:// too
+    # — no fetch/CORS). search.json stays as the machine-readable copy for tooling.
+    (out / "search.js").write_text("window.APIDOCS_INDEX=" + json.dumps(records) + ";", encoding="utf-8")
     # GitHub Pages serves Jekyll by default, which drops files it considers
     # special; .nojekyll publishes the directory verbatim.
     (out / ".nojekyll").write_text("", encoding="utf-8")

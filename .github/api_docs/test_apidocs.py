@@ -185,6 +185,16 @@ def run_fixture() -> None:
         check("addEventListener('click'" in js and "data-dir" in js, "tables are click-to-sort")
         check("<thead><tr><th>Module</th>" in index_html, "homepage table has a sortable header row")
 
+        # Finder sidebar.
+        check('id="finder"' in index_html and 'id="finder-q"' in index_html, "Finder present on the page")
+        check("Finder — search symbols" in index_html, "Finder blank search bar (empty state)")
+        check('id="finder-panel" hidden' in index_html, "Finder panel hidden until populated")
+        check((site / "search.js").exists(), "embedded search index written")
+        check((site / "search.js").read_text().startswith("window.APIDOCS_INDEX="), "search.js defines the index global")
+        check("window.APIDOCS_INDEX" in js and "finder-q" in js, "Finder JS reads the index")
+        check("querySelectorAll('pre, code')" in js, "clicking code/pre feeds the Finder")
+        check('"widgets.make"' in (site / "search.js").read_text(), "embedded index carries symbols")
+
 
 def run_live() -> None:
     print("[live layer — real dispatch packages]")
