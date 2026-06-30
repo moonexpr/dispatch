@@ -1,4 +1,4 @@
-# Unattended ticking (deploy/)
+# Unattended ticking (app/installer/)
 
 Run the dispatch engine on a schedule — **one live tick every 2 hours (12×/day)**.
 Each tick runs `./dispatch --live` against `$PIPELINE_REPO`, working the first open
@@ -32,8 +32,8 @@ PIPELINE_REPO=owner/repo        # the repo whose issues this engine works
 
 ```sh
 mkdir -p ~/.config/systemd/user
-cp deploy/dispatch.service deploy/dispatch.timer ~/.config/systemd/user/
-# edit dispatch.service ExecStart to point at <your-repo>/deploy/dispatch-tick.sh
+cp app/installer/dispatch.service app/installer/dispatch.timer ~/.config/systemd/user/
+# edit dispatch.service ExecStart to point at <your-repo>/app/installer/dispatch-tick.sh
 systemctl --user daemon-reload
 systemctl --user enable --now dispatch.timer
 systemctl --user list-timers dispatch.timer      # confirm next fire
@@ -43,8 +43,8 @@ journalctl --user -u dispatch.service -f          # watch a tick
 ## Install — macOS / WORKSTATION (launchd)
 
 ```sh
-cp deploy/com.reclaimbydesign.dispatch.plist ~/Library/LaunchAgents/
-# edit the ProgramArguments path to <your-repo>/deploy/dispatch-tick.sh
+cp app/installer/com.reclaimbydesign.dispatch.plist ~/Library/LaunchAgents/
+# edit the ProgramArguments path to <your-repo>/app/installer/dispatch-tick.sh
 launchctl load -w ~/Library/LaunchAgents/com.reclaimbydesign.dispatch.plist
 tail -f /tmp/dispatch-tick.log
 ```

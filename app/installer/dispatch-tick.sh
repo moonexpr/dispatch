@@ -3,7 +3,7 @@
 #
 # The shared ExecStart for both the systemd service (Linux) and the launchd
 # agent (macOS / WORKSTATION). It self-locates the repo (this script lives in
-# <repo>/deploy/), sources the gitignored pipeline.env for secrets + target,
+# <repo>/app/installer/), sources the gitignored pipeline.env for secrets + target,
 # and runs a single LIVE tick. The engine picks the first open ready issue when
 # no issue is given; the target repo comes from $PIPELINE_REPO.
 #
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Locate the repo whether this wrapper sits at the repo root or in <repo>/deploy/:
+# Locate the repo whether this wrapper sits at the repo root or in <repo>/app/installer/:
 if [ -x "$HERE/dispatch" ]; then
   REPO="$HERE"
 else

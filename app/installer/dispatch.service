@@ -2,7 +2,7 @@
 #
 # Install as a USER unit (no root needed):
 #   mkdir -p ~/.config/systemd/user
-#   cp deploy/dispatch.service deploy/dispatch.timer ~/.config/systemd/user/
+#   cp app/installer/dispatch.service app/installer/dispatch.timer ~/.config/systemd/user/
 #   # edit ExecStart below if the repo is not at the path shown
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now dispatch.timer
@@ -19,7 +19,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 # Repo location on the deploy host (WORKSTATION default shown — adjust if elsewhere):
-ExecStart=%h/dispatch/deploy/dispatch-tick.sh
+ExecStart=%h/dispatch/app/installer/dispatch-tick.sh
 # A live tick clones, runs the agent, and pushes — give it room; never hang forever:
 TimeoutStartSec=2400
 Nice=10
