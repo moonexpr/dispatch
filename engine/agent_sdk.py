@@ -36,11 +36,15 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from engine import proc  # capturing subprocess wrapper (ProcError/ProcTimeout on failure)
 
@@ -64,6 +68,102 @@ class AgentResult:
     # scaffolds back up into the agents/bindings. On ``is_error`` the message is in
     # ``result``.
     timed_out: bool = False
+
+
+@dataclass
+class AgentEvent:
+    """One normalized event from a *streaming* agent session — the unit an ``on_event``
+    sink receives (Observer pattern). The backend is the only layer that holds the live
+    process stream, so it is the sole producer: it normalizes each transport line into
+    one of these and ALSO emits synthetic ``heartbeat`` / ``timeout`` events (which have
+    no transport line) so a consumer can see liveness and stalls. Emitting an event is
+    observation only — it never changes the run's control flow (timeout/kill stays in
+    the backend). ``kind`` is one of: ``system``, ``text``, ``tool_use``,
+    ``tool_result``, ``rate_limit``, ``result``, ``heartbeat``, ``timeout``, ``error``."""
+
+    kind: str
+    elapsed: float = 0.0      # seconds since the session started
+    tool: str = ""            # tool name (kind == "tool_use")
+    text: str = ""            # short snippet: assistant text / result summary
+    detail: str = ""          # extra: heartbeat gap, system subtype, error message
+    raw_type: str = ""        # the underlying transport event type (debugging)
+
+
+# An ``on_event`` sink: a callable handed one :class:`AgentEvent` at a time, or None
+# (the default — no observer, so the backend takes its silent, non-streaming path).
+EventSink = Optional[Callable[["AgentEvent"], None]]
+
+
+def stream_debug_enabled() -> bool:
+    """True when agent sessions should run in streaming/observable mode. Gated on
+    ``DISPATCH_AGENT_DEBUG`` (truthy). Off by default → backends take the silent
+    ``--output-format json`` path and behave exactly as before."""
+    return os.environ.get("DISPATCH_AGENT_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _stream_heartbeat_seconds() -> int:
+    """Seconds without a *meaningful* event (tool call / text / result) before the
+    backend emits a synthetic ``heartbeat`` — the stall / throttle signal. Override
+    with ``DISPATCH_AGENT_HEARTBEAT_SECONDS`` (default 30)."""
+    try:
+        return max(5, int(os.environ.get("DISPATCH_AGENT_HEARTBEAT_SECONDS", "30")))
+    except ValueError:
+        return 30
+
+
+def _short_tool_input(inp: Any) -> str:
+    """A compact one-line hint of a tool_use input (never the full payload — that can be
+    a whole file's contents)."""
+    if not isinstance(inp, dict):
+        return ""
+    for key in ("command", "file_path", "path", "pattern", "description", "query"):
+        if inp.get(key):
+            return f"{key}={str(inp[key])[:60]}"
+    return ",".join(list(inp.keys())[:4])
+
+
+def _normalize_stream_line(line: str, res: "AgentResult", state: Dict[str, Any]) -> Optional["AgentEvent"]:
+    """Map one ``stream-json`` transport line to an :class:`AgentEvent`, folding the
+    terminal ``result`` event's fields into ``res`` as a side effect. Returns None for
+    pure transport noise (bare ``user`` / ``system`` lines) so the sink isn't spammed —
+    liveness during such gaps is covered by the heartbeat instead. ``state`` carries the
+    cross-line counters the heartbeat reads (``rate_limits``, ``tool_calls``,
+    ``last_meaningful``, ``saw_result``)."""
+    line = (line or "").strip()
+    if not line:
+        return None
+    try:
+        ev = json.loads(line)
+    except (ValueError, TypeError):
+        return None
+    t = ev.get("type")
+    if t == "assistant":
+        for blk in (ev.get("message", {}).get("content") or []):
+            bt = blk.get("type")
+            if bt == "tool_use":
+                state["tool_calls"] = state.get("tool_calls", 0) + 1
+                state["last_meaningful"] = time.monotonic()
+                return AgentEvent(kind="tool_use", tool=str(blk.get("name") or "?"),
+                                  text=_short_tool_input(blk.get("input")), raw_type=t)
+            if bt == "text" and str(blk.get("text") or "").strip():
+                state["last_meaningful"] = time.monotonic()
+                return AgentEvent(kind="text", text=str(blk.get("text"))[:160], raw_type=t)
+        return None
+    if t in ("rate_limit_event", "rate_limit"):
+        state["rate_limits"] = state.get("rate_limits", 0) + 1
+        return AgentEvent(kind="rate_limit",
+                          detail=str(ev.get("rate_limit") or ev.get("subtype") or "")[:80], raw_type=t)
+    if t == "result":
+        res.result = str(ev.get("result") or "")
+        res.usage = ev.get("usage") if isinstance(ev.get("usage"), dict) else {}
+        res.total_cost_usd = ev.get("total_cost_usd")
+        res.is_error = bool(ev.get("is_error", False))
+        res.num_turns = ev.get("num_turns")
+        state["saw_result"] = True
+        state["last_meaningful"] = time.monotonic()
+        return AgentEvent(kind="result", text=res.result[:120],
+                          detail=f"is_error={res.is_error} turns={res.num_turns}", raw_type=t)
+    return None  # bare system / user transport lines — heartbeat covers liveness
 
 
 @dataclass
@@ -163,7 +263,11 @@ class AgentBackend(ABC):
     name: str = "agent"
 
     @abstractmethod
-    def run(self, spec: AgentRunSpec) -> AgentResult:  # pragma: no cover - interface
+    def run(self, spec: AgentRunSpec, *, on_event: EventSink = None) -> AgentResult:  # pragma: no cover - interface
+        """Run one session. When ``on_event`` is given, the backend SHOULD stream
+        normalized :class:`AgentEvent`s to it (observation only — the sink never alters
+        control flow); when None, the backend takes its silent, non-streaming path and
+        behaves exactly as before. A sink raising is swallowed, never propagated."""
         ...
 
     @staticmethod
@@ -186,7 +290,7 @@ class CliBackend(AgentBackend):
 
     name = "cli"
 
-    def run(self, spec: AgentRunSpec) -> AgentResult:
+    def run(self, spec: AgentRunSpec, *, on_event: EventSink = None) -> AgentResult:
         import shutil as _shutil
 
         sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
@@ -198,9 +302,9 @@ class CliBackend(AgentBackend):
         seed_config_auth(iso_cfg)
         sub_env["CLAUDE_CONFIG_DIR"] = iso_cfg
         claude = os.environ.get("CLAUDE_BIN") or "claude"
-        cmd = [
+        # Shared flags; the output-format differs per path (json vs stream-json).
+        base_cmd = [
             claude, "-p", spec.prompt,
-            "--output-format", "json",
             "--permission-mode", spec.permission_mode,
             "--model", spec.model,
             "--add-dir", spec.cwd,
@@ -208,18 +312,27 @@ class CliBackend(AgentBackend):
         if spec.system_prompt:
             # Append (not replace) so the archetype persona layers onto the CLI's
             # default system prompt rather than discarding it.
-            cmd += ["--append-system-prompt", spec.system_prompt]
+            base_cmd += ["--append-system-prompt", spec.system_prompt]
         try:
-            cp = proc.run(
-                cmd, cwd=spec.cwd, env=sub_env, capture=True,
-                timeout=spec.timeout,
-            )
-        except proc.ProcTimeout:
-            return self._timeout_result(spec.timeout)
-        except proc.ProcError as exc:  # launch failure (CLI missing, etc.) — handled as data
-            return self._error_result(exc)
+            if on_event is not None:
+                # Observable path: stream events to the sink (Observer). Used when a
+                # consumer (the worker, under DISPATCH_AGENT_DEBUG) wants liveness.
+                return self._run_streamed(base_cmd, spec, sub_env, on_event)
+            # Default silent path — single JSON blob at the end, exactly as before.
+            cmd = base_cmd + ["--output-format", "json"]
+            try:
+                cp = proc.run(cmd, cwd=spec.cwd, env=sub_env, capture=True, timeout=spec.timeout)
+            except proc.ProcTimeout:
+                return self._timeout_result(spec.timeout)
+            except proc.ProcError as exc:  # launch failure (CLI missing, etc.) — handled as data
+                return self._error_result(exc)
+            return self._parse_json_result(cp)
         finally:
             _shutil.rmtree(iso_cfg, ignore_errors=True)
+
+    @staticmethod
+    def _parse_json_result(cp: "proc.Completed") -> AgentResult:
+        """Build an :class:`AgentResult` from a completed ``--output-format json`` run."""
         res = AgentResult()
         res.is_error = not cp.ok
         out = (cp.stdout or "").strip()
@@ -237,6 +350,84 @@ class CliBackend(AgentBackend):
             res.result = (cp.stderr or "").strip()[:500]
         return res
 
+    def _run_streamed(self, base_cmd: List[str], spec: AgentRunSpec, sub_env: Dict[str, str],
+                      on_event: Callable[["AgentEvent"], None]) -> AgentResult:
+        """Stream-json path: relay normalized events to ``on_event`` as the session runs,
+        emit synthetic ``heartbeat`` events when meaningful progress stalls (the throttle
+        signal), enforce the wall-clock cap with a watchdog, and reconstruct the
+        :class:`AgentResult` from the terminal ``result`` event. Same return contract as
+        the silent path; visibility is the only difference."""
+        cmd = base_cmd + ["--output-format", "stream-json", "--verbose"]
+        res = AgentResult()
+        start = time.monotonic()
+        state: Dict[str, Any] = {"last_meaningful": start, "saw_result": False,
+                                 "timed_out": False, "rate_limits": 0, "tool_calls": 0}
+        hb = _stream_heartbeat_seconds()
+
+        def _emit(ev: AgentEvent) -> None:
+            ev.elapsed = time.monotonic() - start
+            try:
+                on_event(ev)
+            except Exception:  # noqa: BLE001 — a sink must never break the run (observation only)
+                pass
+
+        try:
+            # Merge stderr into stdout so the single stream read drains EVERYTHING —
+            # a separate undrained stderr pipe could fill and deadlock the child. Non-JSON
+            # stderr lines simply normalize to None and are skipped.
+            with proc.popen(cmd, cwd=spec.cwd, env=sub_env, stderr=subprocess.STDOUT,
+                            start_new_session=True) as handle:
+                def _kill() -> None:
+                    state["timed_out"] = True
+                    try:  # whole process group — the agent may have spawned children
+                        os.killpg(os.getpgid(handle.pid), signal.SIGTERM)
+                    except Exception:  # noqa: BLE001
+                        try:
+                            handle.send_signal(signal.SIGTERM)
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                watchdog = threading.Timer(spec.timeout, _kill)
+                watchdog.daemon = True
+                watchdog.start()
+
+                stop = threading.Event()
+
+                def _heartbeat() -> None:
+                    # Fire on lack of *meaningful* progress (tool/text/result), not on raw
+                    # transport silence — so a storm of rate-limit/system lines still reads
+                    # as "stalled", which is exactly the throttle case we want surfaced.
+                    while not stop.wait(min(hb, 5)):
+                        gap = time.monotonic() - state["last_meaningful"]
+                        if gap >= hb:
+                            _emit(AgentEvent(
+                                kind="heartbeat",
+                                detail=(f"no progress for {gap:.0f}s "
+                                        f"({state['tool_calls']} tool calls, "
+                                        f"{state['rate_limits']} rate-limit waits so far)")))
+                            state["last_meaningful"] = time.monotonic()  # throttle the heartbeat itself
+
+                hbt = threading.Thread(target=_heartbeat, daemon=True)
+                hbt.start()
+                try:
+                    for line in handle.stream():
+                        ev = _normalize_stream_line(line, res, state)
+                        if ev is not None:
+                            _emit(ev)
+                finally:
+                    stop.set()
+                    watchdog.cancel()
+        except proc.ProcError as exc:  # launch failure — handled as data
+            return self._error_result(exc)
+
+        if state["timed_out"] and not state["saw_result"]:
+            _emit(AgentEvent(kind="timeout",
+                             detail=f"killed at {spec.timeout}s wall-clock "
+                                    f"({state['tool_calls']} tool calls, "
+                                    f"{state['rate_limits']} rate-limit waits)"))
+            return self._timeout_result(spec.timeout)
+        return res
+
 
 class SdkBackend(AgentBackend):
     """Backend via ``claude_agent_sdk.query`` over asyncio. Subscription auth:
@@ -246,7 +437,10 @@ class SdkBackend(AgentBackend):
 
     name = "sdk"
 
-    def run(self, spec: AgentRunSpec) -> AgentResult:
+    def run(self, spec: AgentRunSpec, *, on_event: EventSink = None) -> AgentResult:
+        # Streaming observability is implemented for the CLI backend only; the SDK path
+        # accepts ``on_event`` for interface parity and ignores it (it is opt-in and
+        # known to stall under the current env — see the class docstring).
         import asyncio
 
         from claude_agent_sdk import (  # imported lazily so OFFLINE never needs it
@@ -312,7 +506,9 @@ class ChatBackend(AgentBackend):
 
     name = "chat"
 
-    def run(self, spec: AgentRunSpec) -> AgentResult:
+    def run(self, spec: AgentRunSpec, *, on_event: EventSink = None) -> AgentResult:
+        # Single-shot, no tool loop and no stream — ``on_event`` is accepted for
+        # interface parity and ignored (there is nothing incremental to relay).
         from engine import models  # local import: keep stdlib-only at module import
 
         messages: List[Dict[str, str]] = []

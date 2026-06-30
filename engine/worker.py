@@ -24,6 +24,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Sequence, Type, Union
 
+from engine import agent_sdk
 from engine import proc as _proc
 from engine.actions import Output
 from engine.agents import AgentOutcome, BaseAgent
@@ -80,7 +81,36 @@ class AgentWorker(BaseWorker):
     def __init__(self, agent: BaseAgent) -> None:
         self.agent = agent
 
+    def _stream_observer(self) -> Optional[Any]:
+        """An env-gated streaming sink (the Observer's consumer side): logs the agent's
+        LIVE progress — tool calls, rate-limit waits, stall heartbeats, the final result
+        — through the agent's own tagged logger. Returns None when ``DISPATCH_AGENT_DEBUG``
+        is off, so the backend takes its silent path and behaviour is unchanged.
+
+        The consumption *policy* lives HERE, at the worker, so it applies uniformly to
+        every archetype (architect, adversary, engineer) without any of them — or the
+        backend — knowing about it. The backend is the sole *producer*; this only
+        formats and logs what it receives, so it can never alter the run."""
+        if not agent_sdk.stream_debug_enabled():
+            return None
+        log = self.agent._log
+        glyph = {"tool_use": "▸", "text": "·", "rate_limit": "⏳",
+                 "heartbeat": "…", "result": "✓", "timeout": "✗", "error": "✗"}
+
+        def _sink(ev: "agent_sdk.AgentEvent") -> None:
+            mark = glyph.get(ev.kind, "·")
+            if ev.kind == "tool_use":
+                body = f"tool {ev.tool}" + (f" ({ev.text})" if ev.text else "")
+            elif ev.kind in ("text", "result", "rate_limit", "heartbeat", "timeout", "error"):
+                body = " ".join(p for p in (ev.text, ev.detail) if p) or ev.kind
+            else:
+                body = ev.detail or ev.kind
+            log(f"  {mark} [{ev.elapsed:.0f}s] {body}")
+
+        return _sink
+
     def run(self, prompt: str, **run_kwargs: Any) -> AgentOutcome:
+        run_kwargs.setdefault("on_event", self._stream_observer())
         return self.agent.invoke(prompt, **run_kwargs)
 
     # readable alias for the fail-safe producer call site
@@ -101,6 +131,7 @@ class AgentWorker(BaseWorker):
         (``tokens_in/out``, ``result_text``, ``summary``) and return the audit Output.
         ``summarize`` / ``on_error`` supply the binding's domain text (a string or a
         callable of the outcome); ``shelf`` defaults to ``ctx.shelves.shared``."""
+        run_kwargs.setdefault("on_event", self._stream_observer())
         outcome = self.agent.invoke(prompt, **run_kwargs)
         sh = shelf if shelf is not None else ctx.shelves.shared
         if outcome.is_error:

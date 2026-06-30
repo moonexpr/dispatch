@@ -167,12 +167,15 @@ class BaseAgent(ABC):
         timeout: Optional[int] = None,
         permission_mode: Optional[str] = None,
         subagents: Optional[Dict[str, Dict[str, Any]]] = None,
+        on_event: "agent_sdk.EventSink" = None,
     ) -> agent_sdk.AgentResult:
         """Run one session: this archetype's persona (``SYSTEM_PROMPT``) + the caller's
         ``session_prompt`` (the task), on the resolved backend. Returns the uniform
         :class:`engine.agent_sdk.AgentResult`. The backend records a handled timeout /
         error as ``is_error`` rather than raising — see :meth:`invoke` for the
-        higher-level, token-extracted, self-logging form a binding should prefer."""
+        higher-level, token-extracted, self-logging form a binding should prefer.
+        ``on_event`` (when given) is forwarded to the backend as a streaming
+        observability sink; the archetype neither produces nor consumes events."""
         spec = agent_sdk.AgentRunSpec(
             cwd=cwd or os.getcwd(),
             prompt=session_prompt,
@@ -183,7 +186,7 @@ class BaseAgent(ABC):
             subagents=subagents,
             system_prompt=self.system_prompt,
         )
-        return agent_sdk.make_backend(self.resolve_backend(backend)).run(spec)
+        return agent_sdk.make_backend(self.resolve_backend(backend)).run(spec, on_event=on_event)
 
     # -- logging ------------------------------------------------------------
     def _log(self, msg: str) -> None:
@@ -204,20 +207,23 @@ class BaseAgent(ABC):
         timeout: Optional[int] = None,
         permission_mode: Optional[str] = None,
         subagents: Optional[Dict[str, Dict[str, Any]]] = None,
+        on_event: "agent_sdk.EventSink" = None,
     ) -> AgentOutcome:
         """Run a session and return a uniform, NEVER-raising :class:`AgentOutcome`. This
         is the higher abstraction the bindings target: it resolves the backend/model/
         timeout, logs the run line and any cost/turns, extracts token counts, and folds
         a handled timeout/backend error into ``is_error`` — so a binding only finds the
         agent, hands it the prompt, and reads the output or branches on a misrun. No run
-        machinery, no timeout scaffolding, no logging in the binding."""
+        machinery, no timeout scaffolding, no logging in the binding. ``on_event`` (when
+        given) is forwarded to the backend as a streaming observability sink — the worker
+        injects one under ``DISPATCH_AGENT_DEBUG``."""
         b = self.resolve_backend(backend)
         m = self.resolve_model(model=model, route=route)
         t = self.resolve_timeout(timeout)
         self._log(f"running backend={b} model={m} timeout={t}s (subscription auth)")
         result = self.run(
             session_prompt, cwd=cwd, backend=b, model=m, route=route, tools=tools,
-            timeout=t, permission_mode=permission_mode, subagents=subagents,
+            timeout=t, permission_mode=permission_mode, subagents=subagents, on_event=on_event,
         )
         tokens_in, tokens_out = agent_sdk.usage_tokens(result.usage)
         if result.total_cost_usd is not None:
