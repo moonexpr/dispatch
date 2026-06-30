@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "dispatch-apidocs": {
+      "command": "python3",
+      "args": ["-m", "api_docs", "mcp"],
+      "env": { "PYTHONPATH": ".github" },
+      "description": "dispatch API reference for agents: list_index, lookup (pydoc), find_usage, get_source. Backed by static AST introspection (no imports of the documented code). The api_docs package lives under .github/ (hence PYTHONPATH). Requires the 'mcp' package: python3 -m pip install -r requirements-docs.txt"
+    }
+  }
+}

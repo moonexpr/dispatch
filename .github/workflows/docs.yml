@@ -1,0 +1,65 @@
+name: API Docs
+
+# Build the dispatch API reference (the .github/api_docs package) and publish it
+# to GitHub Pages.
+#
+# Trigger: pushes to `beta` and `main`. The published Pages site is a single
+# target, so the most recent push wins: `beta` (the integration branch) keeps the
+# live site current while the docs are refined pre-release, and `main` (releases —
+# see PROJECT.md → Branch strategy) republishes on release. `workflow_dispatch`
+# allows a manual rebuild.
+#
+# The build imports nothing from the documented packages — api_docs derives the
+# API statically with `ast` — so this job needs no project dependencies and no
+# pip install: just the stdlib. Fast and hermetic.
+#
+# One-time setup (repo admin, done): Settings → Pages → Build and deployment →
+# Source = "GitHub Actions". Until that is set the deploy step fails.
+
+on:
+  push:
+    branches: [beta, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress release publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Self-test the introspection core (offline, stdlib only)
+        run: python3 .github/api_docs/test_apidocs.py
+
+      - name: Build the static API site
+        run: PYTHONPATH=.github python3 -m api_docs build --out site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

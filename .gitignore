@@ -30,6 +30,8 @@ __pycache__/
 
 # Transient run/test output
 test_results.txt
+# Generated API docs site (apidocs build output; published by docs.yml from CI, never committed).
+/site/
 
 # Editor / OS
 .DS_Store

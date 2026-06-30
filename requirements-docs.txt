@@ -1,0 +1,9 @@
+# Dependencies for the api_docs documentation system (under .github/api_docs).
+#
+# The HTML site build (`PYTHONPATH=.github python3 -m api_docs build`) and the
+# introspection core need NOTHING beyond the Python standard library — that is
+# deliberate, so CI and any checkout can generate docs with no install step.
+#
+# Only the MCP server (`PYTHONPATH=.github python3 -m api_docs mcp`) needs a
+# third-party package:
+mcp>=1.2

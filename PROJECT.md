@@ -152,6 +152,69 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 
 ---
 
+## API Documentation (for developers and agents)
+
+The live packages — `foundation`, `baseworkflow`, `websitewf`, `agents` — carry an
+**auto-generated API reference** built by the [`.github/api_docs/`](./.github/api_docs/)
+package (see [`.github/api_docs/README.md`](./.github/api_docs/README.md)). It is derived **statically from
+source docstrings with `ast`** — it never imports the documented code, so it is
+deterministic, version-independent, and immune to the Python 3.14 SDK-import hang.
+`visitor/` (dead graveyard) and the empty `engine/`/`src/` husks are excluded.
+
+Two surfaces, one core:
+
+- **Humans** — a static HTML site, published to **GitHub Pages** by
+  `.github/workflows/docs.yml` on every push to `beta` (the integration branch,
+  so the live site can be refined pre-release) and `main` (republished on
+  release). Live at <https://reclaimbydesign.github.io/dispatch/>. *Visibility
+  note:* on the Team plan this Pages site is **public** even though the repo is
+  private (private/access-controlled Pages is Enterprise-only) — it exposes the
+  internal API surface to anyone with the URL.
+- **Agents** — an MCP server `dispatch-apidocs` (registered in `.mcp.json`):
+  `list_index`, `lookup` (pydoc for a symbol), `find_usage`, `get_source`. It
+  needs the `mcp` package: `python3 -m pip install -r requirements-docs.txt`.
+
+### How an AGENT looks up API information (use context mode)
+
+Prefer these over reading source files into context — they return only the
+answer, not the file. Two equivalent paths:
+
+**A. The MCP tools** (when the `dispatch-apidocs` server is connected). Call them
+directly — each returns a compact, token-light result:
+
+- `list_index("foundation.workflow")` — browse the index, scoped to a prefix.
+- `lookup("baseworkflow.BaseWorkflow")` or `lookup("chat")` — signature + full
+  docstring + location (a bare name that is ambiguous returns a candidate list).
+- `find_usage("make_backend")` — every reference across the source, def sites flagged.
+- `get_source("foundation.models.chat")` — the exact source of one definition.
+
+**B. The CLI through context-mode** (always available, no server needed). Run the
+`api_docs` CLI inside `ctx_execute` so its output is **indexed in the sandbox** and
+only the summary enters your context — the Think-in-Code path. The package lives
+under `.github/`, so prefix `PYTHONPATH=.github`:
+
+```
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs index foundation")
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs lookup BaseWorkflow")
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs usage make_backend")
+```
+
+For repeated questions about the same area, index the generated site or the
+source once and then query it cheaply:
+
+```
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs build --out site")
+ctx_index(path: "<repo>/site")          # or ctx_index the package dirs directly
+ctx_search(queries: ["how does BaseWorkflow seed the input shelf",
+                     "where is make_backend called"])
+```
+
+The rule: **ask the index, don't grep the tree.** `lookup`/`find_usage` (or a
+`ctx_search` over the indexed site) answer "what is this / where is it used" for
+O(answer) tokens instead of O(files-read).
+
+---
+
 ## Notes
 
 > Anything else the PROMPTER wants the AGENT to know.
