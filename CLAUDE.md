@@ -7,20 +7,27 @@ worker session invoked by it (via `/implement-task`, `/fix-ci`, or
 `/update-docs`), this contract is binding.
 Read it before acting.
 
-## Development mode (current — solo dev)
+## Branch & merge discipline (current — production)
 
-While this repo is in development — as declared by **`Development Status: development`**
-in [`PROJECT.md`](./PROJECT.md), the authoritative signal — **every session works
-directly on `main`** — operator-directed *and* autonomous pipeline workers
-(`/implement-task`, `/fix-ci`, `/update-docs`) alike commit (signed) and push straight
-to `main`. **Pushing is pre-authorized: agents do not need to ask before pushing `main`**
-while PROJECT.md declares development (this overrides the default "commit/push only when
-asked" posture). No pull requests, no `pipeline/issue-*` branches, no branch protection:
-that PR-based review flow (described in **The contract** below) is **deferred until the
-repo leaves development** — i.e. until PROJECT.md's `Development Status` changes. Until
-then, `main` is the working branch.
+This repo is **released / production** — `Development Status: 1.0` in
+[`PROJECT.md`](./PROJECT.md), the authoritative signal. The dev-mode push
+pre-authorization has **lapsed**; no session pushes to `main`. Branch discipline:
+
+- **All work lands via PR into `beta`** — the integration branch. Operator-directed
+  *and* autonomous pipeline workers (`/implement-task`, `/fix-ci`, `/update-docs`) push
+  a `pipeline/issue-<n>` (or topic) branch and open a PR **against `beta`**, never
+  `main`. The PR-based review flow in **The contract** below is in force.
+- **`main` receives releases only.** Only a release merges `beta` → `main`; no feature,
+  fix, or pipeline branch targets `main`. Direct pushes to `main` are blocked by branch
+  protection.
+- Commits are still signed; merges happen through branch protection (CI + one human
+  approval), not by any agent.
+
 (Solo-dev no-PR posture set 2026-06-16; extended to all sessions 2026-06-27;
-PROJECT.md-gated push pre-authorization 2026-06-27.)
+PROJECT.md-gated push pre-authorization 2026-06-27; production cutover —
+`beta` integration, `main` release-only — 2026-06-29. Were `Development Status` set
+back to `development`, the dev-mode direct-push-to-`main` pre-authorization would
+re-arm.)
 
 **Execution layer:** dispatch's own workflow engine (`engine/` + `app/config/`).
 A `BaseWorkflow` Controller drives Actions across `spec → work → build`: the
@@ -30,10 +37,10 @@ the GitHub label state machine and approval/fix ladder.
 
 ## The contract (HANDOFF §5.7)
 
-> **Deferred during development.** The branch / PR / merge rules in this section
-> take effect only once the repo leaves development; until then, work directly on
-> `main` (see *Development mode* above). The scope, done-means, and security
-> discipline below still apply.
+> **In force (production).** The branch / PR / merge rules in this section are
+> active, with one adjustment to the target branch: PRs open against **`beta`**, the
+> integration branch — `main` receives releases only (see *Branch & merge discipline*
+> above). The scope, done-means, and security discipline below all apply.
 
 - **One session = one issue = one branch = one PR.** Never widen scope beyond
   the issue you were handed. If the issue implies more work, note it in the PR

@@ -6,14 +6,20 @@ Project-specific conventions established during spec phase. Fill in each section
 
 ## Development Status
 
-**`Development Status: 1.0`** (released).
+**`Development Status: 1.0`** (released — **production mode**).
 
-This line is the authoritative signal for the push policy in [`CLAUDE.md`](./CLAUDE.md)
-→ "Development mode": while it reads `development`, operator *and* pipeline sessions may
-commit (signed) and **push directly to `main` without per-push confirmation** — no PRs,
-no branches, no branch protection. Change it to `released` (or otherwise
-non-`development`) when the repo leaves solo dev; that re-arms the PR / branch-protection
-/ review flow and the push pre-authorization lapses.
+The repo has left solo dev, so the dev-mode push pre-authorization has **lapsed**:
+operator and pipeline sessions no longer push to `main`. The PR / branch-protection /
+review flow is in force. Branch discipline (see **Branch strategy** below):
+
+- **All work lands via PR into `beta`** — the integration branch.
+- **`main` receives releases only.** Only a release merge moves `beta` → `main`; no
+  feature, fix, or pipeline branch targets `main`. Direct pushes to `main` are blocked
+  by branch protection.
+
+This line stays the authoritative signal: were `Development Status` ever set back to
+`development`, the [`CLAUDE.md`](./CLAUDE.md) dev-mode push-to-`main` pre-authorization
+would re-arm.
 
 ---
 
@@ -113,7 +119,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 > Are PRs preferred over direct pushes to main?
 
 - **Commit convention**: conventional commits (signed)
-- **Branch strategy**: push directly to `main` while `Development Status: development` (see **Development Status** above) — no feature branches / PRs in dev mode
+- **Branch strategy**: production mode — all work lands via PR into `beta` (the integration branch); `main` receives **releases only** (`beta` → `main` on release). Direct pushes to `main` are blocked by branch protection. (Dev-mode direct-push-to-`main` applies only while `Development Status: development`; see **Development Status** above.)
 
 ---
 
