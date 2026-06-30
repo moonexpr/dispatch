@@ -60,7 +60,7 @@ git clone git@github.com:ReclaimByDesign/dispatch.git
 cd dispatch
 
 # 1. Secrets and config (gitignored). Set CLAUDE_CODE_OAUTH_TOKEN, PIPELINE_REPO, tokens.
-cp pipeline.env.example pipeline.env
+cp .env.example .env
 
 # 2. Verify the workflow engine.
 python3 scripts/smoke.py

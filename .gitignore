@@ -1,4 +1,5 @@
 # Secrets live ONLY in env (HANDOFF §8) — never commit the filled-in file.
+.env
 pipeline.env
 tokens.txt
 

@@ -25,12 +25,16 @@ else
 fi
 cd "$REPO"
 
-if [ -f pipeline.env ]; then
-  set -a; . ./pipeline.env; set +a
-fi
+# Source the env file: prefer .env, fall back to the legacy pipeline.env.
+for envf in .env pipeline.env; do
+  if [ -f "$envf" ]; then
+    set -a; . "./$envf"; set +a
+    break
+  fi
+done
 
 if [ -z "${PIPELINE_REPO:-}" ]; then
-  echo "dispatch-tick: PIPELINE_REPO is unset (set it in $REPO/pipeline.env)" >&2
+  echo "dispatch-tick: PIPELINE_REPO is unset (set it in $REPO/.env)" >&2
   exit 2
 fi
 
