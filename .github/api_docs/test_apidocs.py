@@ -170,11 +170,20 @@ def run_fixture() -> None:
         # paragraph NOT duplicated in the body.
         check('<div class="title-row"><span class="kind">package</span><h1>widgets</h1></div>' in html,
               "kind pill precedes the title")
-        check('<p class="subtitle">A fixture package docstring.</p>' in html,
+        check('<div class="subtitle">A fixture package docstring.</div>' in html,
               "summary moved to header subtitle, prefix stripped + capitalized")
         check("<strong>stays</strong>" in html, "non-lead paragraphs stay in the body")
         check("a fixture package docstring" not in html,
               "lead summary not duplicated in the module body")
+
+        # Theme / font / sortable tables.
+        css = (site / "apidocs.css").read_text()
+        js = (site / "apidocs.js").read_text()
+        check("Comic Sans" in css, "Comic Sans is the body font")
+        check("prefers-color-scheme" not in css, "light theme only — no dark-mode override")
+        check("--bg:#ffffff" in css, "light background")
+        check("addEventListener('click'" in js and "data-dir" in js, "tables are click-to-sort")
+        check("<thead><tr><th>Module</th>" in index_html, "homepage table has a sortable header row")
 
 
 def run_live() -> None:

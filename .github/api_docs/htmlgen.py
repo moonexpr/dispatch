@@ -4,10 +4,11 @@
 The output is a self-contained directory (no external assets, no build step, no
 JavaScript framework) suitable for publishing straight to GitHub Pages:
 
-  index.html        landing page: a per-package table of modules, with a filter
+  index.html        landing page: a per-package, click-to-sort table of modules
   <module>.html     one page per module, listing classes, methods, functions
   search.json       flat symbol table powering the filter box and agent tooling
-  apidocs.css       embedded-free stylesheet (one file, no CDN)
+  apidocs.css       embedded-free stylesheet (light theme, one file, no CDN)
+  apidocs.js        live filter + Notion-style click-to-sort tables (vanilla JS)
 
 Docstrings are rendered through a small, dependency-free formatter
 (:func:`_render_doc`) that understands the markup these docstrings actually use —
@@ -27,52 +28,60 @@ from pathlib import Path
 from .introspect import Index, Klass, Module, build_index, summary
 
 _CSS = """\
-:root { --fg:#1b1f24; --muted:#57606a; --bg:#fff; --card:#f6f8fa; --accent:#0969da;
-        --border:#d0d7de; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
-@media (prefers-color-scheme: dark) {
-  :root { --fg:#e6edf3; --muted:#8b949e; --bg:#0d1117; --card:#161b22;
-          --accent:#58a6ff; --border:#30363d; } }
+:root { --fg:#1f2328; --muted:#59636e; --bg:#ffffff; --card:#f6f8fa; --accent:#0969da;
+        --border:#d1d9e0; --hover:#f0f3f6;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+        --sans:"Comic Sans MS","Comic Sans","Chalkboard SE","Comic Neue",cursive; }
 * { box-sizing: border-box; }
-body { font: 15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
-       color: var(--fg); background: var(--bg); margin: 0; }
-.wrap { max-width: 980px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
-header { border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
-h1 { font-size: 1.6rem; margin: .2rem 0; }
-h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
-h3 { font-size: 1rem; margin: 1.4rem 0 .3rem; }
+body { font: 15px/1.65 var(--sans); color: var(--fg); background: var(--bg); margin: 0; }
+.wrap { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .muted { color: var(--muted); }
-code, .sig, pre { font-family: var(--mono); font-size: .86em; }
+code, .sig, pre { font-family: var(--mono); font-size: .85em; }
+
+/* Header — flex column, tight gaps (no <p> margins fighting the layout) */
+header { display: flex; flex-direction: column; gap: .35rem;
+         border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+.crumbs { font-size: .85rem; color: var(--muted); }
+.title-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+h1 { font-size: 1.7rem; margin: 0; }
+.subtitle { color: var(--muted); font-style: italic; font-size: 1.02rem; }
+.lede { margin: 0; }
+.kind { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+        border: 1px solid var(--border); border-radius: 999px; padding: .1rem .5rem; background: var(--card); }
+
+h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+h3 { font-size: 1rem; margin: 1.4rem 0 .3rem; }
+
+input#filter { width: 100%; padding: .55rem .7rem; font-size: 1rem; font-family: var(--sans);
+               border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
+               margin: .6rem 0 1rem; }
+
+/* Member entries */
+.member { border-left: 2px solid var(--border); padding-left: .85rem; margin: 1.1rem 0; }
 .sig { background: var(--card); border: 1px solid var(--border); border-radius: 6px;
-       padding: .35rem .55rem; display: block; margin: .35rem 0 .2rem; overflow-x: auto; }
-.kind { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
-        color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
-        padding: .05rem .45rem; margin-left: .4rem; }
-input#filter { width: 100%; padding: .5rem .65rem; font-size: 1rem; border: 1px solid var(--border);
-               border-radius: 8px; background: var(--card); color: var(--fg); margin: .5rem 0 1rem; }
-.crumbs { font-size: .85rem; margin-bottom: 1rem; }
-.title-row { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
-.title-row h1 { margin: 0; }
-.title-row .kind { margin-left: 0; }
-.subtitle { font-style: italic; color: var(--muted); margin: .45rem 0 0; font-size: 1rem; }
-.member { border-left: 2px solid var(--border); padding-left: .8rem; margin: 1.1rem 0; }
+       padding: .4rem .6rem; display: block; margin: .35rem 0 .2rem; overflow-x: auto; }
 .loc { font-size: .8rem; color: var(--muted); }
 footer { margin-top: 3rem; font-size: .8rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: 1rem; }
 
-/* Module index table */
-table.mods { border-collapse: collapse; width: 100%; margin: .3rem 0 1.5rem; }
-table.mods th, table.mods td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--border);
+/* Notion-style module table — subtle separators, hover, click-to-sort headers */
+table.mods { border-collapse: collapse; width: 100%; margin: .2rem 0 1.6rem; font-size: .95rem; }
+table.mods th, table.mods td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--border);
                                vertical-align: top; }
-table.mods th { font-size: .74rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+table.mods thead th { color: var(--muted); font-weight: 600; font-size: .82rem; cursor: pointer;
+                      user-select: none; border-bottom: 2px solid var(--border); white-space: nowrap; }
+table.mods thead th::after { content: " ↕"; opacity: .25; font-size: .85em; }
+table.mods thead th[data-dir="asc"]::after { content: " ↑"; opacity: .9; }
+table.mods thead th[data-dir="desc"]::after { content: " ↓"; opacity: .9; }
+table.mods thead th:hover { color: var(--fg); }
+table.mods tbody tr:hover td { background: var(--hover); }
 table.mods td.n { white-space: nowrap; font-family: var(--mono); font-size: .9em; }
-table.mods td.k { white-space: nowrap; color: var(--muted); font-size: .82em; text-transform: uppercase;
-                  letter-spacing: .03em; }
-table.mods tr:hover td { background: var(--card); }
+table.mods td.k { white-space: nowrap; color: var(--muted); font-size: .85em; }
 
 /* Rendered docstring prose */
 .doc { margin: .2rem 0 1rem; }
-.doc p { margin: .5rem 0; }
+.doc p { margin: .55rem 0; }
 .doc ul { margin: .4rem 0 .8rem; padding-left: 1.4rem; }
 .doc li { margin: .2rem 0; }
 .doc pre { background: var(--card); border: 1px solid var(--border); border-radius: 6px;
@@ -82,11 +91,29 @@ table.mods tr:hover td { background: var(--card); }
 .doc.muted { font-style: italic; }
 """
 
-_FILTER_JS = """\
+_JS = """\
+// Live filter (homepage modules + module-page members)
 const f=document.getElementById('filter');
 if(f){f.addEventListener('input',()=>{const q=f.value.toLowerCase();
 document.querySelectorAll('[data-name]').forEach(el=>{
 el.style.display=el.dataset.name.includes(q)?'':'none';});});}
+
+// Click-to-sort module tables (Notion-style: click a header to toggle asc/desc)
+document.querySelectorAll('table.mods').forEach(t=>{
+  const tb=t.tBodies[0]; if(!tb) return;
+  t.querySelectorAll('thead th').forEach((th,i)=>{
+    th.addEventListener('click',()=>{
+      const asc=th.getAttribute('data-dir')!=='asc';
+      t.querySelectorAll('thead th').forEach(h=>h.removeAttribute('data-dir'));
+      th.setAttribute('data-dir',asc?'asc':'desc');
+      [...tb.rows].sort((a,b)=>{
+        const x=a.cells[i].textContent.trim().toLowerCase();
+        const y=b.cells[i].textContent.trim().toLowerCase();
+        return asc?x.localeCompare(y):y.localeCompare(x);
+      }).forEach(r=>tb.appendChild(r));
+    });
+  });
+});
 """
 
 # --------------------------------------------------------------------------- #
@@ -140,6 +167,16 @@ def _split_paragraphs(doc: str) -> list[list[str]]:
     return blocks
 
 
+def _render_list(lines: list[str]) -> str:
+    items: list[str] = []
+    for ln in lines:
+        if _BULLET_RE.match(ln):
+            items.append(re.sub(r"^\s*[*\-]\s+", "", ln).strip())
+        elif items:  # continuation line of the current bullet
+            items[-1] += " " + ln.strip()
+    return "<ul>" + "".join(f"<li>{_inline(html.escape(it))}</li>" for it in items) + "</ul>"
+
+
 def _render_paragraphs(blocks: list[list[str]]) -> str:
     out: list[str] = []
     for blk in blocks:
@@ -166,16 +203,6 @@ def _cap(text: str) -> str:
     if text and text[0].islower() and (len(text) < 2 or not text[1].isupper()):
         return text[0].upper() + text[1:]
     return text
-
-
-def _render_list(lines: list[str]) -> str:
-    items: list[str] = []
-    for ln in lines:
-        if _BULLET_RE.match(ln):
-            items.append(re.sub(r"^\s*[*\-]\s+", "", ln).strip())
-        elif items:  # continuation line of the current bullet
-            items[-1] += " " + ln.strip()
-    return "<ul>" + "".join(f"<li>{_inline(html.escape(it))}</li>" for it in items) + "</ul>"
 
 
 def _doc_block(doc: str) -> str:
@@ -256,7 +283,7 @@ def _render_module_page(mod: Module) -> str:
     if paras:
         lead = " ".join(ln.strip() for ln in paras[0])
         sub = _cap(_strip_lead(lead))
-        subtitle = f'<p class="subtitle">{_inline(html.escape(sub))}</p>'
+        subtitle = f'<div class="subtitle">{_inline(html.escape(sub))}</div>'
         if len(paras) > 1:
             body_html = _render_paragraphs(paras[1:])
     header = (
@@ -282,9 +309,9 @@ def _render_module_page(mod: Module) -> str:
 
 def _render_index_page(index: Index) -> str:
     body = [
-        "<header><h1>dispatch API reference</h1>"
-        '<p class="muted">Auto-generated from source docstrings. '
-        f"{len(index.modules)} modules across {len(index.packages())} packages.</p></header>",
+        '<header><div class="title-row"><h1>dispatch API reference</h1></div>'
+        '<div class="subtitle">Auto-generated from source docstrings. '
+        f"{len(index.modules)} modules across {len(index.packages())} packages.</div></header>",
         '<input id="filter" placeholder="filter modules…" autocomplete="off">',
     ]
     for pkg in index.packages():
@@ -336,7 +363,7 @@ def build_site(out_dir: str | Path, index: Index | None = None, **index_kwargs) 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "apidocs.css").write_text(_CSS, encoding="utf-8")
-    (out / "apidocs.js").write_text(_FILTER_JS, encoding="utf-8")
+    (out / "apidocs.js").write_text(_JS, encoding="utf-8")
     (out / "index.html").write_text(_render_index_page(index), encoding="utf-8")
     (out / "search.json").write_text(json.dumps(search_records(index), indent=1), encoding="utf-8")
     # GitHub Pages serves Jekyll by default, which drops files it considers
