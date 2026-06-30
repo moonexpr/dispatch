@@ -1,0 +1,4 @@
+target=9001/copyparty
+invocation=/Users/jc/Mendotree/dispatch/dispatch --repo 9001/copyparty --limit 15
+exit_code=0
+generated=2026-06-26T22:50:10Z

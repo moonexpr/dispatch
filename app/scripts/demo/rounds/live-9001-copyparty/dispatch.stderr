@@ -1,0 +1,104 @@
+dispatch: intake fetched 50 item(s)
+ranker: offline deterministic dependency + priority ranking
+  #95871: depth=0 — foundational (no deps)
+  #95873: depth=0 — foundational (no deps)
+  #95875: depth=0 — foundational (no deps)
+  #95878: depth=0 — foundational (no deps)
+  #95891: depth=0 — foundational (no deps)
+  #95894: depth=0 — foundational (no deps)
+  #95895: depth=0 — foundational (no deps)
+  #95904: depth=0 — foundational (no deps)
+  #95907: depth=0 — foundational (no deps)
+  #95910: depth=0 — foundational (no deps)
+  #95915: depth=0 — foundational (no deps)
+  #95921: depth=0 — foundational (no deps)
+  #95927: depth=0 — foundational (no deps)
+  #95941: depth=0 — foundational (no deps)
+  #95966: depth=0 — foundational (no deps)
+  #95977: depth=0 — foundational (no deps)
+  #95985: depth=0 — foundational (no deps)
+  #95997: depth=0 — foundational (no deps)
+  #95998: depth=0 — foundational (no deps)
+  #96007: depth=0 — foundational (no deps)
+  #96009: depth=0 — foundational (no deps)
+  #96016: depth=0 — foundational (no deps)
+  #96020: depth=0 — foundational (no deps)
+  #96046: depth=0 — foundational (no deps)
+  #96054: depth=0 — foundational (no deps)
+  #96056: depth=0 — foundational (no deps)
+  #96064: depth=0 — foundational (no deps)
+  #96075: depth=0 — foundational (no deps)
+  #96079: depth=0 — foundational (no deps)
+  #96084: depth=0 — foundational (no deps)
+  #96088: depth=0 — foundational (no deps)
+  #96093: depth=0 — foundational (no deps)
+  #96098: depth=0 — foundational (no deps)
+  #96101: depth=0 — foundational (no deps)
+  #96102: depth=0 — foundational (no deps)
+  #96103: depth=0 — foundational (no deps)
+  #96111: depth=0 — foundational (no deps)
+  #96115: depth=0 — foundational (no deps)
+  #96116: depth=0 — foundational (no deps)
+  #96118: depth=0 — foundational (no deps)
+  #96125: depth=0 — foundational (no deps)
+  #96126: depth=0 — foundational (no deps)
+  #96135: depth=0 — foundational (no deps)
+  #96148: depth=0 — foundational (no deps)
+  #96153: depth=0 — foundational (no deps)
+  #96156: depth=0 — foundational (no deps)
+  #96161: depth=0 — foundational (no deps)
+  #96163: depth=0 — foundational (no deps)
+  #96165: depth=0 — foundational (no deps)
+  #96168: depth=0 — foundational (no deps)
+── ADMIN: queue ranked by independence/blocking ──
+  1. #95871 [m/gen-default conf 0.7] implement — eligible: Cron agent runs can surface native Codex web_search missing-tool-result as a timeout-shaped cron failure
+  2. #95873 [m/gen-default conf 0.7] implement — eligible: cron_run_logs can drop session_id, provider, and model on early agent failure
+  3. #95875 [l/gen-frontier conf 0.8] implement — eligible: Codex-backed cron runs can appear as canonical openai/openai-chatgpt-responses in transcript metadata, obscuring actual harness selection
+  4. #95878 [s/gen-local conf 0.8] implement — eligible: [Bug]: Telegram long-message auto-split regression still present in 2026.6.9 — 5 truncations in a single session; default config; reproducible
+  5. #95891 [xs/gen-local conf 0.99] implement — eligible: [Bug]: opencode-go/minimax-m3 thinking content leaks to channel via Anthropic Messages path
+  6. #95894 [m/gen-default conf 0.58] implement — eligible: Plugin installs crash Express 4.x routes: core npm-shrinkwrap pins path-to-regexp@8.x but no central override covers plugins
+  7. #95895 [m/gen-default conf 0.7] implement — eligible: [Security]: GEMINI_API_KEY written as a plaintext literal in the generated systemd service unit
+  8. #95904 [xs/gen-local conf 0.8] implement — eligible: [Bug]: Non-Codex fallback models fail code-mode tool calls with internal_error in 2026.6.9
+  9. #95907 [xs/gen-local conf 0.8] implement — eligible: [Bug]:  Isolated cron session agent loop continues consuming tokens after run marked "ok"
+  10. #95910 [s/gen-local conf 0.8] implement — eligible: follow-up to #86034: wake-false path bypasses direct media fallback (Hypothesis B)
+  11. #95915 [m/gen-default conf 0.7] implement — eligible: Heap not released on embedded run abort (released=0); session write lock persists after abort cleanup
+  12. #95921 [xs/gen-local conf 0.68] implement — eligible: [Bug]: `openclaw commitments` table misaligns - truncate() appends a 3-char "..." but reserves 1 char, overflowing padEnd columns by 2
+  13. #95927 [xs/gen-local conf 0.8] implement — eligible: [Bug]: Install bug:No matching version found for node-domexception@1.0.28
+  14. #95941 [s/gen-local conf 0.8] implement — eligible: [Feature] Cron command-payload: add per-stream delivery filter (e.g., deliveryStreams: ["stdout"])
+  15. #95966 [l/gen-frontier conf 0.9] implement — eligible: [Feature]: Implement Protected Content Output Filtering Mechanism
+  16. #95977 [m/gen-default conf 0.7] implement — eligible: [Bug] Discord audioAsVoice follow-up sends lose reply threading
+  17. #95985 [xs/gen-local conf 0.9] implement — eligible: bug(cost): mid-session writes to bootstrap-injected files trigger cacheWrite spiral on long agentic sessions; bootstrap-cache.ts shipped for #43532 is content-equality, not session-freeze
+  18. #95997 [m/gen-default conf 0.7] implement — eligible: CLI gateway calls can poison local device scopes after read probes
+  19. #95998 [xs/gen-local conf 0.68] implement — eligible: [Bug]: ensureGlobalUndiciEnvProxyDispatcher() breaks COS chunked upload via qqbot plugin
+  20. #96007 [m/gen-default conf 0.7] implement — eligible: Discord: subsequent message content truncated after inline error text
+  21. #96009 [m/gen-default conf 0.7] implement — eligible: exec-like tool error warnings still surface when includeDetails is true (resolveToolErrorWarningPolicy guard gap)
+  22. #96016 [xs/gen-local conf 0.8] implement — eligible: [Bug]: Mirror mode with OpenShell >= 0.0.37 creates recursively nested previous-workspace directories in sandbox
+  23. #96020 [xs/gen-local conf 0.68] implement — eligible: sessions_send delivery.status stays "pending" even after inter-session message is delivered
+  24. #96046 [m/gen-default conf 0.58] implement — eligible: Gateway 'plugins.slots.memory: plugin not found' for an extensions/ plugin present in plugins list — 2026.6.9 regression
+  25. #96054 [xs/gen-local conf 0.8] implement — eligible: skill-creator bypasses skill_workshop proposal workflow, violating its own policy
+  26. #96056 [xs/gen-local conf 0.8] implement — eligible: [Feature]: Add non-secret env list support to the OpenShell sandbox config in openclaw.json
+  27. #96064 [m/gen-default conf 0.58] implement — eligible: IRC plugin creates ghost nicks with underscore suffix on nick collision recovery
+  28. #96075 [m/gen-default conf 0.7] implement — eligible: Outbound message ownership can split when agentId and sessionKey disagree
+  29. #96079 [xs/gen-local conf 0.8] implement — eligible: Anthropic models on Discord: reasoning (/reasoning on) and pre-tool narration (/verbose on) are produced but never surfaced in the channel
+  30. #96084 [xs/gen-local conf 0.9] implement — eligible: [Bug]: /readyz stays healthy when PVC-backed workspace is full and writes fail with ENOSPC
+  31. #96088 [m/gen-default conf 0.7] implement — eligible: Gmail watcher stays live after OAuth invalid_grant and failed watch renewal
+  32. #96093 [m/gen-default conf 0.58] wont-do — skip (wont-do): Diagnostics: no model.usage emitted for HTTP ingress (/v1/responses, /v1/chat/completions) — exporters blind to API traffic
+  33. #96098 [xs/gen-local conf 0.8] implement — eligible: [Bug]: Telegram inline buttons stopped working after update to 2026.6.9
+  34. #96101 [m/gen-default conf 0.7] implement — eligible: feat: export OPENCLAW_SESSION_ID to bash tool subprocesses
+  35. #96102 [m/gen-default conf 0.7] implement — eligible: Approval resolution injection loses channel routing target — Agent reply goes to webchat instead of original channel
+  36. #96103 [m/gen-default conf 0.7] implement — eligible: Approval resolution injection loses channel routing target
+  37. #96111 [m/gen-default conf 0.45] implement — skip (conf 0.45 < 0.55): Improve custom provider configuration experience on Windows (4 issues: dual-registration docs, api field reference, schtasks ghost, gateway.cmd path)
+  38. #96115 [m/gen-default conf 0.58] implement — eligible: [Bug]: localModelLean compact tool_call drops flattened target args, causing sticky missing-parameter failures
+  39. #96116 [m/gen-default conf 0.58] implement — eligible: memory index: openclaw memory index --force exits early without processing full backlog, no error logged
+  40. #96118 [m/gen-default conf 0.5] duplicate? — skip (duplicate?): [6.9 Regression] Dreaming runs but memory never promotes + Dreams UI shows dash
+  41. #96125 [xs/gen-local conf 0.9] implement — eligible: [Bug]: wiki_apply & wiki_lint YAML 解析错误
+  42. #96126 [xs/gen-local conf 0.8] implement — eligible: [openclaw status] Model field should distinguish base model from active fallback
+  43. #96135 [l/gen-frontier conf 0.9] implement — eligible: [Bug]: OAuth-backed OpenAI batch audio transcription no longer works after provider migration
+  44. #96148 [xs/gen-local conf 0.9] implement — eligible: Track iMessage source-reply latency instrumentation
+  45. #96153 [m/gen-default conf 0.5] duplicate? — skip (duplicate?): feat: add charter validator command (openclaw agents charter validate)
+  46. #96156 [xs/gen-local conf 0.8] implement — eligible: [Feature]: Let compaction providers be MCP servers
+  47. #96161 [m/gen-default conf 0.5] duplicate? — skip (duplicate?): cron: restart-interrupted run mislabeled lost instead of failed (recovery matches reservation timestamp vs run id started-at)
+  48. #96163 [xs/gen-local conf 0.68] implement — eligible: [Feature]: LINE: file-type audio attachments not transcribed (0-byte download + missed audio detection)
+  49. #96165 [m/gen-default conf 0.7] implement — eligible: Discord: queued messages lose attachments due to CDN URL expiry
+  50. #96168 [m/gen-default conf 0.58] implement — eligible: claude-cli backend: active-tool heartbeat masks wedged subprocesses, defeats stuck-session detection
+── ARCHITECT: primary #95871 (scope m, route gen-default, budget 80,000 tok) ──

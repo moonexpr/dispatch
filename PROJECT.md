@@ -53,7 +53,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
    issue data with a MockActionFactory: real subsystem logic, **no model, no network
    mutations, no PRs**:
    ```bash
-   python3 scripts/demo/roundabout-baseworkflow.py OWNER/REPO ISSUE [ISSUE...]
+   python3 app/scripts/demo/roundabout-baseworkflow.py OWNER/REPO ISSUE [ISSUE...]
    ```
    Prints a per-issue statechart trace, budget meters, and deliverables; ends with
    `roundabout summary: N/N green`.
@@ -83,7 +83,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 | `-r/--repo OWNER/REPO` | target repo (sets `PIPELINE_REPO`) |
 | `-l/--live` | `PIPELINE_DRY_RUN=0` — mutate GitHub (default: dry-run) |
 | `-b/--bootstrap` | provision pipeline labels on the repo first |
-| `-e/--engineer BIN` | Engineer binary (default: SDK engineer; `scripts/mock-engineer.sh` for offline) |
+| `-e/--engineer BIN` | Engineer binary (default: SDK engineer; `app/scripts/mock-engineer.sh` for offline) |
 | `-f/--fixture FILE` | issue-list JSON for fully offline intake |
 | `-u/--until STAGE` | halt after STAGE (dumps artifacts) |
 | `--from STAGE -a/--artifact FILE` | replay from a captured artifact |

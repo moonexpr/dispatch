@@ -4,7 +4,7 @@
 # that runs the pipeline a few times a day under a lock. Edit the paths and the
 # repo below, then install with:
 #
-#     crontab examples/dispatch.crontab
+#     crontab app/installer/dispatch.crontab
 #
 # DRY-RUN IS THE DEFAULT. The tick line below sets PIPELINE_DRY_RUN=0
 # EXPLICITLY to go live — change it to PIPELINE_DRY_RUN=1 (or delete the

@@ -25,9 +25,9 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]  # app/scripts/smoke.py -> repo root
 PY = sys.executable
-sys.path.insert(0, str(ROOT))  # repo root carries the `engine` package
+sys.path.insert(0, str(ROOT))  # repo root carries the foundation/baseworkflow packages
 from foundation import proc  # noqa: E402  (capturing subprocess wrapper)
 
 # Subprocess checks — each self-asserting target must exit 0.

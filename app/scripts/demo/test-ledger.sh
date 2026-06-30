@@ -15,7 +15,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/../.." && pwd)"
+ROOT="$(cd "${HERE}/../../.." && pwd)"
 PY="${PYTHON_BIN:-python3}"
 LEDGER="${ROOT}/src/ledger/ledger.py"
 TMP="$(mktemp -d)"

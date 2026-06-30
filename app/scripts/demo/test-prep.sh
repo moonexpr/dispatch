@@ -26,7 +26,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/../.." && pwd)"
+ROOT="$(cd "${HERE}/../../.." && pwd)"
 PY="${PYTHON_BIN:-python3}"
 PREP="${ROOT}/src/architect/prep.py"
 FIX="${ROOT}/scripts/fixtures"

@@ -44,7 +44,7 @@ import json
 import os
 import sys
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # app/scripts/ -> repo root
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -62,11 +62,10 @@ if _ROOT not in sys.path:
 try:
     from foundation import runtime as _runtime
 
-    _runtime.load_dotenv(
-        os.path.join(_ROOT, "pipeline.env"),
-        preserve=("PIPELINE_DRY_RUN", "PIPELINE_REPO", "DISPATCH_ENGINE",
-                  "MODELS_BACKEND", "CLAUDE_CODE_OAUTH_TOKEN"),
-    )
+    _preserve = ("PIPELINE_DRY_RUN", "PIPELINE_REPO", "DISPATCH_ENGINE",
+                 "MODELS_BACKEND", "CLAUDE_CODE_OAUTH_TOKEN")
+    for _envfile in (".env", "pipeline.env"):
+        _runtime.load_dotenv(os.path.join(_ROOT, _envfile), preserve=_preserve)
 except Exception:  # noqa: BLE001 — dotenv is optional.
     pass
 

@@ -18,7 +18,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/../.." && pwd)"
+ROOT="$(cd "${HERE}/../../.." && pwd)"
 PY="${PYTHON_BIN:-python3}"
 ACP="${ROOT}/src/architect"
 TMP="$(mktemp -d)"

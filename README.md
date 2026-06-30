@@ -63,7 +63,7 @@ cd dispatch
 cp .env.example .env
 
 # 2. Verify the workflow engine.
-python3 scripts/smoke.py
+python3 app/scripts/smoke.py
 
 # 3. Dry-run a tick — prints what it would do, mutates nothing.
 ./dispatch -r owner/repo

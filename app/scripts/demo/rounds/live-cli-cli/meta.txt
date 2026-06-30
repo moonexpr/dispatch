@@ -1,0 +1,4 @@
+target=cli/cli
+invocation=/Users/jc/Mendotree/dispatch/dispatch --repo cli/cli --refresh --limit 20
+exit_code=0
+generated=2026-06-26T23:12:16Z

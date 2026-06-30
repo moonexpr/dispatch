@@ -15,7 +15,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/../.." && pwd)"
+ROOT="$(cd "${HERE}/../../.." && pwd)"
 S="${ROOT}/scripts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT

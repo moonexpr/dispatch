@@ -1,6 +1,6 @@
 # CI — the deterministic gate (HANDOFF §5.5). CI is the SOLE blocking gate;
 # the adversarial review (review.yml) is advisory. For this pipeline repo the
-# gate is scripts/smoke.sh (§7): it runs fully offline + dry-run, so it needs
+# gate is app/scripts/smoke.sh (§7): it runs fully offline + dry-run, so it needs
 # no secrets and mutates nothing.
 name: CI
 
@@ -35,13 +35,13 @@ jobs:
         run: python3 -m pip install --quiet pyyaml jsonschema
 
       - name: Shellcheck scripts
-        # Lint every tracked shell script under scripts/ (recursive: scripts/*.sh
-        # also matches scripts/lib/*.sh, scripts/demo/*.sh (E8), and any future
+        # Lint every tracked shell script under app/scripts/ (recursive: app/scripts/*.sh
+        # also matches app/scripts/lib/*.sh, app/scripts/demo/*.sh (E8), and any future
         # sprint script dir) so new shell can't land unlinted. Driven by
         # `git ls-files` so a not-yet-created dir never breaks the glob, and so
-        # vendor scripts outside scripts/ (.claude/helpers — the ruflo path, #16)
+        # vendor scripts outside app/scripts/ (.claude/helpers — the ruflo path, #16)
         # stay out of scope.
-        run: shellcheck -x --severity=warning --source-path=SCRIPTDIR $(git ls-files 'scripts/*.sh')
+        run: shellcheck -x --severity=warning --source-path=SCRIPTDIR $(git ls-files 'app/scripts/*.sh')
 
       - name: Smoke (workflow-engine gate, dry-run, offline)
-        run: python3 scripts/smoke.py
+        run: python3 app/scripts/smoke.py
