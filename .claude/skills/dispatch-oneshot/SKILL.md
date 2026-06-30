@@ -1,19 +1,19 @@
 ---
-name: deploy:oneshot
+name: dispatch:oneshot
 description: >-
   Run the dispatch pipeline on a task RIGHT NOW, bypassing GitHub issue intake.
   Runs an interview stage to fully specify the work (or accepts a spec you pass
   in), writes a local task file, and feeds it straight into the engine's
   spec → work → build pipeline via scripts/oneshot_feed.py — sequentially, one
-  task fully through before the next. TRIGGER on "/deploy:oneshot", "run this
+  task fully through before the next. TRIGGER on "/dispatch:oneshot", "run this
   through dispatch without filing an issue", "oneshot this task", or "feed this
   straight into the pipeline".
 ---
 
-# /deploy:oneshot — interview, then feed straight into the pipeline
+# /dispatch:oneshot — interview, then feed straight into the pipeline
 
 The normal path files a GitHub issue and waits for intake to pick it up.
-`/deploy:oneshot` skips that: it specifies the work interactively, then feeds it
+`/dispatch:oneshot` skips that: it specifies the work interactively, then feeds it
 **directly** into the dispatch engine, which walks the same `spec → work → build`
 pipeline a real tick does — minus the GitHub issue. Use it to try the pipeline on
 a task immediately, or to run a short sequence of tasks back-to-back without
@@ -104,7 +104,7 @@ GitHub issue via `/dispatch:scope` so it flows through the normal, reviewable pa
 
 ## Relationship to the skill family
 
-- **/dispatch** interviews and routes to the *issue-based* flow; **/deploy:oneshot**
+- **/dispatch** interviews and routes to the *issue-based* flow; **/dispatch:oneshot**
   interviews and routes *straight into the engine*, skipping issues.
 - A oneshot trial that proves out can be promoted to a tracked issue via
   **/dispatch:scope**.
