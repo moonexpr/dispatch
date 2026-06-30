@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """roundabout-baseworkflow.py — run the YAML-driven BaseWorkflow over a live issue.
 
-Drives the new ``engine.workflow`` engine (app/workflows/baseworkflow.yml + the action
+Drives the new ``foundation.workflow`` engine (app/workflows/baseworkflow.yml + the action
 interface files) through the full spec -> work -> build lifecycle on real GitHub
 issue data, deterministically (MockActionFactory: the architect/admin subsystem
 bodies run as oracles — real logic, no model, no network, no side effects). Prints
@@ -20,9 +20,9 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(os.path.dirname(_HERE))
 sys.path.insert(0, _ROOT)
-sys.path.insert(0, os.path.join(_ROOT, "src", "baseworkflow"))
+sys.path.insert(0, os.path.join(_ROOT, "baseworkflow"))
 
-from engine import proc  # noqa: E402  (capturing subprocess wrapper)
+from foundation import proc  # noqa: E402  (capturing subprocess wrapper)
 import baseworkflow as bw  # noqa: E402  (the YAML-driven thin loader)
 
 

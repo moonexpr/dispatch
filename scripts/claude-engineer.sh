@@ -34,7 +34,7 @@
 #   (parity with mock-engineer.sh's role, but for the real backend).
 #
 # Route → model map: resolved by the single source of truth,
-# engine/models.py (model_id_for_route). gen-default→sonnet,
+# foundation/models.py (model_id_for_route). gen-default→sonnet,
 # gen-frontier→opus; gen-local is a FREE VARIABLE (GEN_LOCAL_MODEL, falling back
 # to the haiku tier when no local model is configured). Override the concrete
 # ids per tier in pipeline.env via ANTHROPIC_DEFAULT_MODEL / ANTHROPIC_FRONTIER_MODEL
@@ -60,11 +60,11 @@ source "${SCRIPT_DIR}/lib/common.sh"
 : "${ENGINEER_OFFLINE:=0}"
 
 # model_for_route ROUTE: resolve a gen-* route to a concrete model id via the
-# single source of truth (engine/models.py). Falls back to the sonnet
+# single source of truth (foundation/models.py). Falls back to the sonnet
 # tier id only if that resolver is somehow unavailable, so the engineer never
 # emits an empty model.
 model_for_route() {
-  "${PYTHON_BIN:-python3}" "${SCRIPT_DIR}/../engine/models.py" --route "$1" 2>/dev/null \
+  "${PYTHON_BIN:-python3}" "${SCRIPT_DIR}/../foundation/models.py" --route "$1" 2>/dev/null \
     || printf '%s' "claude-sonnet-4-6"
 }
 

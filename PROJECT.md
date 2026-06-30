@@ -26,12 +26,11 @@ would re-arm.
 ## Running a live engine tick test
 
 The pipeline is pure Python; the unit-of-work lifecycle is the YAML **BaseWorkflow**
-(`app/workflows/baseworkflow.yml`, engine in `engine/workflow/`), driven through the
-orchestration tick in `src/orchestration/`. Entry points:
+(`app/workflows/baseworkflow.yml`, engine in `foundation/workflow/`), driven directly
+by `./dispatch`. Entry point:
 
-- `./dispatch [FLAGS]` — canonical entry; defaults the Engineer to the Claude
-  Agent SDK engineer (`src/orchestration/engineer_sdk.py`).
-- `./pipeline [FLAGS]` — bash wrapper to the same `python3 -m src.orchestration`.
+- `./dispatch [FLAGS]` — canonical entry; runs the BaseWorkflow engine directly,
+  with the Engineer running in-process via the Claude Agent SDK.
 
 Tick stages: `intake → workorder → prep → engineer → intake-invoice → closure`. The
 architect selects which issues to work during `intake` — epics are flagged
@@ -45,8 +44,8 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 
 1. **Validate the workflow YAML** — offline, instant:
    ```bash
-   python3 -m engine.workflow app/workflows/baseworkflow.yml \
-     --registry src.baseworkflow.bindings:build_registry
+   python3 -m foundation.workflow app/workflows/baseworkflow.yml \
+     --registry baseworkflow.bindings:build_registry
    ```
    Expect `[PASS] … (structure + data-flow + tokens; 3 phases)`.
 

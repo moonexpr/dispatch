@@ -3,24 +3,24 @@
 #
 # WebsiteWF reuses baseworkflow's phases (spec → work → build), agents, budgets and
 # wiring verbatim, and applies a small, auditable diff via `extends:` + `overlays:`
-# (merged at load by engine/workflow/overlay.py). Selected at runtime with
+# (merged at load by foundation/workflow/overlay.py). Selected at runtime with
 # DISPATCH_ENGINE=websitewf (baseworkflow is the default authoring engine).
 #
-# The WebsiteWF *engine* (controller + bindings) is a sibling of src/baseworkflow,
-# under src/websitewf/; the web action manifests live in src/websitewf/actions/ and
+# The WebsiteWF *engine* (controller + bindings) is a sibling of baseworkflow,
+# under websitewf/; the web action manifests live in websitewf/actions/ and
 # are pulled in by `uses:` below. Validate with:
-#   python3 -m engine.workflow app/workflows/websitewf.yml \
-#     --registry src.websitewf.bindings:build_registry
+#   python3 -m foundation.workflow app/workflows/websitewf.yml \
+#     --registry websitewf.bindings:build_registry
 name: websitewf
 
 extends: baseworkflow            # inherit baseworkflow's full WorkflowNode (the base
                                  # document is never edited — this file is a diff)
 
 uses:
-  # The web:* action manifests live with the WebsiteWF engine under src/websitewf/;
+  # The web:* action manifests live with the WebsiteWF engine under websitewf/;
   # this workflow doc lives in app/workflows/, so the include reaches across to it
   # (resolved relative to this file's directory).
-  - ../../src/websitewf/actions/*.yml
+  - ../../websitewf/actions/*.yml
 
 # ── overlays ───────────────────────────────────────────────────────────────
 # Ordered, top-to-bottom; a later op sees earlier ops' effect. This first increment

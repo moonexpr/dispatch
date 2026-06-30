@@ -3,8 +3,8 @@
 # An OVERLAY over baseworkflow (extends: baseworkflow + overlays:), sibling to the
 # proof vertical app/workflows/websitewf.yml. See docs/adr/002-websitewf-overlay-layer.md.
 # Validate with:
-#   python3 -m engine.workflow app/workflows/websitewf-adopt-integration.yml \
-#     --registry src.websitewf.usecases.adopt_integration:build_registry
+#   python3 -m foundation.workflow app/workflows/websitewf-adopt-integration.yml \
+#     --registry websitewf.usecases.adopt_integration:build_registry
 name: websitewf-adopt-integration
 
 extends: baseworkflow            # the base document is never edited — this file is a diff
@@ -12,7 +12,7 @@ extends: baseworkflow            # the base document is never edited — this fi
 uses:
   # Manifests for THIS use case's web:* actions live in their own subdir so the base
   # websitewf.yml's single-star glob never picks them up (the 5 verticals never collide).
-  - ../../src/websitewf/actions/adopt_integration/*.yml
+  - ../../websitewf/actions/adopt_integration/*.yml
 
 # ── overlays ───────────────────────────────────────────────────────────────
 # Ordered, top-to-bottom; a later op sees earlier ops' effect.

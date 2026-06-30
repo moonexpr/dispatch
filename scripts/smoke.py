@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """smoke.py — workflow-engine smoke gate (CI).
 
-Tests ONLY the canonical workflow engine (``engine/`` + ``src/baseworkflow/``)
+Tests ONLY the canonical workflow engine (``foundation/`` + ``baseworkflow/``)
 and the architect↔worker SEAM CONTRACT it owns. Carries **no reference to the
 parked legacy pipeline lineage**, which lives in a separate non-functional
 graveyard until its callers are rewired.
 
 Checks:
-  1. workflow validator — engine/workflow over app/workflows/baseworkflow.yml
-     with the src.baseworkflow bindings registry.
-  2. BaseWorkflow engine e2e — src/baseworkflow/test_e2e.py.
+  1. workflow validator — foundation/workflow over app/workflows/baseworkflow.yml
+     with the baseworkflow bindings registry.
+  2. BaseWorkflow engine e2e — baseworkflow/test_e2e.py.
   3. architect↔worker v1 seam contracts — every versioned schema under schemas/
      (WorkOrder / JobRequest / Invoice #143; Issue / Classification / RankedQueue
      / PrEvent / LedgerRecord #145) validates its golden fixture. The schemas and
@@ -28,18 +28,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
 sys.path.insert(0, str(ROOT))  # repo root carries the `engine` package
-from engine import proc  # noqa: E402  (capturing subprocess wrapper)
+from foundation import proc  # noqa: E402  (capturing subprocess wrapper)
 
 # Subprocess checks — each self-asserting target must exit 0.
 SUBPROC_CHECKS: list[tuple[str, list[str]]] = [
     (
-        "workflow validator (engine/workflow + bindings registry over app/workflows/baseworkflow.yml)",
-        [PY, "-m", "engine.workflow", "workflows/baseworkflow.yml",
-         "--registry", "src.baseworkflow.bindings:build_registry"],
+        "workflow validator (foundation/workflow + bindings registry over app/workflows/baseworkflow.yml)",
+        [PY, "-m", "foundation.workflow", "workflows/baseworkflow.yml",
+         "--registry", "baseworkflow.bindings:build_registry"],
     ),
     (
-        "BaseWorkflow engine e2e (src/baseworkflow/test_e2e.py)",
-        [PY, "src/baseworkflow/test_e2e.py"],
+        "BaseWorkflow engine e2e (baseworkflow/test_e2e.py)",
+        [PY, "baseworkflow/test_e2e.py"],
     ),
 ]
 

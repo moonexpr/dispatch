@@ -7,7 +7,7 @@
 # *implementations* are registered binds in src (engineer_actions.py), composed by
 # the namespaced tokens below. End users edit this file + the action interface
 # files — no Python. Validate with:
-#   python3 -m engine.workflow app/workflows/engineer.yml \
+#   python3 -m foundation.workflow app/workflows/engineer.yml \
 #     --registry src.baseworkflow.bindings.engineer:build_registry
 name: engineer
 

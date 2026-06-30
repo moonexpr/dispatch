@@ -2,7 +2,7 @@
 """close-epic1-live.py — drive the dispatch engineer LIVE to close epic #1.
 
 A thin Python driver (no shell) that closes epic #1 of the disposable test target
-by running the dispatch Engineer (``src/orchestration/engineer_sdk.py``, Claude
+by running the dispatch Engineer (``orchestration/engineer_sdk.py``, Claude
 SUBSCRIPTION auth) on its two children in dependency order:
 
   for #4 (Init Next.js+Tailwind) then #5 (site shell):
@@ -28,9 +28,9 @@ REPO = "ReclaimByDesign/dispatch-testrepo-a"
 EPIC = 1
 CHILDREN = [4, 5]
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root (scripts/demo/..)
-ENGINEER = os.path.join(ROOT, "src", "orchestration", "engineer_sdk.py")
+ENGINEER = os.path.join(ROOT, "orchestration", "engineer_sdk.py")
 sys.path.insert(0, ROOT)  # repo root carries the `engine` package
-from engine import proc  # noqa: E402  (capturing subprocess wrapper)
+from foundation import proc  # noqa: E402  (capturing subprocess wrapper)
 
 
 def sh(*args, **kw):

@@ -3,7 +3,7 @@
 # as JSON (fmt), so the inference carries a JSON adapter.
 #
 # An INFERENCE: under ArchitectFactory (baseworkflow's production factory) the LIVE
-# runner drives a real Claude agent (engine.agent_sdk) to arrange the epic's work
+# runner drives a real Claude agent (foundation.agent_sdk) to arrange the epic's work
 # units and assign an engineer agent that commits to each, layered on the
 # deterministic baseline. The `bind: draft_work_plan` body is the dry-run/mock
 # ORACLE (compiled in by CompileVisitor), so offline + CI stay byte-identical and

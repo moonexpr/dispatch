@@ -60,7 +60,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 try:
-    from engine import runtime as _runtime
+    from foundation import runtime as _runtime
 
     _runtime.load_dotenv(
         os.path.join(_ROOT, "pipeline.env"),
@@ -73,8 +73,8 @@ except Exception:  # noqa: BLE001 — dotenv is optional.
 os.environ.setdefault("MODELS_BACKEND", "cli")
 
 _ENGINES = {
-    "baseworkflow": "src.baseworkflow.baseworkflow",
-    "websitewf": "src.websitewf.websitewf",
+    "baseworkflow": "baseworkflow.baseworkflow",
+    "websitewf": "websitewf.websitewf",
 }
 
 _DEFAULT_TRIAGE = {"action": "implement", "scope": "m", "route": "gen-default", "confidence": 0.9}

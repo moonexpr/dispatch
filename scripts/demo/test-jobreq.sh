@@ -104,7 +104,7 @@ done <<< "${A_OUT}"
 
 echo
 echo "-- A2. gen-* route -> model resolution (single source of truth: models.py) --"
-MR() { "${PY}" "${ROOT}/engine/models.py" --route "$1" 2>/dev/null; }
+MR() { "${PY}" "${ROOT}/foundation/models.py" --route "$1" 2>/dev/null; }
 assert_eq "gen-default -> sonnet"        "claude-sonnet-4-6"          "$(MR gen-default)"
 assert_eq "gen-frontier -> opus"         "claude-opus-4-8"            "$(MR gen-frontier)"
 assert_eq "gen-local -> haiku (no local model defined)" "claude-haiku-4-5-20251001" "$(MR gen-local)"

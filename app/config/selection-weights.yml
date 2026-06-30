@@ -1,6 +1,6 @@
 # selection-weights.yml — data-driven priority weights for issue selection.
 #
-# Consumed by src/intake/ranker.py (priority_key). Edit this file to retune
+# Consumed by intake/ranker.py (priority_key). Edit this file to retune
 # selection ordering without touching Python. Override the path with the env var
 # DISPATCH_SELECTION_WEIGHTS. A missing/corrupt file falls back to these same
 # defaults in code, so the pipeline always has a usable shape.
@@ -46,7 +46,7 @@ feature_labels:
 # AFTER the hard-wired primary key (dependency depth, foundational-first — a
 # correctness constraint, never listed here and never reorderable). priority_key
 # builds its sort tuple by walking this list top-to-bottom; earlier entries
-# dominate. The matchers/extractors stay in Python (src/intake/ranker.py); only
+# dominate. The matchers/extractors stay in Python (intake/ranker.py); only
 # this ordering/precedence is data.
 #
 # Each entry:

@@ -2,7 +2,7 @@
 # (the first gh-MUTATING action in the workflow engine). A procedure; it reads the
 # engineering result + the job, performs gh writes (gated on ctx.dry_run inside the
 # binding), and records the transition it performed/intended on the deliverables
-# shelf. Ported from the deprecated src/orchestration/visitors.py.
+# shelf. Ported from the deprecated orchestration/visitors.py.
 token: admin:intake_invoice
 kind: procedure
 bind: intake_invoice

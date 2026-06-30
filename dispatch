@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """dispatch — entry point + router for the dispatch workflow engine.
 
-Drives the **BaseWorkflow** engine (``engine/`` + ``src/baseworkflow``) — or the
-**WebsiteWF** overlay engine (``src/websitewf``) when ``DISPATCH_ENGINE=websitewf`` —
+Drives the **BaseWorkflow** engine (``foundation/`` + ``baseworkflow``) — or the
+**WebsiteWF** overlay engine (``websitewf``) when ``DISPATCH_ENGINE=websitewf`` —
 directly over a GitHub issue. The router (this file) fetches the issue, builds the
 ``job`` + ``triage``, selects the engine, and runs its ``spec -> work -> build``
 lifecycle. The engine's **Admin** phase owns the GitHub lifecycle (claim / PR /
 closure) gated by ``PIPELINE_DRY_RUN``: dry-run is the default; ``-l/--live`` opts
 into real ``gh`` mutations.
 
-The legacy ``src/orchestration`` visitor-pattern tick is retired — its stage-walk
+The legacy ``orchestration`` visitor-pattern tick is retired — its stage-walk
 is dead code; the workflow engine is the single execution layer (the engineer runs
 in-process via the deserialized orchestration script, so there is no ENGINEER_BIN
 shell-out here).
@@ -69,8 +69,8 @@ except Exception:  # noqa: BLE001 — dotenv is optional.
 os.environ.setdefault("MODELS_BACKEND", "cli")
 
 _ENGINES = {
-    "baseworkflow": "src.baseworkflow.baseworkflow",
-    "websitewf": "src.websitewf.websitewf",
+    "baseworkflow": "baseworkflow.baseworkflow",
+    "websitewf": "websitewf.websitewf",
 }
 
 
@@ -189,7 +189,7 @@ def main(argv: list) -> int:
     os.environ["PIPELINE_REPO"] = opts["repo"]
     os.environ["PIPELINE_DRY_RUN"] = "0" if opts["live"] else "1"
     if opts["verbose"]:
-        # Stream the engine's per-action trace (engine/actions/action.py) so a long
+        # Stream the engine's per-action trace (foundation/actions/action.py) so a long
         # or hanging tick shows live progress, not just a post-run dump.
         os.environ["DISPATCH_DEBUG"] = "1"
 

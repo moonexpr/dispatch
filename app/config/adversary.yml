@@ -1,9 +1,9 @@
 # adversary.yml — cross-model adversarial weigh-in before escalation (#111).
 #
-# Read by src/orchestration/adversary.py via the engine.filesys facade. A
+# Read by orchestration/adversary.py via the foundation.filesys facade. A
 # missing/corrupt file falls back to the same defaults in code, so the pipeline
 # always has a usable shape. Override the path with DISPATCH_ADVERSARY_CONFIG
-# only if needed (absolute paths pass through engine.filesys.resolve).
+# only if needed (absolute paths pass through foundation.filesys.resolve).
 #
 # The gate is ADVISORY and FAIL-OPEN: it never vetoes or blocks an escalation,
 # it never runs a live model under dry-run, and any error/timeout degrades to

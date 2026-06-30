@@ -8,7 +8,7 @@
 #   issues_affected — the set of issue ids one plan resolves together
 #                     (purely administrative; never changes strategy/harness).
 #
-# Consumed by src/architect/purpose.py and src/architect/strategy.py.
+# Consumed by architect/purpose.py and architect/strategy.py.
 # Edit this file to retune classification/derivation WITHOUT touching Python.
 # Override the path with DISPATCH_WORKPLAN_RULES. A missing/corrupt file falls
 # back to equivalent in-code defaults, so the pipeline always has a usable shape.
@@ -129,7 +129,7 @@ issues_affected:
 # ---------------------------------------------------------------------------
 # PREP — the harness-prep stage (#102): provision the declared harness BEFORE
 # the job is issued to the Engineer (intake -> workorder -> [prep] -> engineer).
-# Consumed by src/architect/prep.py + scripts/lib/common.sh::prep_stage.
+# Consumed by architect/prep.py + scripts/lib/common.sh::prep_stage.
 # ---------------------------------------------------------------------------
 prep:
   # The provisioner kinds the prep stage knows how to ready. A harness whose

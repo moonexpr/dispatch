@@ -48,7 +48,7 @@ SECURITY NOTE
 -------------
 This resolver is 100% offline: no network, no subprocess, no eval/exec. Issue
 text from the snapshot/overlay is treated strictly as DATA — never evaled,
-shell-expanded, or interpreted (matches src/intake/intake.py and the
+shell-expanded, or interpreted (matches intake/intake.py and the
 CLAUDE.md untrusted-input posture). Files are loaded via open(), not shell
 expansion. Zero exec capability is enforced by the §8 AST check in smoke.sh.
 """
