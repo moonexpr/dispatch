@@ -12,9 +12,11 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)  # <root>/baseworkflow -> <root>
-for p in (_ROOT,):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+# Force <root> ahead of this script's own dir: that dir holds baseworkflow.py, which
+# would otherwise shadow the `baseworkflow` PACKAGE when PYTHONPATH already lists it.
+while _ROOT in sys.path:
+    sys.path.remove(_ROOT)
+sys.path.insert(0, _ROOT)
 
 from foundation.actions.action import BudgetMeter, Context  # noqa: E402
 from foundation.actions.shelf import MemoryShelf, Shelves  # noqa: E402
