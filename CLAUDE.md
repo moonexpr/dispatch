@@ -7,6 +7,34 @@ worker session invoked by it (via `/implement-task`, `/fix-ci`, or
 `/update-docs`), this contract is binding.
 Read it before acting.
 
+## What dispatch is (orientation)
+
+dispatch is a small, focused **orchestration tool over a workflow engine** — a
+declarative, programmable surface over the management of user requests, resources,
+LLM agents, communication, and failure recovery. It sits one level above raw
+model/agent libraries (Transformers, OpenRouter). Grounded scope: **task
+decomposition, slice-based work processing, admin validation, and arbitrary
+inputs/outputs**. GitHub-issue intake is one input *adapter*, not the core.
+
+Keep a clear boundary between three layers — never let a higher layer's concerns
+leak down, or consumer code reach past its own:
+
+1. **Foundation tooling** (`foundation/`) — agents, backends, models, shelves,
+   proc/filesys primitives.
+2. **Workflow-engine subsystems** (`foundation/workflow/`, `baseworkflow/`
+   subsystems) — the HFSM/statechart engine, controllers, actions, manifests,
+   validation.
+3. **Consumer app code** (`app/`) — concrete workflows, config, `./dispatch`, the
+   `/dispatch` skills.
+
+Roadmap principle: **1.x is refinement and discipline; 2.0 is expansion.** 1.x
+hardens the existing single-host pipeline (decoupling, tool/shelf/serialization
+hygiene, containerized worker isolation, superseedable HFSM states + event
+responders); 2.0 builds outward (OpenRouter backends, declarative profiles, a
+multi-host fleet dispatcher). A scriptable workflow language is exploratory, not
+committed scope. Tracked in the umbrella epic; see [`README.md`](./README.md) →
+*What dispatch is* for the full framing.
+
 ## Branch & merge discipline (current — production)
 
 This repo is **released / production** — `Development Status: 1.0` in
