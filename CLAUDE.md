@@ -27,9 +27,12 @@ leak down, or consumer code reach past its own:
 3. **Consumer app code** (`app/`) — concrete workflows, config, `./dispatch`, the
    `/dispatch` skills.
 
-Roadmap: **1.x** adds superseedable HFSM states + per-workflow event responders
-(committed); **v2.0** is tracked in the umbrella epic; a scriptable workflow
-language is exploratory, not committed scope. See [`README.md`](./README.md) →
+Roadmap principle: **1.x is refinement and discipline; 2.0 is expansion.** 1.x
+hardens the existing single-host pipeline (decoupling, tool/shelf/serialization
+hygiene, containerized worker isolation, superseedable HFSM states + event
+responders); 2.0 builds outward (OpenRouter backends, declarative profiles, a
+multi-host fleet dispatcher). A scriptable workflow language is exploratory, not
+committed scope. Tracked in the umbrella epic; see [`README.md`](./README.md) →
 *What dispatch is* for the full framing.
 
 ## Branch & merge discipline (current — production)

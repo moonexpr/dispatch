@@ -66,17 +66,23 @@ flexible enough to take on new workflow problems.
 
 ### Roadmap
 
-- **1.x (committed)** — *superseedable HFSM states* (a more pressing state can
-  preempt the active one when the scenario calls for it) and *per-workflow event
-  responders* (handlers for unexpected lifecycle conditions — e.g. no ready issues →
-  exit; missing information → open a clarifying ticket). dispatch behaves less like
-  a straight-line program and more like an agent with reflexes: a general plan plus
-  responders for the unexpected.
-- **v2.0** — proxy tools for context management, OpenRouter backends with
-  backend-bound/declarative agent profiles, TOON serialization for agent-bound data,
-  a debuggable shelf redesign, Docker-based remote workers with a
-  CPU-pressure-aware fleet dispatcher, and decoupling GitHub-issue intake from core
-  orchestration. Tracked in the v2.0 umbrella epic.
+The guiding principle: **1.x is refinement and discipline; 2.0 is expansion.** 1.x
+hardens the existing single-host pipeline — clean layering, decoupling, and
+serialization/tool/shelf hygiene — *before* 2.0 builds outward with new backends,
+multi-host scaling, and new surfaces.
+
+- **1.x — refinement & discipline.** Superseedable HFSM states (a more pressing
+  state can preempt the active one) and per-workflow event responders (handlers for
+  unexpected lifecycle conditions — e.g. no ready issues → exit; missing information
+  → open a clarifying ticket), so dispatch behaves less like a straight-line program
+  and more like an agent with reflexes. Plus the discipline work that keeps the
+  layers clean: decoupling GitHub-issue intake from core, agent-runtime / tool-layer
+  hardening, shelf observability and typing, a typed wire contract, TOON
+  serialization for agent-bound data, proxy tools for context management, the
+  live-parallelism fix, and containerized worker isolation on a single host.
+- **2.0 — expansion.** OpenRouter (tool-using) backends, declarative backend-bound
+  agent profiles, and a CPU-pressure-aware fleet dispatcher that scales containerized
+  workers across multiple hosts. Built outward on the refined 1.x layers.
 - **Exploratory (not committed)** — a readable, debuggable scriptable workflow
   language expressing asynchronous communication, function composition, and
   parameterizable invocation. Direction, not scope.
