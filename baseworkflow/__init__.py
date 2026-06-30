@@ -11,6 +11,13 @@ through the factory.
 """
 from __future__ import annotations
 
+# Composition root: importing this package registers the concrete Tuning service
+# (foundation.workflow.tuning.Tuning -> baseworkflow.tuning.YamlTuning) into the
+# service container, so any subsystem that resolves Tuning at import time finds it
+# wired. MUST precede the .baseworkflow import below (which transitively imports those
+# subsystems).
+from . import tuning as _tuning  # noqa: F401 — import for the registration side effect
+
 from .baseworkflow import (
     ADMIN_BUDGET,
     ARCHITECT_BUDGET,

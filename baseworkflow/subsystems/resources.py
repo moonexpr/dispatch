@@ -20,7 +20,11 @@ import sys
 from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import tuning  # noqa: E402
+from foundation.workflow.tuning import get_tuning  # noqa: E402
+
+_tuning = get_tuning()
+_RES_CAPS = _tuning.res_caps
+_INTAKE_CAPS = _tuning.intake_caps
 
 # Explicit repo-relative paths, e.g. scripts/lib/common.sh, intake/x.py
 _PATH_RE = re.compile(r'(?:scripts|src|schemas|\.github|docs)/[\w./-]+\.\w+')
@@ -30,14 +34,14 @@ _FILE_RE = re.compile(r'\b[\w-]+\.(?:sh|py|json|md|ya?ml)\b')
 _FUNC_RE = re.compile(r'\b([a-z_][a-z0-9_]+)\(\)')
 
 # Embedding caps — tunable via app/config/tuning.yml (generation.resources).
-_MAX_FILES = tuning.RES_CAPS["max_files"]   # cap embedded referenced files (logged when exceeded)
-_CAP_BYTES = tuning.RES_CAPS["cap_bytes"]   # cap bytes per embedded file (logged when truncated)
+_MAX_FILES = _RES_CAPS["max_files"]   # cap embedded referenced files (logged when exceeded)
+_CAP_BYTES = _RES_CAPS["cap_bytes"]   # cap bytes per embedded file (logged when truncated)
 
 # Conversation + history caps (#132) — tunable via app/config/tuning.yml
 # (generation.intake). Keep a busy thread from blowing the plan's read budget.
-_MAX_COMMENTS = tuning.INTAKE_CAPS["max_comments"]
-_COMMENT_CAP = tuning.INTAKE_CAPS["comment_cap_bytes"]
-_HISTORY_CAP = tuning.INTAKE_CAPS["history_cap_bytes"]
+_MAX_COMMENTS = _INTAKE_CAPS["max_comments"]
+_COMMENT_CAP = _INTAKE_CAPS["comment_cap_bytes"]
+_HISTORY_CAP = _INTAKE_CAPS["history_cap_bytes"]
 
 
 def _safe_isfile(repo_root: str, rel: str):
@@ -222,7 +226,7 @@ def gather(job: Dict[str, Any], repo_root: str,
     schema = None
     spath = os.path.join(repo_root, "schemas", "invoice.json")
     if os.path.isfile(spath):
-        schema, _ = _read_capped(spath, cap=tuning.RES_CAPS["schema_cap"])
+        schema, _ = _read_capped(spath, cap=_RES_CAPS["schema_cap"])
 
     # Conversation + relevant history (#132): the issue's comment thread and a
     # commit/PR slice, capped for embedding. Untrusted data — capped, never

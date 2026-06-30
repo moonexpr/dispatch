@@ -19,30 +19,32 @@ import sys
 from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import tuning  # noqa: E402
+from foundation.workflow.tuning import get_tuning  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # architect dir (verify)
 import verify  # noqa: E402
 
+_tuning = get_tuning()
+
 # Hard cap on agents (= number of units). Tunable via app/config/tuning.yml
 # (generation.decompose.swarm_max).
-_SWARM_MAX = tuning.SWARM_MAX
+_SWARM_MAX = _tuning.swarm_max
 
 # Complexity-aware staffing knobs (#134) — all thresholds/counts live in config
 # (generation.decompose.complexity); this module only matches + renders.
-_CX = tuning.DECOMPOSE_COMPLEXITY
+_CX = _tuning.decompose_complexity
 
 # Work-order UNIT TEXT templates (#144) — the template STRINGS live in config
 # (generation.decompose.templates); this module COMPUTES the fields
 # (issue/path/gate/focus/suffix) and fills them via str.format. A missing config
 # falls back to DEFAULTS (byte-identical text).
-_TPL = tuning.DECOMPOSE_TEMPLATES
+_TPL = _tuning.decompose_templates
 
 # Feature-decomposition knobs (greenfield multi-feature builds). When a job is a
 # "build an app" ask that enumerates features/pages/routes AND references no
 # existing files, decompose by FEATURE: a foundation unit, then one unit per
 # feature (a parallel wave of team agents), then the verify tail. Config lives in
 # generation.decompose.features; this module only matches + renders.
-_FEAT = tuning.DECOMPOSE_FEATURES
+_FEAT = _tuning.decompose_features
 _FTPL = dict(_FEAT.get("templates") or {})
 
 # Light backend-vs-frontend hint for staffing a feature unit (data only).
@@ -55,7 +57,7 @@ _BUILD_SIGNALS = [str(s).lower() for s in (_FEAT.get("build_signals") or [])]
 # Research-slice knobs (generation.decompose.research). When an issue has an
 # information gap, the architect schedules a RESEARCH unit (deep /deep-research or
 # surface /research) ahead of implementation; the implementation units depend on it.
-_RES = tuning.DECOMPOSE_RESEARCH
+_RES = _tuning.decompose_research
 _RTPL = dict(_RES.get("templates") or {})
 _RESEARCH_LABELS = [str(s).lower() for s in (_RES.get("labels") or [])]
 _DEEP_RESEARCH_LABELS = [str(s).lower() for s in (_RES.get("deep_labels") or [])]
@@ -70,7 +72,7 @@ def _spec_for(path: str):
     (generation.decompose.specialization_rules) and are evaluated by
     tuning.spec_for — edit the config to retune staffing labels.
     """
-    return tuning.spec_for(path)
+    return _tuning.spec_for(path)
 
 
 def _spec(function: str, domain: str) -> Dict[str, str]:

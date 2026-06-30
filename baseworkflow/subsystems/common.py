@@ -357,21 +357,18 @@ def reaper_epoch_of(v: str):
 
 
 def reaper_timeout_hours():
-    """env override -> tuning.json recovery.reaper_timeout_hours -> 4."""
+    """env override -> tuning recovery.reaper_timeout_hours -> 4."""
     override = os.environ.get("DISPATCH_CLAIM_TIMEOUT_HOURS", "")
     if override:
         return override
-    v = proc.run_text(
-        [
-            os.environ["PYTHON_BIN"],
-            "-c",
-            "import tuning; v=tuning.RECOVERY_REAPER_TIMEOUT_HOURS; "
-            "print(int(v) if float(v).is_integer() else v)",
-        ],
-        default="",
-        env={**os.environ, "PYTHONPATH": str(PIPELINE_ROOT)},
-    )
-    return v if v else "4"
+    t = _routing_tuning()
+    if t is None:
+        return "4"
+    try:
+        v = t.recovery_reaper_timeout_hours
+        return str(int(v) if float(v).is_integer() else v)
+    except Exception:  # noqa: BLE001 — never break a tick on a config hiccup
+        return "4"
 
 
 # ------------------------------ Run-ledger (E4 / #36) ----------------------
@@ -494,13 +491,13 @@ def claude_invoke(workflow: str, args_json: str) -> int:
 # unimportable, _routing_tuning() returns None and the helpers degrade to the
 # documented defaults rather than breaking the tick.
 def _routing_tuning():
-    """Lazily import the tuning module (repo root on the path). None if unavailable."""
-    src_dir = str(PIPELINE_ROOT)
-    if src_dir not in sys.path:
-        sys.path.insert(0, src_dir)
+    """Resolve the registered Tuning service (the routing config), or None when none is
+    registered — the helpers then degrade to the documented fail-safe defaults. Imported
+    lazily so this quarantine-path module stays import-light at load time."""
     try:
-        import tuning  # noqa: PLC0415 — lazy by design (quarantine-safe)
-        return tuning
+        from foundation.service_container import services  # noqa: PLC0415 — lazy by design
+        from foundation.workflow.tuning import Tuning  # noqa: PLC0415
+        return services.try_resolve(Tuning)
     except Exception:  # noqa: BLE001 — routing must never break the tick
         return None
 
@@ -520,7 +517,7 @@ _FALLBACK_NEEDS_HUMAN = "needs-human"  # policy-literal-ok: config fail-safe
 # from app/config/tuning.yml (routing.needs_human_route) when the config loads.
 def _needs_human_route() -> str:
     t = _routing_tuning()
-    return t.NEEDS_HUMAN_ROUTE if t is not None else _FALLBACK_NEEDS_HUMAN
+    return t.needs_human_route if t is not None else _FALLBACK_NEEDS_HUMAN
 
 
 NEEDS_HUMAN_ROUTE = _needs_human_route()
@@ -531,7 +528,7 @@ def fix_attempt_cap() -> int:
     routing.fix_attempt_cap. Falls back to 3 (the historical ladder length)."""
     t = _routing_tuning()
     if t is not None:
-        return t.FIX_ATTEMPT_CAP
+        return t.fix_attempt_cap
     return 3
 
 
@@ -569,7 +566,7 @@ def _reconcile_confidence_threshold() -> None:
         return
     try:
         os.environ["PIPELINE_CONFIDENCE_THRESHOLD"] = (
-            f"{float(t.CONFIDENCE_THRESHOLD):g}")
+            f"{float(t.confidence_threshold):g}")
     except Exception:  # noqa: BLE001 — never break import on a config hiccup
         pass
 

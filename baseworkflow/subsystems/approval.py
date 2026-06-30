@@ -17,16 +17,17 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import tuning  # noqa: E402
+from foundation.workflow.tuning import get_tuning  # noqa: E402
 
+_tuning = get_tuning()
 # scope -> total token budget ADMIN authorizes for the job.
 # Tunable via app/config/tuning.yml (generation.approval.scope_budget).
-_SCOPE_BUDGET = tuning.SCOPE_BUDGET
+_SCOPE_BUDGET = _tuning.scope_budget
 
 # Fraction of the budget allocated per phase. The remainder (~0.20) is held as
 # contingency reserve — PLAY.md Act II: "hold the reserve, do not pre-spend it."
 # Tunable via app/config/tuning.yml (generation.approval.phase_split).
-_PHASE_SPLIT = tuning.PHASE_SPLIT
+_PHASE_SPLIT = _tuning.phase_split
 
 
 @dataclass(frozen=True)

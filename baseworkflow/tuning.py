@@ -30,8 +30,9 @@ _TUNING_REL = "config/tuning.yml"
 
 # Repo root on sys.path so ``from foundation import filesys`` resolves regardless of
 # how this module was imported (consumers put only the repo root on PYTHONPATH). This
-# is path-only — no import side effects — mirroring workplan_config's seam.
-_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+# is path-only — no import side effects — mirroring workplan_config's seam. This module
+# lives at ``<root>/baseworkflow/tuning.py``, so the repo root is two levels up.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
@@ -609,3 +610,71 @@ def spec_for(path: str) -> Tuple[str, str]:
         if any(_cond(c, p, base) for c in rule.get("any", [])):
             return rule["function"], rule["domain"]
     return "engineer", "general software"
+
+
+# ---------------------------------------------------------------------------
+# Composition — the YAML-backed concrete Tuning and its registration into the
+# service container. Consumers resolve the Tuning INTERFACE
+# (foundation.workflow.tuning.Tuning) and never reach for this module's globals.
+# ---------------------------------------------------------------------------
+from foundation.service_container import services  # noqa: E402
+from foundation.workflow.tuning import Tuning  # noqa: E402
+
+
+class YamlTuning(Tuning):
+    """The concrete tuning surface, backed by ``app/config/tuning.yml`` (loaded once into
+    this module's constants above). Each member is a thin facade over those values, so the
+    YAML stays the single edit point while consumers depend only on the interface."""
+
+    def spec_for(self, path):
+        return spec_for(path)
+
+    def route_for_scope(self, scope):
+        return route_for_scope(scope)
+
+    def tier_for_attempt(self, attempt):
+        return tier_for_attempt(attempt)
+
+    @property
+    def scope_budget(self): return SCOPE_BUDGET
+
+    @property
+    def phase_split(self): return PHASE_SPLIT
+
+    @property
+    def swarm_max(self): return SWARM_MAX
+
+    @property
+    def decompose_complexity(self): return DECOMPOSE_COMPLEXITY
+
+    @property
+    def decompose_templates(self): return DECOMPOSE_TEMPLATES
+
+    @property
+    def decompose_features(self): return DECOMPOSE_FEATURES
+
+    @property
+    def decompose_research(self): return DECOMPOSE_RESEARCH
+
+    @property
+    def res_caps(self): return RES_CAPS
+
+    @property
+    def intake_caps(self): return INTAKE_CAPS
+
+    @property
+    def recovery_reaper_timeout_hours(self): return RECOVERY_REAPER_TIMEOUT_HOURS
+
+    @property
+    def confidence_threshold(self): return CONFIDENCE_THRESHOLD
+
+    @property
+    def fix_attempt_cap(self): return FIX_ATTEMPT_CAP
+
+    @property
+    def needs_human_route(self): return NEEDS_HUMAN_ROUTE
+
+
+# Register the singleton at import. Importing any ``baseworkflow`` module wires this
+# (the composition root is baseworkflow/__init__.py) before consumers resolve Tuning.
+services.register(Tuning, YamlTuning())
