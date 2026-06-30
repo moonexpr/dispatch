@@ -162,10 +162,84 @@ def test_shared_shelf_is_write_serialized() -> None:
           f"all {expected} concurrent writes survived (no lost/torn writes)")
 
 
+def _supervised_chart(runs, injected, *, retry_cap):
+    """A leaf that raises ``slice.failed`` + errors until it has run > retry_cap
+    times, nested inside an inner COMPOUND that does NOT handle that event, inside
+    a supervising LOOP that DOES (guard caps retries; action records a 'history'
+    injection). Exercises (a) up-propagation past the non-handling parent and
+    (b) the guarded event-triggered retry — the supervisor pattern."""
+    from engine.actions.action import Procedure
+    from engine.actions.statechart import (
+        COMPOUND, EV_DONE, EV_ERROR, LEAF, LOOP, T_DONE, T_ERROR, State, Statechart, Transition,
+    )
+    from engine.actions.result import Error, Output
+
+    def work(payload, ctx):
+        runs.append(1)
+        if len(runs) <= retry_cap:           # fail-then-raise for the first cap runs
+            ctx.raise_event("slice.failed", {"attempt": len(runs)})
+            return Error(f"slice failed attempt {len(runs)}")
+        return Output(f"slice ok after {len(runs)}")
+
+    leaf = State(id="sup/inner/work", kind=LEAF, activity=Procedure("work", work))
+    inner = State(  # deliberately has NO slice.failed transition -> event must bubble up
+        id="sup/inner", kind=COMPOUND, children=[leaf], initial=leaf.id,
+        transitions=[Transition(source=leaf.id, event=EV_DONE, target=T_DONE),
+                     Transition(source=leaf.id, event=EV_ERROR, target=T_ERROR)],
+    )
+
+    def retry_guard(result, ctx):
+        return len(runs) <= retry_cap        # retry only while not yet succeeded
+
+    def inject_history(result, ctx):
+        injected.append(result.value)        # the 'prior attempt' the supervisor would inject
+
+    sup = State(
+        id="sup", kind=LOOP, children=[inner], initial=inner.id,
+        transitions=[
+            Transition(source=inner.id, event="slice.failed", target=inner.id,
+                       guard=retry_guard, guard_name="retries<cap", action=inject_history),
+            Transition(source=inner.id, event=EV_DONE, target=T_DONE),
+            Transition(source=inner.id, event=EV_ERROR, target=T_ERROR),
+        ],
+    )
+    return Statechart(root=sup)
+
+
+def test_named_event_propagates_and_retries():
+    """A leaf raises a named event; a SUPERVISING loop two levels up catches it and
+    retries with a guard, while the immediate parent ignores it (up-propagation)."""
+    runs, injected = [], []
+    chart = _supervised_chart(runs, injected, retry_cap=2)  # fail twice, then succeed
+    result = Interpreter(chart, _ctx()).run()
+    check(result.ok, "supervised chart completes once the slice eventually succeeds")
+    check(len(runs) == 3, f"slice ran 3x (2 supervised retries + success); got {len(runs)}")
+    check(len(injected) == 2, f"supervisor action fired once per retry; got {len(injected)}")
+
+
+def test_named_event_retry_exhaustion():
+    """When the retry guard is exhausted, the named event is NOT consumed; the failure
+    falls through to the error edge and propagates out (no infinite retry)."""
+    runs, injected = [], []
+    chart = _supervised_chart(runs, injected, retry_cap=99)  # always fails
+    # cap retries at 1 by overriding the guard via a tighter chart:
+    runs2, injected2 = [], []
+    chart2 = _supervised_chart(runs2, injected2, retry_cap=99)
+    # find the slice.failed transition and tighten its guard to allow exactly 1 retry
+    for t in chart2.root.transitions:
+        if t.event == "slice.failed":
+            t.guard = lambda result, ctx: len(runs2) < 2
+    result = Interpreter(chart2, _ctx()).run()
+    check(not result.ok, "exhausted retries surface as a failure, not a hang")
+    check(len(runs2) == 2, f"slice ran exactly 2x (initial + 1 retry) then gave up; got {len(runs2)}")
+
+
 def main() -> int:
     test_resume_flat_sequence()
     test_resume_nested_configuration()
     test_shared_shelf_is_write_serialized()
+    test_named_event_propagates_and_retries()
+    test_named_event_retry_exhaustion()
     print(f"\nstatechart: {_PASSED} checks passed")
     return 0
 

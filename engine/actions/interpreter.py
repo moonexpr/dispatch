@@ -52,15 +52,23 @@ from .statechart import (
 
 @dataclass
 class Event:
-    """A completion event placed on the agenda by a finishing leaf."""
+    """An event on the agenda. Completion events (``EV_DONE``/``EV_ERROR``) are
+    raised by a finishing leaf and select among the immediate superstate's edges.
+    A *named* event (``external=True``) is raised by an activity via
+    ``ctx.raise_event`` and PROPAGATES up the active configuration until a
+    superstate handles it — the broadcast seam (ADR-001). ``payload`` carries the
+    raised value; it is wrapped as the Result handed to a named transition's
+    action/guard."""
 
     source: str
-    name: str  # EV_DONE | EV_ERROR
+    name: str  # EV_DONE | EV_ERROR | a named event
     result: Result
     external: bool = False
+    payload: Any = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"source": self.source, "event": self.name, "ok": self.result.ok}
+        return {"source": self.source, "event": self.name, "ok": self.result.ok,
+                "external": self.external}
 
 
 @dataclass
@@ -113,6 +121,7 @@ class Interpreter:
         again (the guarded self-transition); the live iteration count is published
         on ``ctx.counters[state.id]`` for its guard to read."""
         self.config.enter(state.id)
+        child_ids = {c.id for c in state.children}
         try:
             cur_id = self._initial_child(state)
             feed = payload
@@ -125,19 +134,39 @@ class Interpreter:
                     iteration += 1
                     self.ctx.counters[state.id] = iteration
                 result = self._run_state(child, feed)
-                event = EV_DONE if result.ok else EV_ERROR
-                self._emit(Event(source=cur_id, name=event, result=result))
-                nxt = self._select(state, cur_id, event, result)
+                # Collect any named events the child subtree raised onto the external
+                # queue, then give a SUPERVISING transition at this level first refusal:
+                # a named-event edge (e.g. slice.failed -> retry) is preferred over the
+                # plain done/error completion edge. Unhandled named events stay queued
+                # and bubble to the parent frame (source rewritten on exit).
+                self._collect_raised(cur_id)
+                sup, sup_event = self._select_external(state, cur_id)
+                if sup is not None:
+                    self._emit(sup_event)
+                    nxt, edge_result = sup, sup_event.result
+                else:
+                    event = EV_DONE if result.ok else EV_ERROR
+                    self._emit(Event(source=cur_id, name=event, result=result))
+                    nxt, edge_result = self._select(state, cur_id, event, result), result
                 if nxt is None:
                     break  # implicit completion with the child's result
                 if nxt.action is not None:
-                    nxt.action(result, self.ctx)
+                    nxt.action(edge_result, self.ctx)
                 if nxt.target in (T_DONE, T_ERROR):
                     return result
                 cur_id = nxt.target
-                feed = result.value
+                # Re-enter with the child's value; an error-carrying edge (e.g. a
+                # supervised retry on a failed slice) has no .value, so keep the
+                # prior feed — the retry re-runs the body with the same input.
+                feed = getattr(result, "value", feed)
             return result
         finally:
+            # Bubble this frame's still-unhandled named events to the parent: from the
+            # parent's perspective they emerged from THIS superstate, so re-key their
+            # source to state.id (one level of propagation per returning frame).
+            for ev in self._external:
+                if ev.source in child_ids:
+                    ev.source = state.id
             self.config.leave(state.id)
 
     def _run_parallel(self, state: State, payload: Any) -> Result:
@@ -192,6 +221,33 @@ class Interpreter:
                 if t.guard is None or t.guard(result, self.ctx):
                     return t
         return None
+
+    def _collect_raised(self, source: str) -> None:
+        """Move events an activity raised (``ctx.raise_event``) onto the external
+        queue, tagged with the child id they emerged from at this frame. They are
+        matched against named-event transitions here and, if unhandled, bubble up."""
+        while self.ctx.raised:
+            re = self.ctx.raised.pop(0)
+            self._external.append(
+                Event(source=source, name=re.name, result=Output(re.payload),
+                      external=True, payload=re.payload)
+            )
+
+    def _select_external(self, state: State, source: str):
+        """Give a named-event (broadcast) transition at THIS level first refusal over
+        the plain done/error edge. Returns ``(transition, event)`` and consumes the
+        event from the external queue when one matches (source + event name + guard);
+        otherwise ``(None, None)`` and the events stay queued to bubble upward. The
+        event's payload is wrapped as the Result the transition's guard/action sees."""
+        for ev in list(self._external):
+            if ev.source != source:
+                continue
+            for t in state.transitions:
+                if t.source == source and t.event == ev.name:
+                    if t.guard is None or t.guard(ev.result, self.ctx):
+                        self._external.remove(ev)
+                        return t, ev
+        return None, None
 
     # -- resume seam --------------------------------------------------------
     def snapshot(self) -> Dict[str, Any]:

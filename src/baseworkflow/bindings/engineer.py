@@ -472,6 +472,11 @@ def _engineer_worker(spec: InferenceSpec, payload: Any, ctx: Context) -> Output:
     s = _setup(ctx)
     units = s["units"]
     issue, model, timeout = s["issue"], s["model"], s["timeout"]
+    # Multi-unit issues run one bounded session PER SLICE under a supervising statechart
+    # (no long-living session that throttles out and commits nothing). Single-unit issues
+    # — and an explicit opt-out — keep the one-session path unchanged.
+    if len(units) >= 2 and _per_slice_enabled():
+        return _run_per_slice(ctx, s, units, _sh(ctx).get("clone_dir"), model)
     # Persona (SYSTEM_PROMPT) is the durable engineer identity + git/scope contract;
     # ``prompt`` is this issue's session task. Backend resolves from $ENGINEER_BACKEND.
     return AgentWorker(EngineerAgent()).execute(
@@ -485,6 +490,88 @@ def _engineer_worker(spec: InferenceSpec, payload: Any, ctx: Context) -> Output:
         on_error=lambda o: (f"Engineer session timed out after {timeout}s on #{issue}."
                             if o.timed_out else f"Engineer backend error on #{issue}: {o.error}"),
     )
+
+
+def _per_slice_enabled() -> bool:
+    """Per-slice engineering is the default for multi-unit issues; opt out with
+    ``ENGINEER_PER_SLICE=0`` (or false/no/off) to force the single-session path."""
+    return os.environ.get("ENGINEER_PER_SLICE", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _slice_timeout(total: int) -> int:
+    """Per-slice wall-clock cap. Short by design (a slice is one unit), so a slice that
+    throttles fails fast and retries rather than consuming the whole issue budget.
+    ``ENGINEER_SLICE_TIMEOUT_SECONDS`` overrides (default 360), never above ``total``."""
+    try:
+        sec = int(os.environ.get("ENGINEER_SLICE_TIMEOUT_SECONDS", "360"))
+    except ValueError:
+        sec = 360
+    return max(60, min(sec, total))
+
+
+def _slice_prompt(s: Dict[str, Any], unit: Dict[str, Any], prior: List[str]) -> str:
+    """The per-slice session task: one unit's deliverable/acceptance/files, plus — on a
+    retry — the prior failed attempts (the supervisor's injected history), so the engineer
+    learns from them instead of repeating them."""
+    label = _spec_label(unit.get("specialization") or unit.get("domain"))
+    files = unit.get("files") or []
+    deliverable = unit.get("deliverable") or "see acceptance criteria"
+    acceptance = unit.get("acceptance") or "the issue's acceptance criteria are met"
+    lines = [
+        f"Implement ONE slice of issue #{s['issue']} — {s['title']}.",
+        f"Slice specialization: {label}.",
+        f"Deliverable: {deliverable}",
+        f"Acceptance: {acceptance}",
+        f"Files: {', '.join(files) if files else 'n/a'}",
+        "",
+        "Implement ONLY this slice in the current working tree. You MAY commit; the "
+        "pipeline commits any leftover changes. Do NOT push or open a PR.",
+    ]
+    if prior:
+        lines.append("")
+        lines.append("PRIOR ATTEMPTS ON THIS SLICE FAILED — learn from them, do not repeat:")
+        lines.extend(f"  - {p}" for p in prior)
+    return "\n".join(lines)
+
+
+def _run_per_slice(ctx: Context, s: Dict[str, Any], units: List[Dict[str, Any]],
+                   clone_dir: str, model: str) -> Output:
+    """Drive the issue one slice at a time through the supervising statechart, committing
+    each slice as it lands. Writes the same shelf run-record the judge reads; flags any
+    slice that exhausted its retries as needs-human in the summary."""
+    from agents import EngineerAgent
+    from engine.worker import AgentWorker
+    from baseworkflow.slice_supervisor import run_slices_supervised
+
+    issue = s["issue"]
+    slice_timeout = _slice_timeout(s["timeout"])
+    worker = AgentWorker(EngineerAgent())
+
+    def run_slice(unit: Dict[str, Any], attempt: int, prior: List[str]):
+        outcome = worker.invoke(_slice_prompt(s, unit, prior), cwd=clone_dir,
+                                model=model, timeout=slice_timeout)
+        if outcome.is_error:
+            return False, ("session timed out" if outcome.timed_out
+                           else f"backend error: {(outcome.error or '')[:200]}")
+        return True, _clean_summary(outcome.result_text) or "slice implemented"
+
+    def commit_slice(unit: Dict[str, Any]) -> None:
+        if _git(clone_dir, "status", "--porcelain").stdout.strip():
+            _git(clone_dir, "add", "-A")
+            uid = unit.get("id") or "unit"
+            _git(clone_dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m",
+                 f"Implement #{issue} (slice {uid}): {s['title']}")
+
+    report = run_slices_supervised(units, run_slice=run_slice, commit_slice=commit_slice,
+                                   ctx=ctx.descend(), retry_cap=2)
+    _log(f"per-slice #{issue}: landed={report.landed} needs_human={report.needs_human} "
+         f"attempts={report.attempts}")
+    landed = ", ".join(report.landed) or "none"
+    note = (f" [NEEDS-HUMAN: slice(s) {', '.join(report.needs_human)} failed after retries]"
+            if report.needs_human else "")
+    summary = f"Per-slice engineer on #{issue}: landed {landed}.{note}"
+    _sh(ctx).update({"result_text": summary, "is_error": not report.landed, "summary": summary})
+    return Output(summary, meta={"is_error": not report.landed})
 
 
 # -- A4: judge the backend's output; commit; gate on commits-ahead ----------

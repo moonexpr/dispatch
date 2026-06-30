@@ -83,6 +83,18 @@ class BudgetMeter:
 
 
 @dataclass
+class RaisedEvent:
+    """A named event an activity raises via :meth:`Context.raise_event` for the
+    statechart interpreter to dispatch UP the active configuration (the broadcast
+    seam, ADR-001 action items 4 & 8). Distinct from a Result's ``done``/``error``
+    completion edge: a raised event names a condition (e.g. ``slice.failed``) that a
+    *supervising* superstate handles, not just the immediate parent's edges."""
+
+    name: str
+    payload: Any = None
+
+
+@dataclass
 class Context:
     """Execution state threaded through one Controller run and every Action,
     Sequence, Loop and nested Program inside it. Mutable and *shared*: ``descend``
@@ -101,6 +113,11 @@ class Context:
     # so a phase cap and the global total are enforced by one charge. Shared across
     # a phase's actions: the first BudgetGovernor with a given key creates it.
     budgets: Dict[str, "BudgetMeter"] = field(default_factory=dict)
+    # Named events raised by activities, drained by the interpreter and dispatched
+    # up the active configuration. Shared across ``descend`` (one list), so a leaf
+    # inside a nested Program raises onto the same sink the enclosing interpreters
+    # drain at each Program boundary.
+    raised: List[RaisedEvent] = field(default_factory=list)
 
     def phase_meter(self, key: str, cap: int) -> "BudgetMeter":
         m = self.budgets.get(key)
@@ -124,6 +141,14 @@ class Context:
         these). Shared across ``descend`` because ``counters`` is one dict."""
         self.counters[key] = self.counters.get(key, 0) + 1
         return self.counters[key]
+
+    def raise_event(self, name: str, payload: Any = None) -> None:
+        """Raise a named event for the interpreter to dispatch UP the active
+        configuration to the nearest superstate with a matching transition (e.g. a
+        supervising Loop that retries the failed child). The activity only signals
+        the condition; the chart's transition table decides who handles it and how —
+        keeping control flow in the transition layer, not in the activity."""
+        self.raised.append(RaisedEvent(name=name, payload=payload))
 
 
 # A runner fulfils an Inference: (spec, payload, ctx) -> value | Result.
