@@ -75,31 +75,58 @@ def select_bucket(inputs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# A unit's ``phase`` value (from decompose.plan) selects how many agents staff it.
+# Foundation / verify / research are STRUCTURAL single-agent units; everything else
+# is a FEATURE slice staffed by two agents — a prototyper then a tester (issue #171:
+# "each feature/work-unit is handled by ≥2 agents").
+_SINGLE_AGENT_PHASES = frozenset({"foundation", "verify"})
+
+
+def _spec_label(u: Dict[str, Any]) -> str:
+    spec = u.get("specialization") or u.get("domain") or "general software"
+    return spec.get("label") if isinstance(spec, dict) else str(spec)
+
+
 def author_orchestration(inputs: Dict[str, Any]) -> Dict[str, Any]:
     """A6 — emit the serialized Program (orchestration script): the AGENT DEFINITIONS
-    and their wiring (one phase per unit; deps; parallelism), carrying NO budgets. Budget
-    allocation is a separate concern, stamped onto this script by ``budget:scope_orchestration``
-    (bindings/budget.py) — so agent definition and budget scoping never touch the same
-    function. Phases/script leave ``budget=0`` here; the budget seam fills them."""
+    and their wiring (deps; parallelism; per-slice agent staffing), carrying NO budgets.
+    Budget allocation is a separate concern, stamped onto this script by
+    ``budget:scope_orchestration`` (bindings/budget.py) — so agent definition and budget
+    scoping never touch the same function. Phases/script leave ``budget=0`` here; the
+    budget seam fills them.
+
+    Per issue #171, a FEATURE unit is staffed by TWO agents that share the unit's
+    ``slice_id``: a *prototyper* (initial implementation) and a *tester* that
+    ``depends_on`` the prototyper and adds tests against it. The tester carries the
+    unit's id as its phase id (it is the slice's EXIT node), so any downstream unit
+    that ``depends_on`` this unit waits for the slice to be implemented AND tested.
+    The prototyper inherits the unit's upstream deps. Foundation / verify / research
+    units stay single-agent. Sibling slices in the same wave keep their ``parallel``
+    flag so the wave executor fans them out concurrently."""
     plan = inputs.get("plan") or {}
     units = plan.get("units", []) or []
     staffing = plan.get("staffing", {}) or {}
     parallel_ids = set(staffing.get("parallel", []) or [])
-    # A unit is run in parallel when it shares its wave with siblings (a multi-unit
-    # parallel wave of team agents) OR it has no dependencies (the existing
-    # behaviour). So a feature build's foundation runs first, the feature units run
-    # as one parallel wave, then the verify tail runs last.
+    # A slice runs in parallel when it shares its wave with siblings (a multi-unit
+    # wave of team agents) OR it has no dependencies (the existing behaviour). So a
+    # feature build's foundation runs first, the feature slices run as one parallel
+    # wave (prototypers concurrently, then their testers concurrently), then the
+    # verify tail runs last.
     multi_wave_ids = {uid for wave in (staffing.get("waves", []) or [])
                       if len(wave) > 1 for uid in wave}
 
     phases: List[PhaseSpec] = []
     if not units:
-        units = [{"id": "u1", "specialization": "general software", "deliverable": "implement the issue"}]
+        units = [{"id": "u1", "specialization": "general software",
+                  "deliverable": "implement the issue", "phase": "feature"}]
     for u in units:
         uid = str(u.get("id", f"u{len(phases)+1}"))
         deps = tuple(str(d) for d in (u.get("depends_on", []) or []))
-        spec = u.get("specialization") or u.get("domain") or "general software"
-        if u.get("phase") == "research":
+        spec = _spec_label(u)
+        phase_kind = str(u.get("phase") or "feature").lower()
+        slice_parallel = (uid in parallel_ids and not deps) or (uid in multi_wave_ids)
+
+        if phase_kind == "research":
             # A research unit runs its /deep-research or /research skill with web
             # tools; it gathers findings rather than editing the tree.
             skill = u.get("skill") or "/research"
@@ -110,26 +137,51 @@ def author_orchestration(inputs: Dict[str, Any]) -> Dict[str, Any]:
             )
             agent = AgentSpec(description=f"researcher:{skill}", prompt=prompt,
                               tools=("Read", "WebSearch", "WebFetch", "Bash"), model="gen-frontier")
-        else:
-            route = u.get("route")
-            route_txt = f" Target route: {route}." if route else ""
+            phases.append(PhaseSpec(id=uid, agent=agent, depends_on=deps, parallel=slice_parallel,
+                                    budget=0, abort_when=("budget_exceeded", "tests_red"), slice_id=uid))
+            continue
+
+        route = u.get("route")
+        route_txt = f" Target route: {route}." if route else ""
+        files = ", ".join(u.get("files", []) or []) or "n/a"
+        deliverable = u.get("deliverable", "see acceptance criteria")
+
+        if phase_kind in _SINGLE_AGENT_PHASES:
+            # Foundation / verify: one engineer agent (no prototyper/tester split).
             prompt = (
-                f"Implement unit {uid} ({spec}). Deliverable: {u.get('deliverable', 'see acceptance criteria')}.{route_txt} "
-                f"Files: {', '.join(u.get('files', []) or []) or 'n/a'}. "
-                "All context is inlined; assume zero shared state with sibling agents."
+                f"Implement unit {uid} ({spec}). Deliverable: {deliverable}.{route_txt} "
+                f"Files: {files}. All context is inlined; assume zero shared state with sibling agents."
             )
             agent = AgentSpec(description=f"engineer:{spec}", prompt=prompt,
                               tools=("Read", "Edit", "Bash"), model="gen-default")
-        phases.append(
-            PhaseSpec(
-                id=uid,
-                agent=agent,
-                depends_on=deps,
-                parallel=(uid in parallel_ids and not deps) or (uid in multi_wave_ids),
-                budget=0,  # stamped by budget:scope_orchestration (budget de-coupling)
-                abort_when=("budget_exceeded", "tests_red"),
-            )
+            phases.append(PhaseSpec(id=uid, agent=agent, depends_on=deps, parallel=slice_parallel,
+                                    budget=0, abort_when=("budget_exceeded", "tests_red"), slice_id=uid))
+            continue
+
+        # FEATURE slice (#171): prototyper, then a tester that depends on it. The
+        # tester keeps the unit id (slice exit node); the prototyper gets ``{uid}p``.
+        proto_id = f"{uid}p"
+        proto_prompt = (
+            f"Prototype unit {uid} ({spec}) — the INITIAL implementation. "
+            f"Deliverable: {deliverable}.{route_txt} Files: {files}. "
+            "All context is inlined; assume zero shared state with sibling agents. "
+            "A separate tester agent will add tests against your work — implement, do not test."
         )
+        proto = AgentSpec(description=f"prototyper:{spec}", prompt=proto_prompt,
+                          tools=("Read", "Edit", "Bash"), model="gen-default")
+        phases.append(PhaseSpec(id=proto_id, agent=proto, depends_on=deps, parallel=slice_parallel,
+                                budget=0, abort_when=("budget_exceeded", "tests_red"), slice_id=uid))
+
+        test_prompt = (
+            f"Write tests for unit {uid} ({spec}) against the prototype the prototyper produced. "
+            f"Deliverable under test: {deliverable}. Files touched by the prototype: {files}. "
+            "Read the prototyper's changes and add tests that exercise the deliverable and its "
+            "edge cases. Do NOT reimplement the feature — test it; a red test is a real finding."
+        )
+        tester = AgentSpec(description=f"tester:{spec}", prompt=test_prompt,
+                           tools=("Read", "Edit", "Bash"), model="gen-default")
+        phases.append(PhaseSpec(id=uid, agent=tester, depends_on=(proto_id,), parallel=slice_parallel,
+                                budget=0, abort_when=("budget_exceeded", "tests_red"), slice_id=uid))
 
     script = OrchestrationScript(
         phases=tuple(phases),

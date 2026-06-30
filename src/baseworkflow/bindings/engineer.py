@@ -62,7 +62,9 @@ import os
 import sys
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from engine import models, proc
 from engine.actions import (
@@ -834,7 +836,9 @@ def _setup_for(job: Dict[str, Any]) -> Dict[str, Any]:
         "timeout": int(_envc("ENGINEER_TIMEOUT_SECONDS", "900")),
         "keep": _envc("ENGINEER_KEEP_WORKTREE", "0") == "1",
         "gh_bin": _envc("GH_BIN", "gh"),
-        "prompt": _build_task_prompt(repo, issue, branch, title, body, units),
+        # A single unit-agent (issue #171 wave dispatch) carries its OWN phase prompt;
+        # the whole-issue prompt is the default when no per-unit prompt is injected.
+        "prompt": job.get("_unit_prompt") or _build_task_prompt(repo, issue, branch, title, body, units),
         "start": time.time(),
     }
 
@@ -894,6 +898,258 @@ def _cleanup(ctx: Context) -> None:
 
 
 # ===========================================================================
+# Wave executor (issue #171) — dispatch the authored orchestration phases as a
+# team of unit-agents, wave by wave, with bounded concurrency.
+# ===========================================================================
+# The architect authors ~2 phases per feature slice (prototyper + tester). The LIVE
+# work phase runs them here: each wave's unit-agents fire CONCURRENTLY (bounded), then
+# the next wave runs once its deps are done. The dispatch logic is pure and injectable
+# (``run_unit``/``sleep`` are parameters) so the whole policy — fan-out, ordering,
+# bounded concurrency, staggered startup, burst-limit backoff, per-unit fail-safe — is
+# unit-tested offline with NO clone, NO model, NO network. The real per-unit runner
+# (live) reuses the existing engineer.yml lifecycle (:func:`run_live`) one clone per
+# agent; consolidation cherry-picks each slice's commits onto ONE issue branch so the
+# Administrator's existing single-clone squash+push (admin:consolidate_pr) is preserved.
+
+# Error substrings that mark a server-side burst / rate limit — retry these with
+# exponential backoff (a thundering herd of ``claude -p`` bootstraps trips them).
+_BURST_HINTS = ("rate limit", "rate_limit", "ratelimit", "overloaded", "429",
+                "too many requests", "burst", "quota", "503", "service unavailable")
+
+
+def _is_burst_error(msg: str) -> bool:
+    m = (msg or "").lower()
+    return any(h in m for h in _BURST_HINTS)
+
+
+@dataclass
+class UnitOutcome:
+    """The result of one unit-agent (one authored phase). ``value`` is the agent's
+    payload (live: its Invoice dict with ``clone_dir``); ``ok`` False with ``error``
+    set is a CONTAINED failure (it did not abort the wave)."""
+
+    phase_id: str
+    slice_id: str
+    ok: bool
+    value: Any = None
+    error: str = ""
+    attempts: int = 1
+
+
+def _wave_levels(phases: Sequence[Any]) -> List[List[Any]]:
+    """Group phases into dependency WAVES (topological levels): a phase joins the
+    next wave once every dep it names *within this phase set* has completed in an
+    earlier wave. Deps that point outside the set (already satisfied upstream) are
+    ignored. A dependency cycle / unsatisfiable remainder is emitted as one final
+    wave rather than looping forever (fail-safe)."""
+    ids = {p.id for p in phases}
+    pending = list(phases)
+    done: set = set()
+    waves: List[List[Any]] = []
+    while pending:
+        ready = [p for p in pending
+                 if all((d in done) or (d not in ids) for d in (p.depends_on or ()))]
+        if not ready:  # cycle / unsatisfiable — don't spin; flush the rest.
+            ready = list(pending)
+        waves.append(ready)
+        done.update(p.id for p in ready)
+        ready_set = set(map(id, ready))
+        pending = [p for p in pending if id(p) not in ready_set]
+    return waves
+
+
+def _wave_config() -> Dict[str, Any]:
+    """Tunables for the wave executor (env-overridable; safe defaults). Concurrency
+    is capped at 3–5 per the issue's rate-limit findings (default 4)."""
+    return {
+        "max_parallel": max(1, int(_envc("PIPELINE_MAX_PARALLEL", "4"))),
+        "stagger_s": max(0.0, float(_envc("PIPELINE_UNIT_STAGGER_S", "1.5"))),
+        "max_retries": max(0, int(_envc("PIPELINE_UNIT_RETRIES", "2"))),
+        "backoff_base_s": max(0.0, float(_envc("PIPELINE_UNIT_BACKOFF_S", "2.0"))),
+    }
+
+
+def dispatch_waves(
+    phases: Sequence[Any],
+    run_unit: Callable[[Any], Any],
+    *,
+    max_parallel: int = 4,
+    stagger_s: float = 1.5,
+    max_retries: int = 2,
+    backoff_base_s: float = 2.0,
+    sleep: Callable[[float], None] = time.sleep,
+    log: Optional[Callable[[str], None]] = None,
+) -> List[UnitOutcome]:
+    """Run the authored ``phases`` wave by wave (issue #171). Within a wave the
+    unit-agents run CONCURRENTLY, bounded to ``max_parallel``, each launch offset by
+    ``stagger_s`` (so N ``claude -p`` bootstraps don't start at once and trip burst
+    limiting). A unit whose error looks like a burst limit is retried with exponential
+    backoff up to ``max_retries`` times. One unit's failure is CONTAINED — it does not
+    abort its wave or the run (fail-safe, like the rest of the pipeline). ``run_unit``
+    and ``sleep`` are injected so the policy is fully testable with no side effects.
+    Returns the outcomes in wave-then-slice order."""
+    _l = log or (lambda _m: None)
+    outcomes: List[UnitOutcome] = []
+
+    def _run_one(phase: Any, launch_order: int) -> UnitOutcome:
+        if stagger_s and launch_order:
+            sleep(stagger_s * launch_order)  # stagger real starts; a no-op in tests
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                value = run_unit(phase)
+                return UnitOutcome(phase.id, getattr(phase, "slice_id", "") or "", True,
+                                   value=value, attempts=attempts)
+            except Exception as exc:  # noqa: BLE001 — contained; one unit never aborts the wave
+                msg = str(exc)
+                if _is_burst_error(msg) and attempts <= max_retries:
+                    _l(f"unit {phase.id}: burst-limited (attempt {attempts}); backing off")
+                    sleep(backoff_base_s * (2 ** (attempts - 1)))
+                    continue
+                return UnitOutcome(phase.id, getattr(phase, "slice_id", "") or "", False,
+                                   error=msg, attempts=attempts)
+
+    for wi, wave in enumerate(_wave_levels(phases)):
+        _l(f"wave {wi}: dispatching {len(wave)} unit-agent(s) (max_parallel={max_parallel})")
+        wave_out: List[Optional[UnitOutcome]] = [None] * len(wave)
+        with ThreadPoolExecutor(max_workers=max(1, max_parallel)) as ex:
+            futs = {ex.submit(_run_one, p, i): i for i, p in enumerate(wave)}
+            for fut in as_completed(futs):
+                wave_out[futs[fut]] = fut.result()
+        outcomes.extend(o for o in wave_out if o is not None)
+    return outcomes
+
+
+def _consolidate_clones(
+    primary_clone: str,
+    units: Sequence[Tuple[str, str, str]],
+    *,
+    git: Callable[..., Any] = _git,
+    log: Optional[Callable[[str], None]] = None,
+) -> Tuple[List[str], List[str]]:
+    """Apply each non-primary slice's commits onto the primary clone's issue branch,
+    in order, by fetching its branch and cherry-picking the commits it added on top of
+    the shared base. A slice whose fetch fails or whose cherry-pick conflicts is
+    SKIPPED (fail-safe, recorded) — never aborts the consolidation. ``git`` is injected
+    so the ordering + fail-safe is testable. ``units`` is ``(label, clone_dir, branch)``.
+    Returns ``(applied_labels, conflicted_labels)``."""
+    _l = log or _log
+    applied: List[str] = []
+    conflicts: List[str] = []
+    for i, (label, clone, branch) in enumerate(units):
+        ref = f"refs/dispatch/u{i}"
+        fetched = git(primary_clone, "fetch", clone, f"{branch}:{ref}")
+        if getattr(fetched, "returncode", 1) != 0:
+            _l(f"consolidate: fetch of slice {label} failed; skipping")
+            conflicts.append(label)
+            continue
+        mb = git(primary_clone, "merge-base", "HEAD", ref)
+        base = (getattr(mb, "stdout", "") or "").strip()
+        rng = f"{base}..{ref}" if base else ref
+        picked = git(primary_clone, "cherry-pick", rng)
+        if getattr(picked, "returncode", 1) != 0:
+            git(primary_clone, "cherry-pick", "--abort")
+            _l(f"consolidate: slice {label} conflicted; skipping (left for follow-up)")
+            conflicts.append(label)
+        else:
+            applied.append(label)
+    return applied, conflicts
+
+
+def _run_unit_live(phase: Any, job: Dict[str, Any]) -> Dict[str, Any]:
+    """Real per-unit runner: drive the existing engineer.yml lifecycle for ONE
+    unit-agent, carrying the phase's own prompt into its own clone. Raises on a
+    non-completed Invoice so :func:`dispatch_waves` can apply burst-backoff /
+    fail-safe; returns the Invoice (with ``clone_dir``) on success."""
+    unit_job = dict(job)
+    unit_job["_unit_prompt"] = phase.agent.prompt
+    unit_job["_unit_id"] = phase.id
+    invoice = run_live(unit_job, keep_clone=True)
+    status = str(invoice.get("status") or "failed")
+    if status != "completed":
+        raise RuntimeError(invoice.get("summary") or f"unit {phase.id} status={status}")
+    return invoice
+
+
+def _run_live_orchestrated(job: Dict[str, Any], phases: Sequence[Any]) -> Dict[str, Any]:
+    """LIVE multi-slice work phase (issue #171): fan the authored phases out as a wave
+    of unit-agents (each its own clone), then consolidate every slice's commits onto ONE
+    issue branch so admin:consolidate_pr's single-clone squash+push is preserved. On any
+    consolidation trouble it degrades to the primary clone alone (never worse than the
+    pre-#171 single-engineer outcome). Returns an Invoice dict with the primary
+    ``clone_dir`` — the shape the live work-phase seam already expects."""
+    cfg = _wave_config()
+    issue = int(job["issue"])
+    repo = str(job.get("repo") or os.environ.get("PIPELINE_REPO", ""))
+    route = str(job.get("route") or "gen-default")
+    _log(f"orchestrated dispatch: issue=#{issue} phases={len(phases)} max_parallel={cfg['max_parallel']}")
+    outcomes = dispatch_waves(phases, lambda ph: _run_unit_live(ph, job), log=_log, **cfg)
+    ok = [o for o in outcomes if o.ok and isinstance(o.value, dict) and o.value.get("clone_dir")]
+    failed = [o for o in outcomes if not o.ok]
+
+    def _fail_invoice(summary: str) -> Dict[str, Any]:
+        return build_invoice(issue=issue, repo=repo, status="failed", branch=None, pr_number=None,
+                             scope_actual=str(job.get("scope") or "m"), route_used=route,
+                             tokens_in=0, tokens_out=0, duration_seconds=0,
+                             model=_model_for_route(route), summary=summary)
+
+    if not ok:
+        return _fail_invoice(f"All {len(phases)} unit-agents failed on #{issue} (#171 dispatch).")
+
+    primary = ok[0].value
+    primary_clone = primary.get("clone_dir")
+    branch = primary.get("branch")
+    others = [(o.slice_id or o.phase_id, o.value.get("clone_dir"), o.value.get("branch"))
+              for o in ok[1:]]
+    applied, conflicts = ([], [])
+    if others:
+        applied, conflicts = _consolidate_clones(primary_clone, others, git=_git, log=_log)
+    # Tear down the consumed (non-primary) clones; the primary is handed to admin.
+    for o in ok[1:]:
+        cd = o.value.get("clone_dir")
+        if cd and os.path.isdir(cd):
+            import shutil
+            shutil.rmtree(cd, ignore_errors=True)
+
+    status = "completed" if not failed and not conflicts else "partial"
+    summary = (
+        f"#171 parallel slice dispatch: {len(ok)}/{len(phases)} unit-agents delivered; "
+        f"{1 + len(applied)} slice contribution(s) consolidated onto {branch}"
+        + (f"; {len(conflicts)} conflicted (skipped)" if conflicts else "")
+        + (f"; {len(failed)} agent(s) failed" if failed else "") + "."
+    )
+    return {**primary, "status": status, "summary": summary,
+            "clone_dir": primary_clone, "branch": branch}
+
+
+def _parallel_dispatch_enabled() -> bool:
+    """Opt-in gate (#171) for the LIVE parallel slice dispatch. OFF by default so the
+    live work phase stays byte-identical to pre-#171 (one engineer over the whole
+    issue); set PIPELINE_PARALLEL_DISPATCH=1 to fan the authored phases out as a wave
+    of unit-agents (one clone per agent, cherry-pick consolidation). The architect
+    still authors the 2N-phase plan and the dry-run/mock path runs all 2N agents
+    regardless — only the live clone/model path is gated, pending a live validation
+    tick before this becomes the default."""
+    return _envc("PIPELINE_PARALLEL_DISPATCH", "0") == "1"
+
+
+def _orchestration_phases(script: Any) -> List[Any]:
+    """Deserialize the authored orchestration script (dict / OrchestrationScript) into
+    its phase list; ``[]`` on anything malformed (the caller then falls back to the
+    single-engineer path, so a bad script never breaks the live tick)."""
+    if not script:
+        return []
+    try:
+        from engine.actions import OrchestrationScript
+        if isinstance(script, dict):
+            script = OrchestrationScript.from_dict(script)
+        return list(getattr(script, "phases", ()) or ())
+    except Exception:  # noqa: BLE001 — fail-safe to the single-engineer path
+        return []
+
+
+# ===========================================================================
 # Baseworkflow ``engineer:`` bindings — the execute_orchestration recursion seam.
 # ===========================================================================
 # Distinct from the engineer.yml unit binds above: these serve baseworkflow.yml's
@@ -933,7 +1189,14 @@ def build_execute_orchestration(factory: Any):
                 job["plan"] = plan  # carry the architect's decomposition into the units
             # keep_clone: the engineer commits locally but does NOT push; the Admin
             # build phase squashes those commits + pushes, so it needs the clone.
-            invoice = run_live(job, keep_clone=True)
+            # #171: when the architect authored a multi-agent team (>1 phase — feature
+            # slices each staffed by a prototyper + tester), fan them out wave by wave;
+            # a single-phase script keeps the byte-identical single-engineer path.
+            phases = _orchestration_phases(deliv.get("orchestration_script"))
+            if len(phases) > 1:
+                invoice = _run_live_orchestrated(job, phases)
+            else:
+                invoice = run_live(job, keep_clone=True)
             clone_dir = invoice.pop("clone_dir", None)  # transport out-of-band; keep the Invoice schema-clean
             status = str(invoice.get("status") or "failed")
             deliv.put("invoice", invoice)

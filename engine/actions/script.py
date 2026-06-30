@@ -86,7 +86,13 @@ class AgentSpec:
 class PhaseSpec:
     """One phase of the orchestration script: an agent, its dependencies, whether
     it fans out in parallel, its share of the engineering budget, and the names of
-    its abort predicates (compiled to hooks at deserialize time)."""
+    its abort predicates (compiled to hooks at deserialize time).
+
+    ``slice_id`` groups the phases that belong to one work unit (one feature). A
+    feature unit emits two phases — a prototyper and a tester — sharing the unit's
+    ``slice_id`` so the wave executor can attribute both agents to the same slice
+    and the Admin can consolidate a slice's commits together (issue #171). Defaults
+    to ``""`` so older scripts round-trip unchanged."""
 
     id: str
     agent: AgentSpec
@@ -94,6 +100,7 @@ class PhaseSpec:
     parallel: bool = False
     budget: int = 0
     abort_when: Tuple[str, ...] = ()
+    slice_id: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -103,6 +110,7 @@ class PhaseSpec:
             "parallel": self.parallel,
             "budget": self.budget,
             "abort_when": list(self.abort_when),
+            "slice_id": self.slice_id,
         }
 
     @classmethod
@@ -114,6 +122,7 @@ class PhaseSpec:
             parallel=bool(d.get("parallel", False)),
             budget=int(d.get("budget", 0)),
             abort_when=tuple(d.get("abort_when", ()) or ()),
+            slice_id=str(d.get("slice_id", "") or ""),
         )
 
 
