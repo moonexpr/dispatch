@@ -42,16 +42,22 @@ def check(cond: bool, label: str) -> None:
 
 
 _FIXTURE = '''\
-"""widgets — a fixture package docstring."""
+"""widgets — a fixture package docstring.
+
+This second paragraph **stays** in the body.
+"""
 from __future__ import annotations
 
 CONST = 1
 
 
 def make(name: str, count: int = 3, *parts, scale: float = 1.0, **opts) -> "Widget":
-    """Build a Widget from parts.
+    """Build a ``Widget`` from **parts**.
 
     Longer body that should not appear in the one-line summary.
+
+    * first bullet with `inline` code
+    * second bullet
     """
     return Widget(name)
 
@@ -72,7 +78,7 @@ class Widget:
         return self.name
 
     async def render(self, *, pretty: bool = False) -> str:
-        """Render it."""
+        """Render it (``unbalanced source markup)."""
         return make(self.name).name
 '''
 
@@ -109,7 +115,7 @@ def run_fixture() -> None:
         out = lookup(idx, "widgets.make")
         for fragment in ["name: str", "count: int = 3", "*parts", "scale: float = 1.0", "**opts", "-> 'Widget'"]:
             check(fragment in out, f"make() signature renders {fragment!r}")
-        check("Build a Widget from parts." in out, "make() docstring rendered")
+        check("Build a ``Widget`` from **parts**." in out, "make() docstring (raw) in text lookup")
         check("Longer body" in out, "make() full docstring (not just summary) in lookup")
 
         # Class + method rendering
@@ -143,9 +149,32 @@ def run_fixture() -> None:
         recs = json.loads((site / "search.json").read_text())
         paths = {r["path"] for r in recs}
         check("widgets.make" in paths and "widgets.Widget.render" in paths, "search.json carries symbols")
+
+        # Homepage: a table, with the redundant "name —" summary prefix stripped.
+        index_html = (site / "index.html").read_text()
+        check('<table class="mods"' in index_html, "homepage renders a table")
+        check("a fixture package docstring" in index_html, "stripped summary present on homepage")
+        check("widgets — a fixture package docstring" not in index_html, "name prefix stripped from summary")
+        check('<td class="k">package</td>' in index_html, "kind column shows 'package'")
+
+        # Module page: docstring markup rendered (not shown literally).
         html = (site / "widgets.html").read_text()
-        check("Build a Widget from parts." in html, "docstring rendered into HTML")
-        check("&amp;" not in "make" and "<script>" not in html.split("apidocs.js")[0], "html body escaped")
+        check("<code>Widget</code>" in html, "``literal`` rendered to <code>")
+        check("<strong>parts</strong>" in html, "**bold** rendered to <strong>")
+        check("<ul>" in html and "<li>" in html, "bullet list rendered")
+        check("<code>inline</code>" in html, "`inline` code rendered in a bullet")
+        check("``Widget``" not in html, "no raw double-backticks remain in rendered doc")
+        check("`" not in html, "unbalanced backticks stripped — none leak to the reader")
+
+        # Module header: pill before title, summary as italic subtitle, lead
+        # paragraph NOT duplicated in the body.
+        check('<div class="title-row"><span class="kind">package</span><h1>widgets</h1></div>' in html,
+              "kind pill precedes the title")
+        check('<p class="subtitle">A fixture package docstring.</p>' in html,
+              "summary moved to header subtitle, prefix stripped + capitalized")
+        check("<strong>stays</strong>" in html, "non-lead paragraphs stay in the body")
+        check("a fixture package docstring" not in html,
+              "lead summary not duplicated in the module body")
 
 
 def run_live() -> None:
