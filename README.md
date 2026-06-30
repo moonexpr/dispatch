@@ -22,6 +22,65 @@ It does three things and nothing more:
 > Start with [Getting started](https://github.com/ReclaimByDesign/dispatch/wiki/Getting-Started)
 > and [Strengths and limitations](https://github.com/ReclaimByDesign/dispatch/wiki/Strengths-and-Limitations).
 
+## What dispatch is
+
+Underneath the GitHub control tower, dispatch is a small, focused **orchestration
+tool over a workflow engine**. It gives you a declarative, programmable surface for
+the hard parts of putting LLM agents to work on real engineering: organizing user
+requests, marshalling resources, coordinating agents, handling communication, and
+recovering from failure. It sits one abstraction level above raw model/agent
+libraries (Transformers, OpenRouter): you express *what the workflow is*, and the
+engine runs it — deterministically validated, observable, and recoverable.
+
+Its competencies are deliberately narrow:
+
+- **Task decomposition** — break a request into independently shippable units.
+- **Slice-based work processing** — fan work out across per-unit slices.
+- **Admin validation** — verify process and outcome (CI, review, acceptance).
+- **Arbitrary inputs and outputs** — GitHub issues are one input *adapter*, not the
+  core. The engine consumes generic work items and emits generic deliverables; the
+  GitHub queue above is the first such adapter.
+
+The aim is to let everyday consumer programs benefit from AI through both classical
+and AI-engineering principles — engineering loops, process verification, agent
+communication, lifecycle management — so a complicated request can be solved by a
+swarm of small agents working in parallel without the end user ever needing to know
+they ran.
+
+### The three layers
+
+dispatch keeps a clear boundary between three layers; consumer code never reaches
+past its own:
+
+1. **Foundation tooling** (`foundation/`) — primitives: agents, backends, models,
+   shelves, process/filesystem facades. *The vocabulary.*
+2. **Workflow-engine subsystems** (`foundation/workflow/`, `baseworkflow/`
+   subsystems) — the HFSM/statechart engine: controllers, actions, manifests,
+   validation, the declarative composition surface. *The grammar.*
+3. **Consumer app code** (`app/`) — concrete workflows (`app/workflows/*.yml`),
+   config, the `./dispatch` entry point, and the `/dispatch` skills. *The programs.*
+
+For now, **YAML + Python** is expressive enough to convey function composition and
+implementation complexity; the abstraction boundary is what keeps the engine
+flexible enough to take on new workflow problems.
+
+### Roadmap
+
+- **1.x (committed)** — *superseedable HFSM states* (a more pressing state can
+  preempt the active one when the scenario calls for it) and *per-workflow event
+  responders* (handlers for unexpected lifecycle conditions — e.g. no ready issues →
+  exit; missing information → open a clarifying ticket). dispatch behaves less like
+  a straight-line program and more like an agent with reflexes: a general plan plus
+  responders for the unexpected.
+- **v2.0** — proxy tools for context management, OpenRouter backends with
+  backend-bound/declarative agent profiles, TOON serialization for agent-bound data,
+  a debuggable shelf redesign, Docker-based remote workers with a
+  CPU-pressure-aware fleet dispatcher, and decoupling GitHub-issue intake from core
+  orchestration. Tracked in the v2.0 umbrella epic.
+- **Exploratory (not committed)** — a readable, debuggable scriptable workflow
+  language expressing asynchronous communication, function composition, and
+  parameterizable invocation. Direction, not scope.
+
 ## Interact with dispatch via Claude skills (recommended)
 
 dispatch is **L3-class automation**: it shines on small, clear, checkable units of
