@@ -193,6 +193,7 @@ def run_fixture() -> None:
         check((site / "search.js").read_text().startswith("window.APIDOCS_INDEX="), "search.js defines the index global")
         check("window.APIDOCS_INDEX" in js and "finder-q" in js, "Finder JS reads the index")
         check("querySelectorAll('pre, code')" in js, "clicking code/pre feeds the Finder")
+        check("function symbolize" in js, "click extracts the symbol name from a signature")
         check('"widgets.make"' in (site / "search.js").read_text(), "embedded index carries symbols")
 
 

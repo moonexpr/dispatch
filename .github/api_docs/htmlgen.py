@@ -161,14 +161,26 @@ document.querySelectorAll('table.mods').forEach(t=>{
     fpanel.hidden=false;
   }
   fq.addEventListener('input',run);
-  // Click any code/signature/code-block to drop its text into the Finder.
+  // Pull the symbol out of clicked code: drop a 'def'/'class' keyword, take the
+  // name before any '(', then the trailing identifier/dotted-path token. So
+  // "make(name: str) -> 'Widget'" -> "make", "class BaseWorkflow(C)" ->
+  // "BaseWorkflow", "foundation.agent_sdk.make_backend" -> the full dotted path.
+  function symbolize(raw){
+    let t=(raw||'').trim().split('\\n')[0].trim();
+    t=t.replace(/^(async\\s+)?(def|class)\\s+/,'');
+    const p=t.indexOf('(');
+    if(p>0) t=t.slice(0,p);
+    const m=t.match(/[A-Za-z_][A-Za-z0-9_.]*$/);
+    return m?m[0]:t.trim();
+  }
+  // Click any code/signature/code-block to search its symbol in the Finder.
   document.querySelectorAll('pre, code').forEach(el=>{
     if(el.closest('#finder')) return;          // skip the Finder's own results
     el.addEventListener('click',e=>{
-      const t=(el.innerText||el.textContent||'').trim();
-      if(!t) return;
+      const sym=symbolize(el.innerText||el.textContent||'');
+      if(!sym) return;
       e.stopPropagation();                       // innermost code wins over its <pre>
-      fq.value=t; run();
+      fq.value=sym; run();
       document.getElementById('finder').scrollIntoView({behavior:'smooth',block:'start'});
     });
   });
