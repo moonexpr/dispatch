@@ -8,7 +8,7 @@ harness never reaches the Engineer. This module is the deterministic PLANNER for
 that stage: given a job (and optional labels / decomposition plan) it derives the
 complete PREP PLAN — what harness to install, how to orchestrate, and which
 branch/worktree to ready — as one JSON object the shell stage
-(``scripts/lib/common.sh::prep_stage``) records, dumps, and acts on.
+(``app/scripts/lib/common.sh::prep_stage``) records, dumps, and acts on.
 
 It mirrors purpose.py / strategy.py / characteristics.py: pure orchestration over
 the data-driven rules in ``workplan-rules.yml`` (purpose→harness, strategy→layout,

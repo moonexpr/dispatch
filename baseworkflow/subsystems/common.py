@@ -1,6 +1,6 @@
 """common.py — the Unattended Engineering Pipeline contract (orchestration layer).
 
-Python port of ``scripts/lib/common.sh``, imported by every orchestration entry
+Python port of ``app/scripts/lib/common.sh``, imported by every orchestration entry
 point. This is the SINGLE source of truth for dispatch *policy*: the env-var
 defaults, the scope->route map, the fix-ladder, dry-run semantics, the run-ledger
 and the per-tick run record, the crash-reaper clock, and the thin wrappers around

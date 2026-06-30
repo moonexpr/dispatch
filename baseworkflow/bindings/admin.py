@@ -34,7 +34,7 @@ def _ensure_repo_exists(repo: str, ctx: Any) -> Dict[str, Any]:
     A missing target makes ``engineer:clone`` fail and the whole tick produce nothing
     pushable, so prep guarantees the repo is there first. Idempotent: an existing repo
     is left untouched (``gh repo view`` then create-if-missing — the same shape as
-    scripts/demo/provision-testrepo.sh). Network-MUTATING (``gh repo create``), so —
+    app/scripts/demo/provision-testrepo.sh). Network-MUTATING (``gh repo create``), so —
     like consolidate_pr / publish / intake_invoice — the create is gated on
     ``ctx.dry_run``: under dry-run the intended create is recorded only (greppable
     DRY-RUN line via common.run) and no network call is made; the read-only
