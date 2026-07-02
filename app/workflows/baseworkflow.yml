@@ -13,7 +13,26 @@ uses:
   # this file's directory).
   - ../config/actions/**/*.yml  # #base-style include of every action interface file
 
-inputs: [job, triage]           # provided at run time (seeded onto the input shelf)
+inputs: [request, job, triage]  # provided at run time (seeded onto the input shelf)
+
+# The parties to the contract (ADR-003): controllers the workflow references —
+# including the seed variants, which are never phase-referenced (they enter
+# dynamically, superseding the seed controller's processing) — so the aggregate
+# needs surface is complete and statically checkable:
+#   python3 -m foundation.workflow app/workflows/baseworkflow.yml \
+#     --registry baseworkflow.bindings:build_registry \
+#     --services baseworkflow.services:build_mock_services --needs
+controllers:
+  - seed.intake
+  - seed.handle.github
+  - seed.handle.interactive
+  - seed.handle.job
+
+# Early completion (ADR-003): when the seed controller did NOT hand the request
+# off to a variant (rejected job, unroutable source), its fallback records a
+# `decision` deliverable and the lifecycle completes there — spec/work/build
+# never run for a request that was never accepted.
+terminal_when: seed_unrouted
 
 seed:                           # static input-shelf values
   config:
@@ -29,6 +48,17 @@ budgets:                        # named budget buckets (unit = tokens, placehold
 admin_spec_split: 0.5           # API-compat knob; does not affect the wiring
 
 phases:
+
+  # seed — the workflow now STARTS with the seed controller (ADR-003), a
+  # controller REFERENCE (the three-layer discipline: this file names the
+  # party; baseworkflow/bindings/seed.py owns the coordination; the seed:*
+  # action interfaces own the plumbing). The kernel initializes it by seeding
+  # `input.request` — a GitHub issue, an operator interaction, or a
+  # non-interactive job request. On acceptance the seed spawns the matching
+  # variation of itself and SUPERSEDES its own processing with it (#190);
+  # every variant converges on the source-agnostic work_item (#188).
+  seed:
+    - controller: seed.intake
 
   # spec — the Architect's A1-A8 plus the Administrator's initial work. decompose
   # (A3) runs before strategy (A2): the strategy resolver reads the plan.

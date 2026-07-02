@@ -92,7 +92,7 @@ def test_overlay_merge() -> None:
     doc = load_workflow(_WF)
     _ok(doc.name == "websitewf-ux-loop-issues",
         "overlay header: name is 'websitewf-ux-loop-issues'")
-    spec = _phase_tokens(doc.phases[0])
+    spec = _phase_tokens(next(p for p in doc.phases if p.name == "spec"))
     _ok(
         "web:generate_issue_work_units" in spec and "github:generate_work_units" not in spec,
         "replace: github:generate_work_units -> web:generate_issue_work_units",
@@ -102,7 +102,7 @@ def test_overlay_merge() -> None:
         "extend after: web:classify_uxloop_addendum follows architect:classify_strategy",
     )
     # the replacement carries a procedure manifest (deterministic spec writer).
-    m = _kind_of(doc.phases[0], "web:generate_issue_work_units")
+    m = _kind_of(next(p for p in doc.phases if p.name == "spec"), "web:generate_issue_work_units")
     _ok(m is not None and m.kind == "procedure", "replacement is a kind 'procedure'")
 
 

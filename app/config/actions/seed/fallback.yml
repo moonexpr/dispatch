@@ -1,0 +1,13 @@
+# seed:fallback — the unrouted tail of the seed controller. Runs ONLY when no
+# variant superseded processing (rejected job, unroutable source, refused
+# preemption) and records the decision — with the unmet needs / missing fields —
+# as a deliverable. On the accepted path this step is abandoned by the
+# supersede, which is the #190 semantics the seed exists to practice.
+token: seed:fallback
+kind: procedure
+bind: seed_fallback
+interface:
+  in:
+    intake: shared.intake
+  out:
+    decision: deliverables.decision

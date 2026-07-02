@@ -33,13 +33,26 @@ from foundation import proc  # noqa: E402  (capturing subprocess wrapper)
 # Subprocess checks — each self-asserting target must exit 0.
 SUBPROC_CHECKS: list[tuple[str, list[str]]] = [
     (
-        "workflow validator (foundation/workflow + bindings registry over app/workflows/baseworkflow.yml)",
+        "workflow validator (structure + data-flow + tokens + needs over app/workflows/baseworkflow.yml)",
         [PY, "-m", "foundation.workflow", "workflows/baseworkflow.yml",
-         "--registry", "baseworkflow.bindings:build_registry"],
+         "--registry", "baseworkflow.bindings:build_registry",
+         "--services", "baseworkflow.services:build_mock_services"],
     ),
     (
         "BaseWorkflow engine e2e (baseworkflow/test_e2e.py)",
         [PY, "baseworkflow/test_e2e.py"],
+    ),
+    (
+        "superseedable states — preemption contract (foundation/actions/test_supersede.py)",
+        [PY, "foundation/actions/test_supersede.py"],
+    ),
+    (
+        "needs formalism + controller references (foundation/workflow/test_needs.py)",
+        [PY, "foundation/workflow/test_needs.py"],
+    ),
+    (
+        "seed controller e2e — three intakes + supersede routing (baseworkflow/test_seed.py)",
+        [PY, "baseworkflow/test_seed.py"],
     ),
 ]
 

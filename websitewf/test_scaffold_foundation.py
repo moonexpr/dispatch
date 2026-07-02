@@ -98,7 +98,7 @@ def test_overlay_merge() -> None:
     from foundation.workflow import load_workflow
 
     doc = load_workflow(_WF)
-    spec = _phase_tokens(doc.phases[0])
+    spec = _phase_tokens(next(p for p in doc.phases if p.name == "spec"))
     # extend after: the addendum follows architect:classify_strategy in the spec phase.
     _ok(
         "web:classify_foundation_addendum" in spec
@@ -106,7 +106,7 @@ def test_overlay_merge() -> None:
         == spec.index("architect:classify_strategy") + 1,
         "extend after: web:classify_foundation_addendum follows architect:classify_strategy",
     )
-    work = doc.phases[1]
+    work = next(p for p in doc.phases if p.name == "work")
     work_tokens = _phase_tokens(work)
     # add: the scaffold task is spliced into the work phase.
     _ok("web:scaffold_foundation" in work_tokens, "add: web:scaffold_foundation spliced into the work phase")

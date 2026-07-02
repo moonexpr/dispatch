@@ -77,8 +77,16 @@ class WebsiteWF(BaseWorkflow):
         return int(self._load_doc().budgets["total"])
 
 
-def _run(factory: Any, job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool) -> Dict[str, Any]:
-    wf = WebsiteWF(factory, job=job, triage=triage)
+def _run(
+    factory: Any,
+    job: Dict[str, Any],
+    triage: Dict[str, Any],
+    *,
+    dry_run: bool,
+    request: Any = None,
+    services: Any = None,
+) -> Dict[str, Any]:
+    wf = WebsiteWF(factory, job=job, triage=triage, request=request, services=services)
     ctx = wf.context(dry_run=dry_run)
     result = wf.run(ctx=ctx)
     return {
@@ -90,14 +98,28 @@ def _run(factory: Any, job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: 
     }
 
 
-def run_mock(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = True) -> Dict[str, Any]:
+def run_mock(
+    job: Dict[str, Any],
+    triage: Dict[str, Any],
+    *,
+    dry_run: bool = True,
+    request: Any = None,
+    services: Any = None,
+) -> Dict[str, Any]:
     """Run WebsiteWF against the MockActionFactory (no real effects) — the e2e spine."""
     from foundation.actions import MockActionFactory
 
-    return _run(MockActionFactory(), job, triage, dry_run=dry_run)
+    return _run(MockActionFactory(), job, triage, dry_run=dry_run, request=request, services=services)
 
 
-def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = True) -> Dict[str, Any]:
+def run_live(
+    job: Dict[str, Any],
+    triage: Dict[str, Any],
+    *,
+    dry_run: bool = True,
+    request: Any = None,
+    services: Any = None,
+) -> Dict[str, Any]:
     """Run WebsiteWF against the ArchitectFactory (same summary shape as run_mock).
     Under ``dry_run=True`` the inference runner emits a deterministic placeholder
     instead of calling a model."""
@@ -118,6 +140,9 @@ def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
     # stale shelf state (shelves are within-run only — CLAUDE.md).
     shelf_root = tempfile.mkdtemp(prefix="dispatch-shelves-")
     try:
-        return _run(ArchitectFactory(shelf_root=shelf_root), job, triage, dry_run=dry_run)
+        return _run(
+            ArchitectFactory(shelf_root=shelf_root), job, triage,
+            dry_run=dry_run, request=request, services=services,
+        )
     finally:
         shutil.rmtree(shelf_root, ignore_errors=True)

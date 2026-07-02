@@ -63,10 +63,24 @@ ENGINEERING_BUDGET = int(_BUDGETS["engineering"])
 ADMIN_BUDGET = int(_BUDGETS["admin"])
 
 
+def _default_request(job: Dict[str, Any]) -> Dict[str, Any]:
+    """The legacy-compat request: callers that hand in a pre-fetched ``job`` get
+    a non-interactive job-source request synthesized from it, so the seed
+    controller accepts and hands off without any service dependency."""
+    title = job.get("title") or f"issue #{job.get('issue')}"
+    return {
+        "source": "job",
+        "job": {"title": title, "goal": job.get("body") or title, "acceptance": ""},
+    }
+
+
 class BaseWorkflow(YamlController):
-    """One work-unit cycle across spec/work/build, compiled from the YAML. The
-    constructor signature is unchanged; ``job``/``triage`` are seeded onto the
-    input shelf at run time.
+    """One work-unit cycle across seed/spec/work/build, compiled from the YAML.
+    ``job``/``triage`` — and ``request``, the seed controller's raw intake
+    (ADR-003; synthesized from ``job`` when not given, so existing callers are
+    unchanged) — are seeded onto the input shelf at run time. ``services`` (a
+    ``ServiceRegistry``) is both the validation-time provision source and the
+    run ``Context``'s resolution surface.
 
     Subclassable into a sibling *engine* (e.g. ``WebsiteWF``): override
     :meth:`_load_doc` (the parsed workflow — e.g. an overlay), :meth:`_build_registry`
@@ -98,9 +112,15 @@ class BaseWorkflow(YamlController):
         triage: Dict[str, Any],
         admin_spec_split: float = 0.5,
         shelves: Any = None,
+        request: Optional[Dict[str, Any]] = None,
+        services: Any = None,
     ) -> None:
         doc = self._load_doc()
         registry = self._build_registry()
+        # Structure/data-flow/token validation only: CONTRACT satisfaction (all
+        # declared controllers' needs met) is the CLI validator's strict check
+        # (`--services`); at run time the seed applies per-REQUEST satisfaction,
+        # so a host providing only some services still takes the requests it can.
         errors = validate(doc, registry)
         if errors:
             raise WorkflowValidationError(errors)
@@ -115,8 +135,10 @@ class BaseWorkflow(YamlController):
         )
         self.job = dict(job)
         self.triage = dict(triage)
+        self.request = dict(request) if request is not None else _default_request(self.job)
         self.admin_spec_split = float(admin_spec_split)
         self._seed_static = dict(doc.seed or {})
+        self._services = services
 
     # -- budget helpers (API-compat) ----------------------------------------
     @property
@@ -129,6 +151,7 @@ class BaseWorkflow(YamlController):
 
     # -- run-time shelf seeding ---------------------------------------------
     def _seed(self, shelves: Any) -> None:
+        shelves.input.put("request", self.request)
         shelves.input.put("job", self.job)
         shelves.input.put("triage", self.triage)
         for key, value in self._seed_static.items():
@@ -136,6 +159,8 @@ class BaseWorkflow(YamlController):
 
     def context(self, **kw: Any) -> Context:
         kw.setdefault("meter", BudgetMeter(self._total_budget(), label="workflow"))
+        if self._services is not None:
+            kw.setdefault("services", self._services)
         return super().context(**kw)
 
     def run(self, payload: Any = None, ctx: Optional[Context] = None, *, until: str = ""):
@@ -145,13 +170,25 @@ class BaseWorkflow(YamlController):
         return super().run(payload, ctx=ctx, until=until)
 
 
-def run_mock(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = True) -> Dict[str, Any]:
+def run_mock(
+    job: Dict[str, Any],
+    triage: Dict[str, Any],
+    *,
+    dry_run: bool = True,
+    request: Optional[Dict[str, Any]] = None,
+    services: Any = None,
+) -> Dict[str, Any]:
     """Run a BaseWorkflow against the MockActionFactory and return a summary — the
-    spine of the end-to-end test. No real side effects."""
+    spine of the end-to-end test. No real side effects: with no explicit
+    ``services`` the offline service family (canned issues, scripted operator)
+    provides the seed's provisions."""
     from foundation.actions import MockActionFactory
 
+    import services as bw_services  # baseworkflow/services.py (path-bootstrapped)
+
     factory = MockActionFactory()
-    wf = BaseWorkflow(factory, job=job, triage=triage)
+    svc = services if services is not None else bw_services.build_mock_services()
+    wf = BaseWorkflow(factory, job=job, triage=triage, request=request, services=svc)
     ctx = wf.context(dry_run=dry_run)
     result = wf.run(ctx=ctx)
     return {
@@ -163,9 +200,18 @@ def run_mock(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
     }
 
 
-def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = True) -> Dict[str, Any]:
+def run_live(
+    job: Dict[str, Any],
+    triage: Dict[str, Any],
+    *,
+    dry_run: bool = True,
+    request: Optional[Dict[str, Any]] = None,
+    services: Any = None,
+) -> Dict[str, Any]:
     """Run a BaseWorkflow against the ``RealActionFactory`` and return the same
-    summary shape as :func:`run_mock`.
+    summary shape as :func:`run_mock`. The real service family (gh-backed
+    github.access, TTY-backed operator.interactive) provides the seed's
+    provisions unless the caller injects its own.
 
     This is the foundational *live* runner (Phase 1 of wiring BaseWorkflow onto
     the live tick). It is identical to :func:`run_mock` except for the injected
@@ -194,8 +240,11 @@ def run_live(job: Dict[str, Any], triage: Dict[str, Any], *, dry_run: bool = Tru
     # once read another issue's job and mutated the wrong issue). A fresh temp root per
     # run, torn down in the finally below, gives each tick clean isolation.
     shelf_root = tempfile.mkdtemp(prefix="dispatch-shelves-")
+    import services as bw_services  # baseworkflow/services.py (path-bootstrapped)
+
     factory = ArchitectFactory(shelf_root=shelf_root)
-    wf = BaseWorkflow(factory, job=job, triage=triage)
+    svc = services if services is not None else bw_services.build_services()
+    wf = BaseWorkflow(factory, job=job, triage=triage, request=request, services=svc)
     ctx = wf.context(dry_run=dry_run)
     try:
         result = wf.run(ctx=ctx)

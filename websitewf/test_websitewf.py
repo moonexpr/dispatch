@@ -85,7 +85,7 @@ def test_overlay_merge() -> None:
 
     doc = load_workflow("workflows/websitewf.yml")
     _ok(doc.name == "websitewf", "overlay header: name is 'websitewf'")
-    spec = _phase_tokens(doc.phases[0])
+    spec = _phase_tokens(next(p for p in doc.phases if p.name == "spec"))
     _ok(
         "web:generate_route_work_units" in spec and "github:generate_work_units" not in spec,
         "replace: github:generate_work_units -> web:generate_route_work_units",
@@ -94,7 +94,7 @@ def test_overlay_merge() -> None:
         spec.index("web:classify_route_addendum") == spec.index("architect:classify_strategy") + 1,
         "extend after: web:classify_route_addendum follows architect:classify_strategy",
     )
-    work = doc.phases[1]
+    work = next(p for p in doc.phases if p.name == "work")
     pm = _kind_of(work, "engineer:execute_orchestration")
     _ok(pm is not None and pm.kind == "proxy", "proxy: engineer:execute_orchestration is kind 'proxy'")
     _ok(pm is not None and pm.proxy_target is not None and pm.proxy_target.bind == "execute_orchestration",

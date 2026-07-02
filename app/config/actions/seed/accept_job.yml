@@ -1,0 +1,12 @@
+# seed:accept_job — the non-interactive intake: a job request was already
+# accepted by classify (required fields complete, needs satisfied); normalize it.
+# Re-asserts completeness as defense in depth — an incomplete payload here is an
+# error, never a question (there is no one to ask).
+token: seed:accept_job
+kind: procedure
+bind: seed_accept_job
+interface:
+  in:
+    envelope: shared.envelope
+  out:
+    payload: shared.payload

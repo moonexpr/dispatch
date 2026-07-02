@@ -102,7 +102,7 @@ def test_overlay_verbs() -> None:
     from foundation.workflow import load_workflow
 
     doc = load_workflow(_WORKFLOW)
-    spec = _phase_tokens(doc.phases[0])
+    spec = _phase_tokens(next(p for p in doc.phases if p.name == "spec"))
     # add: web:scaffold_backend spliced into spec, right after author_orchestration.
     _ok("web:scaffold_backend" in spec, "add: web:scaffold_backend spliced into the spec phase")
     _ok(
@@ -111,7 +111,7 @@ def test_overlay_verbs() -> None:
         "add after: web:scaffold_backend follows architect:author_orchestration",
     )
     # proxy: the engineer in the work phase becomes a kind: proxy wrapper.
-    work = doc.phases[1]
+    work = next(p for p in doc.phases if p.name == "work")
     pm = _kind_of(work, "engineer:execute_orchestration")
     _ok(pm is not None and pm.kind == "proxy", "proxy: engineer:execute_orchestration is kind 'proxy'")
     _ok(

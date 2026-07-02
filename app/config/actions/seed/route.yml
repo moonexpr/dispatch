@@ -1,0 +1,12 @@
+# seed:route — spawn the variation of the seed controller matching the accepted
+# request and SUPERSEDE this controller's processing with it (policy=abandon:
+# the variant takes over; the fallback step below is skipped). A rejected or
+# unroutable request passes through untouched. RAW builder: needs the factory to
+# materialize the variant via compile_controller; self-manages shelf I/O.
+token: seed:route
+kind: procedure
+bind: seed_route
+raw: true
+interface:
+  in:
+    intake: shared.intake

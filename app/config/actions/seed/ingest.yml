@@ -1,0 +1,10 @@
+# seed:ingest — normalize the raw request (whatever the kernel booted) into the
+# envelope every seed variant consumes. A procedure; pure data shaping.
+token: seed:ingest
+kind: procedure
+bind: seed_ingest
+interface:
+  in:
+    request: input.request
+  out:
+    envelope: shared.envelope
