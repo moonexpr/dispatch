@@ -37,16 +37,20 @@ from .statechart import (
     COMPOUND,
     EV_DONE,
     EV_ERROR,
+    EV_SUPERSEDE,
     FINAL,
     LEAF,
     LOOP,
     PARALLEL,
+    SUPERSEDE_ABANDON,
     Configuration,
     State,
     Statechart,
+    SupersedeRequest,
     T_DONE,
     T_ERROR,
     Transition,
+    make_id,
 )
 
 
@@ -87,10 +91,19 @@ class Interpreter:
     history: Dict[str, str] = field(default_factory=dict)
     resuming: bool = False  # when True, _initial_child re-enters from history (H*)
     _internal: Deque[Event] = field(default_factory=deque)
-    _external: Deque[Event] = field(default_factory=deque)  # broadcast seam (unused)
+    _external: Deque[Event] = field(default_factory=deque)  # broadcast + supersede seam
+    _refused: set = field(default_factory=set)  # (id(request), frame) pairs already audited
 
     def run(self, payload: Any = None) -> Result:
-        return self._run_state(self.chart.root, payload)
+        result = self._run_state(self.chart.root, payload)
+        # A supersede request no frame accepted is dropped at the root — audited,
+        # never silent (ADR-003).
+        for ev in self._external:
+            if ev.name == EV_SUPERSEDE:
+                self.events.append(
+                    {"source": ev.source, "event": "supersede.dropped", "ok": True, "external": True}
+                )
+        return result
 
     # -- dispatch -----------------------------------------------------------
     def _run_state(self, state: State, payload: Any) -> Result:
@@ -140,6 +153,19 @@ class Interpreter:
                 # plain done/error completion edge. Unhandled named events stay queued
                 # and bubble to the parent frame (source rewritten on exit).
                 self._collect_raised(cur_id)
+                # Supersede outranks ordinary supervision (ADR-003 / #190): a
+                # higher-priority spawned state preempts HERE — the microstep
+                # boundary; RTC steps are never torn. Policy decides the plan's
+                # fate: abandon -> the superseder's Result completes this
+                # superstate; suspend -> on success the plan resumes below, on
+                # failure the interruption fails the plan via the error edge.
+                sup_req = self._take_supersede(state, cur_id)
+                if sup_req is not None:
+                    sup_result = self._run_supersede(state, cur_id, sup_req, feed)
+                    if sup_req.policy == SUPERSEDE_ABANDON:
+                        return sup_result
+                    if not sup_result.ok:
+                        result = sup_result
                 sup, sup_event = self._select_external(state, cur_id)
                 if sup is not None:
                     self._emit(sup_event)
@@ -238,9 +264,11 @@ class Interpreter:
         the plain done/error edge. Returns ``(transition, event)`` and consumes the
         event from the external queue when one matches (source + event name + guard);
         otherwise ``(None, None)`` and the events stay queued to bubble upward. The
-        event's payload is wrapped as the Result the transition's guard/action sees."""
+        event's payload is wrapped as the Result the transition's guard/action sees.
+        Supersede events are never matched here — they preempt via
+        :meth:`_take_supersede`, not via chart-authored transitions."""
         for ev in list(self._external):
-            if ev.source != source:
+            if ev.source != source or ev.name == EV_SUPERSEDE:
                 continue
             for t in state.transitions:
                 if t.source == source and t.event == ev.name:
@@ -248,6 +276,53 @@ class Interpreter:
                         self._external.remove(ev)
                         return t, ev
         return None, None
+
+    # -- supersede (ADR-003 / #190) ------------------------------------------
+    def _take_supersede(self, state: State, source: str) -> Optional[SupersedeRequest]:
+        """Consume the first supersede request raised at this frame whose
+        priority beats the frame's own. A refused request stays queued (audited)
+        and bubbles to the parent frame on exit; a malformed one is dropped."""
+        for ev in list(self._external):
+            if ev.name != EV_SUPERSEDE or ev.source != source:
+                continue
+            req = ev.payload
+            if not isinstance(req, SupersedeRequest):
+                self._external.remove(ev)
+                self._emit(Event(source=source, name="supersede.invalid", result=Output(req), external=True))
+                continue
+            if req.priority > state.priority:
+                self._external.remove(ev)
+                return req
+            refusal = (id(req), state.id)
+            if refusal not in self._refused:  # audit one refusal per frame, not per microstep
+                self._refused.add(refusal)
+                self._emit(Event(source=source, name="supersede.refused", result=Output(req.to_dict()), external=True))
+        return None
+
+    def _run_supersede(self, state: State, source: str, req: SupersedeRequest, feed: Any) -> Result:
+        """Graft the superseding control into the chart (a leaf child of the
+        preempted superstate — serialization and audit stay faithful) and run it.
+        The preempted frame's history is untouched, so a suspended plan resumes
+        exactly where it was."""
+        sup_state = State(
+            id=make_id(state.id, req.name, index=len(state.children)),
+            kind=LEAF,
+            activity=req.control,
+            priority=req.priority,
+        )
+        state.children.append(sup_state)
+        self.chart.index[sup_state.id] = sup_state
+        self._emit(Event(source=source, name="supersede.accepted", result=Output(req.to_dict()), external=True))
+        result = self._run_state(sup_state, req.payload if req.payload is not None else feed)
+        self._emit(
+            Event(
+                source=sup_state.id,
+                name="supersede.completed" if result.ok else "supersede.failed",
+                result=result,
+                external=True,
+            )
+        )
+        return result
 
     # -- resume seam --------------------------------------------------------
     def snapshot(self) -> Dict[str, Any]:

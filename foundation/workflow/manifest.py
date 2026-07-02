@@ -23,8 +23,15 @@ The manifest declares everything about the action that is *not* its code:
                       the compiler reads ``in`` from the shelves into the body and
                       writes the body's result to ``out``, and the validator checks
                       that every ``in`` is seeded or produced upstream.
+  * ``needs``       — first-class dependency declarations (ADR-003): what the
+                      action requires from its environment (``service:``/
+                      ``config:``/``input:`` kinds; see ``foundation.needs``).
+                      ``input`` needs are additionally *derived* from the
+                      ``interface.in`` refs that read the input shelf, so only
+                      ``raw`` actions (which self-manage I/O) declare them.
 
-Leaf module: stdlib + an in-function PyYAML import.
+Leaf module: stdlib + an in-function PyYAML import + ``foundation.needs`` (a
+stdlib leaf).
 """
 from __future__ import annotations
 
@@ -32,6 +39,8 @@ import glob as _glob
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
+
+from foundation.needs import Need, NeedError, parse_needs
 
 VALID_KINDS = ("inference", "procedure", "proxy")
 VALID_SHELVES = ("input", "deliverables", "shared")
@@ -76,6 +85,7 @@ class ActionManifest:
     budget: Optional[str] = None
     inputs: Tuple[IORef, ...] = ()
     outputs: Tuple[IORef, ...] = ()
+    needs: Tuple[Need, ...] = ()
     source: str = ""
     # -- proxy-only (kind == "proxy") ---------------------------------------
     proxy_target: Optional["ActionManifest"] = None
@@ -85,6 +95,18 @@ class ActionManifest:
     @property
     def namespace(self) -> str:
         return self.token.split(":", 1)[0]
+
+    @property
+    def effective_needs(self) -> Tuple[Need, ...]:
+        """The declared ``needs`` plus the input needs *derived* from every
+        ``interface.in`` ref that reads the input shelf (ADR-003). Declared
+        entries win on a key collision (they may carry ``optional``/notes)."""
+        declared = {n.key: n for n in self.needs}
+        derived = (
+            Need.input(r.key) for r in self.inputs
+            if r.shelf == "input" and Need.input(r.key).key not in declared
+        )
+        return tuple(self.needs) + tuple(derived)
 
 
 def _parse_io(spec: Any, where: str) -> Tuple[IORef, ...]:
@@ -117,6 +139,10 @@ def manifest_from_dict(d: Dict[str, Any], *, source: str = "") -> ActionManifest
         raise ManifestError(f"{source}: token {token!r} missing 'bind' (the registered impl name)")
     iface = d.get("interface") or {}
     perm = d.get("permission")
+    try:
+        needs = parse_needs(d.get("needs"), where=f"{token}.needs")
+    except NeedError as exc:
+        raise ManifestError(f"{source}: {exc}")
     return ActionManifest(
         token=str(token),
         kind=str(kind),
@@ -127,6 +153,7 @@ def manifest_from_dict(d: Dict[str, Any], *, source: str = "") -> ActionManifest
         budget=(str(d["budget"]) if d.get("budget") is not None else None),
         inputs=_parse_io(iface.get("in"), f"{token}.interface.in"),
         outputs=_parse_io(iface.get("out"), f"{token}.interface.out"),
+        needs=needs,
         source=source,
     )
 
@@ -177,6 +204,7 @@ def proxy_manifest(
         budget=None,
         inputs=eff_inputs,
         outputs=eff_outputs,
+        needs=target.needs,
         source=source or target.source,
         proxy_target=target,
         rewire_in=rin,

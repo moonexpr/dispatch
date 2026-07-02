@@ -36,6 +36,7 @@ from foundation.runtime import Logger
 
 from .result import ActionError, Error, Output, ProgramError, Result
 from .shelf import Shelves
+from .statechart import SUPERSEDE_ABANDON, EV_SUPERSEDE, SupersedeRequest
 
 
 def _debug_on() -> bool:
@@ -117,6 +118,10 @@ class Context:
     # inside a nested Program raises onto the same sink the enclosing interpreters
     # drain at each Program boundary.
     raised: List[RaisedEvent] = field(default_factory=list)
+    # The run's ServiceRegistry (ADR-003) — the runtime provision surface actions
+    # resolve their service needs against. Duck-typed (``get(id)``) so this leaf
+    # never imports the services package.
+    services: Any = None
 
     def phase_meter(self, key: str, cap: int) -> "BudgetMeter":
         m = self.budgets.get(key)
@@ -148,6 +153,34 @@ class Context:
         the condition; the chart's transition table decides who handles it and how —
         keeping control flow in the transition layer, not in the activity."""
         self.raised.append(RaisedEvent(name=name, payload=payload))
+
+    def supersede(
+        self,
+        control: Any,
+        *,
+        name: str = "supersede",
+        payload: Any = None,
+        policy: str = SUPERSEDE_ABANDON,
+        priority: int = 1,
+    ) -> None:
+        """Request preemption (ADR-003 / #190): ``control`` (anything runnable —
+        an Action, Control or Controller) supersedes the active plan at the next
+        microstep boundary, at the nearest enclosing frame whose priority it
+        beats. The activity only *requests*; the interpreter owns acceptance,
+        policy and audit."""
+        self.raise_event(
+            EV_SUPERSEDE,
+            SupersedeRequest(control=control, name=name, payload=payload, policy=policy, priority=priority),
+        )
+
+    def service(self, sid: str) -> Any:
+        """Resolve a service need (``domain.facet``) against the run's registry.
+        Raises in the needs vocabulary when the environment does not provide
+        what the action declared — the runtime counterpart of static
+        satisfaction."""
+        if self.services is None:
+            raise ActionError(f"unmet need service:{sid} — no ServiceRegistry on this run's Context")
+        return self.services.get(sid)
 
 
 # A runner fulfils an Inference: (spec, payload, ctx) -> value | Result.

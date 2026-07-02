@@ -24,6 +24,7 @@ from foundation import filesys
 from .manifest import ActionManifest, load_manifests
 from .nodes import (
     ActionRefNode,
+    ControllerRefNode,
     LoopNode,
     Node,
     ParallelNode,
@@ -32,7 +33,7 @@ from .nodes import (
     WorkflowNode,
 )
 
-_STRUCTURAL = ("loop", "sequence", "parallel")
+_STRUCTURAL = ("loop", "sequence", "parallel", "controller")
 
 
 class SchemaError(Exception):
@@ -70,8 +71,25 @@ def _parse_step(step: Any, manifests: Dict[str, ActionManifest], path: str) -> N
             return _parse_sequence(spec, manifests, f"{path}.sequence")
         if kind == "parallel":
             return _parse_parallel(spec, manifests, f"{path}.parallel")
+        if kind == "controller":
+            return _parse_controller(spec, manifests, f"{path}.controller")
         raise SchemaError(path, f"unknown structural token {kind!r} (one of {_STRUCTURAL} or an action token)")
     raise SchemaError(path, f"a step is a token string or a mapping, got {type(step).__name__}")
+
+
+def _parse_controller(spec: Any, manifests: Dict[str, ActionManifest], path: str) -> ControllerRefNode:
+    """A controller reference (ADR-003): ``- controller: <name>`` or
+    ``- controller: {name: <name>}``. The name resolves against the registry at
+    validate/compile time; the loaded manifests ride along for the expansion."""
+    if isinstance(spec, str):
+        name = spec
+    elif isinstance(spec, dict):
+        name = str(spec.get("name") or "")
+    else:
+        raise SchemaError(path, f"controller must be a name or a mapping with 'name', got {type(spec).__name__}")
+    if not name:
+        raise SchemaError(path, "controller reference needs a name")
+    return ControllerRefNode(name=name, manifests=manifests)
 
 
 def _parse_loop(spec: Any, manifests: Dict[str, ActionManifest], path: str) -> LoopNode:
@@ -132,6 +150,8 @@ def parse_document(doc: Dict[str, Any], manifests: Dict[str, ActionManifest], *,
         inputs=tuple(str(k) for k in (doc.get("inputs") or ())),
         seed=dict(doc.get("seed") or {}),
         budgets=dict(doc.get("budgets") or {}),
+        controllers=tuple(str(c) for c in (doc.get("controllers") or ())),
+        manifests=manifests,
         admin_spec_split=float(doc.get("admin_spec_split", 0.5)),
         terminal_when=(str(doc["terminal_when"]) if doc.get("terminal_when") else None),
     )
@@ -150,6 +170,7 @@ def _apply_header(merged: WorkflowNode, doc: Dict[str, Any], base: WorkflowNode)
         seed={**base.seed, **(doc.get("seed") or {})},
         budgets={**base.budgets, **(doc.get("budgets") or {})},
         inputs=(tuple(str(k) for k in doc["inputs"]) if doc.get("inputs") else merged.inputs),
+        controllers=(tuple(str(c) for c in doc["controllers"]) if doc.get("controllers") else merged.controllers),
         terminal_when=(str(doc["terminal_when"]) if doc.get("terminal_when") else merged.terminal_when),
     )
 
@@ -171,10 +192,14 @@ def load_workflow(relpath: str) -> WorkflowNode:
 
     extends = doc.get("extends")
     if extends:
+        from dataclasses import replace
+
         from .overlay import apply_overlays
 
         base = load_workflow(os.path.join(wf_dir, f"{extends}.yml"))
         merged = apply_overlays(base, doc.get("overlays") or [], manifests, source=relpath)
+        # The merged tree's interface library is the base's plus the overlay's own.
+        merged = replace(merged, manifests={**base.manifests, **manifests})
         return _apply_header(merged, doc, base)
 
     return parse_document(doc, manifests, source=relpath)

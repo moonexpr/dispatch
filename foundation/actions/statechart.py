@@ -45,6 +45,16 @@ FINAL = "final"
 EV_DONE = "done"
 EV_ERROR = "error"
 
+# The preemption event (ADR-003 / #190). Raised via ``ctx.supersede`` with a
+# SupersedeRequest payload; consumed by the interpreter at microstep boundaries
+# — never matched against ordinary named-event transitions (hence the dunder).
+EV_SUPERSEDE = "__supersede__"
+
+# Supersede policies: what happens to the preempted superstate's remaining plan.
+SUPERSEDE_ABANDON = "abandon"  # superseder takes over; its Result completes the superstate
+SUPERSEDE_SUSPEND = "suspend"  # superseder interrupts; on success the plan resumes
+VALID_SUPERSEDE_POLICIES = (SUPERSEDE_ABANDON, SUPERSEDE_SUSPEND)
+
 # Special transition targets meaning "this superstate completes".
 T_DONE = "@done"
 T_ERROR = "@error"
@@ -95,7 +105,10 @@ class State:
         self-transition and the exit edges.
       * PARALLEL — ``children`` are orthogonal regions.
       * FINAL — absorbing.
-    ``history`` records the last deep configuration (resume seam)."""
+    ``history`` records the last deep configuration (resume seam).
+    ``priority`` is the preemption threshold this state defends (ADR-003): a
+    SupersedeRequest preempts a frame only when its priority is strictly
+    higher."""
 
     id: str
     kind: str
@@ -104,6 +117,7 @@ class State:
     initial: str = ""
     transitions: List[Transition] = field(default_factory=list)
     history: Optional[str] = None
+    priority: int = 0
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def child(self, sid: str) -> Optional["State"]:
@@ -137,7 +151,33 @@ class State:
             d["transitions"] = [t.to_dict() for t in self.transitions]
         if self.history is not None:
             d["history"] = self.history
+        if self.priority:
+            d["priority"] = self.priority
         return d
+
+
+@dataclass
+class SupersedeRequest:
+    """A first-class request to preempt the active plan (ADR-003 / #190).
+    ``control`` is anything runnable — ``run(payload, ctx) -> Result`` (an
+    Action, a Control, a Controller) — grafted into the chart as a leaf when a
+    frame accepts the request. ``policy`` decides the preempted plan's fate
+    (abandon / suspend); ``priority`` must exceed the defending frame's
+    ``State.priority`` to be accepted there, otherwise the request bubbles up."""
+
+    control: Any
+    name: str = "supersede"
+    payload: Any = None
+    policy: str = SUPERSEDE_ABANDON
+    priority: int = 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "policy": self.policy,
+            "priority": self.priority,
+            "control": getattr(self.control, "name", type(self.control).__name__),
+        }
 
 
 @dataclass
