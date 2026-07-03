@@ -15,6 +15,10 @@ no branches, no branch protection. Change it to `released` (or otherwise
 non-`development`) when the repo leaves solo dev; that re-arms the PR / branch-protection
 / review flow and the push pre-authorization lapses.
 
+**The repo is released**, so the PR flow is in force: `main` is protected and work merges
+through PRs targeting **`beta`** (the integration branch — see **Git & PRs** below), not
+`main`.
+
 ---
 
 ## Running a live engine tick test
@@ -113,7 +117,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 > Are PRs preferred over direct pushes to main?
 
 - **Commit convention**: conventional commits (signed)
-- **Branch strategy**: push directly to `main` while `Development Status: development` (see **Development Status** above) — no feature branches / PRs in dev mode
+- **Branch strategy**: **`beta` is the integration branch — all PRs merge into `beta`, never into `main`.** `main` is the protected release/stable branch; `beta` is promoted to `main` only at a release. Work on a feature branch (`feat/…`, `fix/…`, or `pipeline/issue-<n>`), then open a PR with `--base beta`. (The old "push directly to `main`" posture applied only while `Development Status: development`; the repo is now released — see **Development Status** above.)
 
 ---
 

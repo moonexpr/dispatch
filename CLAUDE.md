@@ -30,10 +30,16 @@ the GitHub label state machine and approval/fix ladder.
 
 ## The contract (HANDOFF §5.7)
 
-> **Deferred during development.** The branch / PR / merge rules in this section
-> take effect only once the repo leaves development; until then, work directly on
-> `main` (see *Development mode* above). The scope, done-means, and security
-> discipline below still apply.
+> **In force (repo is released).** `PROJECT.md` reads `Development Status: 1.0`, so
+> the branch / PR / merge rules in this section apply. The scope, done-means, and
+> security discipline below all hold.
+
+> **Merge target = `beta`, not `main`.** `beta` is the integration branch: every PR
+> opens with `--base beta`. `main` is the protected release/stable branch and is
+> promoted from `beta` only at a release — no PR merges directly into `main`. Wherever
+> this contract says "`main`" as the branch you must not push to, that protection now
+> covers **both** `main` and `beta` (you push only to your own feature branch and open
+> a PR into `beta`).
 
 - **One session = one issue = one branch = one PR.** Never widen scope beyond
   the issue you were handed. If the issue implies more work, note it in the PR
@@ -41,9 +47,10 @@ the GitHub label state machine and approval/fix ladder.
 - **Done means:** CI green, review feedback addressed, docs updated, and the
   issue's stated acceptance criteria met. Restate those criteria at the top of
   your PR body as a checklist.
-- **Never merge. Never push to `main`.** You push only to your own
-  `pipeline/issue-<n>` branch. Merging happens through branch protection
-  (CI + one human approval) and auto-merge — not by any agent.
+- **Never merge. Never push to `main` or `beta`.** You push only to your own
+  `pipeline/issue-<n>` (or `feat/…` / `fix/…`) branch and open a PR into `beta`.
+  Merging into `beta` happens through branch protection (CI + one human approval)
+  and auto-merge — not by any agent; promotion of `beta` → `main` is a release step.
 - **Never edit labels outside your stage.** The label state machine
   (`queued → claimed → pr-open → in-review → docs-pending → done`) is owned by
   the workflow's stages. Touch only the transition your stage owns.
