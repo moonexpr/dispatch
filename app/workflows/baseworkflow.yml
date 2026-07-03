@@ -106,6 +106,7 @@ phases:
   # stored record + the consolidated PR number are all available.
   build:
     - admin:update_docs
+    - admin:migrate      # apply the app's DB migrations (build STATE) before deploy
     - admin:publish
     - admin:store
     - admin:consolidate_pr

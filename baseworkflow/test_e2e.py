@@ -51,7 +51,7 @@ EXPECTED_DELIVERABLES = {
     "purpose", "work_unit", "plan", "strategy", "bucket", "budget",
     "orchestration_script", "work_plan", "submission",
     "env", "adversarial_tests", "engineering_result", "docs", "stored",
-    "intake",
+    "intake", "migration",
 }
 
 _RESULTS: list = []

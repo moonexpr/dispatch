@@ -1,0 +1,19 @@
+# admin:migrate — apply the app's DB migrations to the hosting database. A
+# first-class build state: the engineer commits migration files but nothing
+# applies them, so a "completed" build whose DB was never migrated looks green
+# yet cannot run (the app's queries 404 on missing tables). This state closes
+# that gap — it applies each supabase/migrations/*.sql to the target Supabase
+# project via the Management API (personal-access-token auth; no DB password or
+# CLI needed — the headless-viable path). Network-MUTATING, gated on ctx.dry_run;
+# fail-safe: absent creds / no migrations -> recorded skip, an apply error ->
+# recorded stop, never an exception that breaks the tick. Runs before publish so
+# the deployed frontend meets a migrated backend.
+token: admin:migrate
+kind: procedure
+bind: migrate
+interface:
+  in:
+    engineering_result: deliverables.engineering_result
+    job: input.job
+  out:
+    migration: deliverables.migration
