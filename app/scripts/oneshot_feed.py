@@ -22,14 +22,32 @@ Tasks file: a JSON array of objects, each:
       "labels": ["..."],              # optional
       "route":  "/pricing",           # optional web route hint (websitewf)
       "framework": "nextjs",          # optional
+      "usecase": "scaffold-foundation",  # optional websitewf use-case (see below)
       "triage": {"action": "implement", "scope": "m",
                  "route": "gen-default", "confidence": 0.9}   # optional override
     }
+
+WebsiteWF use-cases (the ``usecase`` field / ``--usecase`` flag)
+---------------------------------------------------------------
+The websitewf engine is not one workflow but a set of use-case overlays selected
+by the ``WEBSITEWF_USECASE`` env var (``websitewf.websitewf._USECASES``): e.g.
+``scaffold-foundation`` (create the Next.js/Laravel app skeleton) vs the default
+proof-vertical overlay (ADD one route/feature to an *existing* app). Until this
+feeder could set that var, every oneshot task ran under the default overlay — so
+feeding a "build a website" plan into a bare repo produced feature code with no
+foundation, each engineer improvising a different stack against an empty clone.
+
+``usecase`` closes that gap: set the first task's use-case to ``scaffold-foundation``
+so the foundation is built before the feature tasks run. It maps 1:1 to
+``WEBSITEWF_USECASE`` and is applied per task (a task without ``usecase`` falls back
+to ``--usecase``, then to the default overlay). Ignored by the baseworkflow engine.
 
 Usage:
     python scripts/oneshot_feed.py tasks.json
     python scripts/oneshot_feed.py tasks.json --repo owner/repo
     python scripts/oneshot_feed.py tasks.json --engine websitewf --live -v
+    # foundation-first: scaffold, then features (per-task usecase in the JSON)
+    python scripts/oneshot_feed.py tasks.json --engine websitewf --usecase scaffold-foundation --live
 
 Dry-run is the default — the engine's real inference returns a deterministic
 placeholder and no GitHub mutation occurs. ``--live`` runs the real model. Because
@@ -108,6 +126,9 @@ def main(argv: list | None = None) -> int:
     ap.add_argument("-e", "--engine", default=os.environ.get("DISPATCH_ENGINE", "baseworkflow"))
     ap.add_argument("-l", "--live", action="store_true", help="PIPELINE_DRY_RUN=0 — run the real model")
     ap.add_argument("-v", "--verbose", action="store_true", help="stream the engine action trace")
+    ap.add_argument("-u", "--usecase", default=os.environ.get("WEBSITEWF_USECASE") or None,
+                    help="run-wide websitewf use-case (WEBSITEWF_USECASE); per-task 'usecase' overrides it. "
+                         "e.g. scaffold-foundation")
     args = ap.parse_args(argv)
 
     raw = sys.stdin.read() if args.tasks == "-" else open(args.tasks, encoding="utf-8").read()
@@ -129,6 +150,13 @@ def main(argv: list | None = None) -> int:
         os.environ["DISPATCH_DEBUG"] = "1"
     mod = importlib.import_module(_ENGINES[engine])
 
+    # Known websitewf use-case slugs, for validating the usecase field/flag. An
+    # unknown value silently degrades to the default overlay in the engine, so we
+    # warn loudly here rather than let a typo scaffold nothing. None → not websitewf.
+    known_usecases = None
+    if engine == "websitewf":
+        known_usecases = {slug for slug in getattr(mod, "_USECASES", {}) if slug}
+
     mode = "LIVE" if args.live else "dry-run"
     print(f"oneshot: engine={engine} mode={mode} tasks={len(tasks)} (bypassing GitHub intake)")
 
@@ -136,8 +164,24 @@ def main(argv: list | None = None) -> int:
     for i, task in enumerate(tasks):
         job = _build_job(task, args.repo, i)
         triage = {**_DEFAULT_TRIAGE, **(task.get("triage") or {})}
+
+        # Select the websitewf use-case overlay for THIS task (WEBSITEWF_USECASE is
+        # read per WebsiteWF instance inside run_live). Per-task 'usecase' wins over
+        # the run-wide --usecase; absence means the default (feature-addition) overlay.
+        usecase = task.get("usecase") or args.usecase
+        if usecase:
+            os.environ["WEBSITEWF_USECASE"] = usecase
+            if known_usecases is not None and usecase not in known_usecases:
+                print(f"oneshot: WARNING — task {i + 1} use-case {usecase!r} is not a known "
+                      f"websitewf overlay {sorted(known_usecases)}; the engine will fall back "
+                      f"to the DEFAULT feature-addition overlay (no foundation scaffold).",
+                      file=sys.stderr)
+        else:
+            os.environ.pop("WEBSITEWF_USECASE", None)
+
+        overlay = usecase if usecase else ("default-overlay" if engine == "websitewf" else "n/a")
         print(f"\noneshot: ── task {i + 1}/{len(tasks)} — {job['title']!r} "
-              f"(synthetic #{job['issue']}) ──")
+              f"(synthetic #{job['issue']}, use-case={overlay}) ──")
         summary = mod.run_live(job, triage, dry_run=not args.live)
         result = summary["result"]
         deliv = sorted(summary.get("deliverables") or {})

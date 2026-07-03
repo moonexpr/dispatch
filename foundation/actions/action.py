@@ -109,6 +109,11 @@ class Context:
     permissions: Any = None
     trace: List[Dict[str, Any]] = field(default_factory=list)
     counters: Dict[str, int] = field(default_factory=dict)
+    # Optional run observer (default None = un-observed). The Interpreter notifies
+    # it on every state enter/leave and completion event, so a debug viewer (or any
+    # monitor) can watch a run live without the engine knowing what it is. Shared
+    # across ``descend`` (``replace`` copies it) so nested Programs are observed too.
+    observer: Any = None
     # Scoped sub-meters (one per named scope), each a child of ``meter``
     # so a scope cap and the global total are enforced by one charge. Shared across
     # a scope's actions: the first BudgetGovernor with a given key creates it.

@@ -24,7 +24,7 @@ from .action import Action, BudgetMeter, Context, Inference, Procedure, Program
 from .adapter import Adapter, JsonAdapter, TextAdapter, YamlAdapter, adapter_for
 from .control import Control, Controller, Loop, Parallel, Sequence, compile_node, ordinal
 from .factory import AbstractActionFactory, MockActionFactory, RealActionFactory
-from .interpreter import Event, Interpreter, interpret
+from .interpreter import Event, Interpreter, Observer, interpret
 from .statechart import (
     EV_SUPERSEDE,
     SUPERSEDE_ABANDON,
@@ -75,7 +75,7 @@ __all__ = [
     "Control", "Sequence", "Loop", "Parallel", "Controller", "compile_node", "ordinal",
     # statechart + interpreter
     "State", "Transition", "Statechart", "Configuration", "make_id",
-    "Interpreter", "Event", "interpret",
+    "Interpreter", "Event", "Observer", "interpret",
     # supersede (ADR-003 / #190)
     "SupersedeRequest", "EV_SUPERSEDE", "SUPERSEDE_ABANDON", "SUPERSEDE_SUSPEND",
     # script

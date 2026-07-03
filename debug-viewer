@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# debug-viewer — realtime debug viewer for dispatch workflows.
+#
+# Draws every workflow YAML under app/workflows/ as a statechart graph in the
+# browser, with a switcher to flip between them. Graphs recompile on every
+# request, so edit a workflow and hit refresh to see the new states.
+#
+#   ./debug-viewer                 serve on http://127.0.0.1:8787
+#   ./debug-viewer --open          also open a browser
+#   ./debug-viewer --port 9000     bind a different port
+#
+# Watching a tick execute live is stubbed for now (the /api/sessions endpoints).
+# Thin wrapper over `python3 -m tools.debugviewer`.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+cd "$(dirname "$0")"
+exec python3 -m tools.debugviewer "$@"

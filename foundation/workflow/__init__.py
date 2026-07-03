@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from .controller import CompiledWorkflow, YamlController
+from .graph import GraphVisitor, workflow_to_graph
 from .loader import SchemaError, load_workflow, parse_document
 from .manifest import (
     ActionManifest,
@@ -83,6 +84,8 @@ __all__ = [
     # controllers + needs (ADR-003)
     "compile_controller", "controller_needs", "expand_controller", "needs_report",
     "Need", "NeedSet", "Provision",
+    # graph / debug viewer (#197)
+    "GraphVisitor", "workflow_to_graph",
     # loader
     "load_workflow", "parse_document", "SchemaError",
     # controller
