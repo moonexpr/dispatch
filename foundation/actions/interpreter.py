@@ -56,9 +56,14 @@ class Observer:
     is passive telemetry — it must never mutate the run or raise (the Interpreter
     swallows observer exceptions), so watching a run cannot change its outcome."""
 
-    def on_enter(self, state_id: str, kind: str) -> None: ...
-    def on_leave(self, state_id: str, ok: bool) -> None: ...
-    def on_event(self, event: Dict[str, Any]) -> None: ...
+    def on_enter(self, state_id: str, kind: str) -> None:
+        pass
+
+    def on_leave(self, state_id: str, ok: bool) -> None:
+        pass
+
+    def on_event(self, event: Dict[str, Any]) -> None:
+        pass
 
 
 @dataclass

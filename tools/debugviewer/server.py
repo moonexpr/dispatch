@@ -158,7 +158,9 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json({"error": f"not found: {route}"}, 404)
         except BrokenPipeError:
-            pass
+            # Client disconnected while we were writing the response; ignore.
+            sys.stderr.write("  client disconnected (BrokenPipeError)\n")
+            return
         except Exception as exc:  # noqa: BLE001 — never 500-crash the whole server
             self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
@@ -189,6 +191,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json({"error": f"not found: {route}"}, 404)
         except BrokenPipeError:
+            # Client disconnected before the response finished writing.
+            # This is expected for aborted HTTP requests; ignore quietly.
             pass
         except Exception as exc:  # noqa: BLE001
             self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
@@ -225,6 +229,7 @@ class Handler(BaseHTTPRequestHandler):
                     if run.status in terminal:
                         done = True
         except (BrokenPipeError, ConnectionResetError):
+            # Client disconnected mid-stream; this is expected for SSE and can be ignored.
             pass
         finally:
             run.unsubscribe(q)

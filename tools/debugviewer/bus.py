@@ -67,6 +67,8 @@ class Run:
                 try:
                     q.put_nowait(event)
                 except queue.Full:
+                    # Slow subscriber: drop this live event for that queue so one
+                    # backpressured client cannot block emission to others.
                     pass
 
     def subscribe(self) -> "Tuple[queue.Queue, List[Dict[str, Any]]]":
