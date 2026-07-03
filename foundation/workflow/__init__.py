@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from .controller import CompiledWorkflow, YamlController
+from .graph import GraphVisitor, workflow_to_graph
 from .loader import SchemaError, load_workflow, parse_document
 from .manifest import (
     ActionManifest,
@@ -71,6 +72,7 @@ __all__ = [
     "parse_predicate", "compile_predicate", "PredicateError", "PredicateCompiler", "PredicateValidator",
     # visitors
     "WorkflowVisitor", "CompileVisitor", "ValidateVisitor", "RenderVisitor", "ValidationError",
+    "GraphVisitor", "workflow_to_graph",
     # loader
     "load_workflow", "parse_document", "SchemaError",
     # controller

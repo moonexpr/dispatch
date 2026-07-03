@@ -24,7 +24,7 @@ from .action import Action, BudgetMeter, Context, Inference, Procedure, Program
 from .adapter import Adapter, JsonAdapter, TextAdapter, YamlAdapter, adapter_for
 from .control import Control, Controller, Loop, Parallel, Sequence, compile_node, ordinal
 from .factory import AbstractActionFactory, MockActionFactory, RealActionFactory
-from .interpreter import Event, Interpreter, interpret
+from .interpreter import Event, Interpreter, Observer, interpret
 from .statechart import (
     Configuration,
     State,
@@ -71,7 +71,7 @@ __all__ = [
     "Control", "Sequence", "Loop", "Parallel", "Controller", "compile_node", "ordinal",
     # statechart + interpreter
     "State", "Transition", "Statechart", "Configuration", "make_id",
-    "Interpreter", "Event", "interpret",
+    "Interpreter", "Event", "Observer", "interpret",
     # script
     "OrchestrationScript", "PhaseSpec", "AgentSpec", "InferenceSpec",
     # factory

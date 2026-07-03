@@ -50,6 +50,22 @@ from .statechart import (
 )
 
 
+class Observer:
+    """No-op base for a run observer. The Interpreter calls these on every state
+    enter/leave and completion event; override the ones you care about. An observer
+    is passive telemetry — it must never mutate the run or raise (the Interpreter
+    swallows observer exceptions), so watching a run cannot change its outcome."""
+
+    def on_enter(self, state_id: str, kind: str) -> None:
+        pass
+
+    def on_leave(self, state_id: str, ok: bool) -> None:
+        pass
+
+    def on_event(self, event: Dict[str, Any]) -> None:
+        pass
+
+
 @dataclass
 class Event:
     """An event on the agenda. Completion events (``EV_DONE``/``EV_ERROR``) are
@@ -86,11 +102,29 @@ class Interpreter:
     events: List[Dict[str, Any]] = field(default_factory=list)
     history: Dict[str, str] = field(default_factory=dict)
     resuming: bool = False  # when True, _initial_child re-enters from history (H*)
+    observer: Any = None  # optional; falls back to ctx.observer (rides descend)
     _internal: Deque[Event] = field(default_factory=deque)
     _external: Deque[Event] = field(default_factory=deque)  # broadcast seam (unused)
 
     def run(self, payload: Any = None) -> Result:
         return self._run_state(self.chart.root, payload)
+
+    # -- observer notification ---------------------------------------------
+    def _notify(self, method: str, *args: Any) -> None:
+        """Fire an observer hook. The observer lives on ``ctx.observer`` (so it
+        rides ``ctx.descend`` into nested Programs) or on this interpreter. It is
+        passive: any exception it raises is swallowed so telemetry can never break
+        the run."""
+        obs = self.observer or getattr(self.ctx, "observer", None)
+        if obs is None:
+            return
+        fn = getattr(obs, method, None)
+        if fn is None:
+            return
+        try:
+            fn(*args)
+        except Exception:  # noqa: BLE001 — an observer must never break the run
+            pass
 
     # -- dispatch -----------------------------------------------------------
     def _run_state(self, state: State, payload: Any) -> Result:
@@ -106,12 +140,18 @@ class Interpreter:
 
     def _run_leaf(self, state: State, payload: Any) -> Result:
         self.config.enter(state.id)
+        self._notify("on_enter", state.id, state.kind)
+        ok = False
         try:
             if state.activity is None:
-                return Output(payload)
-            # A Program activity enters a nested chart here — the depth operator.
-            return state.activity.run(payload, self.ctx)
+                result: Result = Output(payload)
+            else:
+                # A Program activity enters a nested chart here — the depth operator.
+                result = state.activity.run(payload, self.ctx)
+            ok = result.ok
+            return result
         finally:
+            self._notify("on_leave", state.id, ok)
             self.config.leave(state.id)
 
     def _run_super(self, state: State, payload: Any) -> Result:
@@ -121,11 +161,12 @@ class Interpreter:
         again (the guarded self-transition); the live iteration count is published
         on ``ctx.counters[state.id]`` for its guard to read."""
         self.config.enter(state.id)
+        self._notify("on_enter", state.id, state.kind)
+        result: Result = Output(payload)
         child_ids = {c.id for c in state.children}
         try:
             cur_id = self._initial_child(state)
             feed = payload
-            result: Result = Output(payload)
             iteration = 0
             while cur_id:
                 child = self.chart.index[cur_id]
@@ -161,6 +202,7 @@ class Interpreter:
                 feed = getattr(result, "value", feed)
             return result
         finally:
+            self._notify("on_leave", state.id, result.ok)
             # Bubble this frame's still-unhandled named events to the parent: from the
             # parent's perspective they emerged from THIS superstate, so re-key their
             # source to state.id (one level of propagation per returning frame).
@@ -174,16 +216,20 @@ class Interpreter:
         join on all-success; the first failing region short-circuits. Concurrency
         and cross-region events are the reserved seam."""
         self.config.enter(state.id)
+        self._notify("on_enter", state.id, state.kind)
+        ok = True
         try:
             outputs: List[Any] = []
             for region in state.children:
                 r = self._run_state(region, payload)
                 self._emit(Event(source=region.id, name=EV_DONE if r.ok else EV_ERROR, result=r))
                 if not r.ok:
+                    ok = False
                     return r
                 outputs.append(r.value)
             return Output(outputs)
         finally:
+            self._notify("on_leave", state.id, ok)
             self.config.leave(state.id)
 
     # -- entry / deep history ----------------------------------------------
@@ -210,7 +256,9 @@ class Interpreter:
         self._internal.append(event)
         while self._internal:
             ev = self._internal.popleft()
-            self.events.append(ev.to_dict())
+            d = ev.to_dict()
+            self.events.append(d)
+            self._notify("on_event", d)
 
     def _select(self, state: State, source: str, event: str, result: Result) -> Optional[Transition]:
         """Consult the chart's first-class transitions: the first one whose source
