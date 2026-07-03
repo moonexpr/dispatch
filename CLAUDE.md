@@ -7,20 +7,55 @@ worker session invoked by it (via `/implement-task`, `/fix-ci`, or
 `/update-docs`), this contract is binding.
 Read it before acting.
 
-## Development mode (current — solo dev)
+## What dispatch is (orientation)
 
-While this repo is in development — as declared by **`Development Status: development`**
-in [`PROJECT.md`](./PROJECT.md), the authoritative signal — **every session works
-directly on `main`** — operator-directed *and* autonomous pipeline workers
-(`/implement-task`, `/fix-ci`, `/update-docs`) alike commit (signed) and push straight
-to `main`. **Pushing is pre-authorized: agents do not need to ask before pushing `main`**
-while PROJECT.md declares development (this overrides the default "commit/push only when
-asked" posture). No pull requests, no `pipeline/issue-*` branches, no branch protection:
-that PR-based review flow (described in **The contract** below) is **deferred until the
-repo leaves development** — i.e. until PROJECT.md's `Development Status` changes. Until
-then, `main` is the working branch.
+dispatch is a small, focused **orchestration tool over a workflow engine** — a
+declarative, programmable surface over the management of user requests, resources,
+LLM agents, communication, and failure recovery. It sits one level above raw
+model/agent libraries (Transformers, OpenRouter). Grounded scope: **task
+decomposition, slice-based work processing, admin validation, and arbitrary
+inputs/outputs**. GitHub-issue intake is one input *adapter*, not the core.
+
+Keep a clear boundary between three layers — never let a higher layer's concerns
+leak down, or consumer code reach past its own:
+
+1. **Foundation tooling** (`foundation/`) — agents, backends, models, shelves,
+   proc/filesys primitives.
+2. **Workflow-engine subsystems** (`foundation/workflow/`, `baseworkflow/`
+   subsystems) — the HFSM/statechart engine, controllers, actions, manifests,
+   validation.
+3. **Consumer app code** (`app/`) — concrete workflows, config, `./dispatch`, the
+   `/dispatch` skills.
+
+Roadmap principle: **1.x is refinement and discipline; 2.0 is expansion.** 1.x
+hardens the existing single-host pipeline (decoupling, tool/shelf/serialization
+hygiene, containerized worker isolation, superseedable HFSM states + event
+responders); 2.0 builds outward (OpenRouter backends, declarative profiles, a
+multi-host fleet dispatcher). A scriptable workflow language is exploratory, not
+committed scope. Tracked in the umbrella epic; see [`README.md`](./README.md) →
+*What dispatch is* for the full framing.
+
+## Branch & merge discipline (current — production)
+
+This repo is **released / production** — `Development Status: 1.0` in
+[`PROJECT.md`](./PROJECT.md), the authoritative signal. The dev-mode push
+pre-authorization has **lapsed**; no session pushes to `main`. Branch discipline:
+
+- **All work lands via PR into `beta`** — the integration branch. Operator-directed
+  *and* autonomous pipeline workers (`/implement-task`, `/fix-ci`, `/update-docs`) push
+  a `pipeline/issue-<n>` (or topic) branch and open a PR **against `beta`**, never
+  `main`. The PR-based review flow in **The contract** below is in force.
+- **`main` receives releases only.** Only a release merges `beta` → `main`; no feature,
+  fix, or pipeline branch targets `main`. Direct pushes to `main` are blocked by branch
+  protection.
+- Commits are still signed; merges happen through branch protection (CI + one human
+  approval), not by any agent.
+
 (Solo-dev no-PR posture set 2026-06-16; extended to all sessions 2026-06-27;
-PROJECT.md-gated push pre-authorization 2026-06-27.)
+PROJECT.md-gated push pre-authorization 2026-06-27; production cutover —
+`beta` integration, `main` release-only — 2026-06-29. Were `Development Status` set
+back to `development`, the dev-mode direct-push-to-`main` pre-authorization would
+re-arm.)
 
 **Execution layer:** dispatch's own workflow engine (`engine/` + `app/config/`).
 A `BaseWorkflow` Controller drives Actions across `spec → work → build`: the
@@ -30,16 +65,10 @@ the GitHub label state machine and approval/fix ladder.
 
 ## The contract (HANDOFF §5.7)
 
-> **In force (repo is released).** `PROJECT.md` reads `Development Status: 1.0`, so
-> the branch / PR / merge rules in this section apply. The scope, done-means, and
-> security discipline below all hold.
-
-> **Merge target = `beta`, not `main`.** `beta` is the integration branch: every PR
-> opens with `--base beta`. `main` is the protected release/stable branch and is
-> promoted from `beta` only at a release — no PR merges directly into `main`. Wherever
-> this contract says "`main`" as the branch you must not push to, that protection now
-> covers **both** `main` and `beta` (you push only to your own feature branch and open
-> a PR into `beta`).
+> **In force (production).** The branch / PR / merge rules in this section are
+> active, with one adjustment to the target branch: PRs open against **`beta`**, the
+> integration branch — `main` receives releases only (see *Branch & merge discipline*
+> above). The scope, done-means, and security discipline below all apply.
 
 - **One session = one issue = one branch = one PR.** Never widen scope beyond
   the issue you were handed. If the issue implies more work, note it in the PR
@@ -47,10 +76,9 @@ the GitHub label state machine and approval/fix ladder.
 - **Done means:** CI green, review feedback addressed, docs updated, and the
   issue's stated acceptance criteria met. Restate those criteria at the top of
   your PR body as a checklist.
-- **Never merge. Never push to `main` or `beta`.** You push only to your own
-  `pipeline/issue-<n>` (or `feat/…` / `fix/…`) branch and open a PR into `beta`.
-  Merging into `beta` happens through branch protection (CI + one human approval)
-  and auto-merge — not by any agent; promotion of `beta` → `main` is a release step.
+- **Never merge. Never push to `main`.** You push only to your own
+  `pipeline/issue-<n>` branch. Merging happens through branch protection
+  (CI + one human approval) and auto-merge — not by any agent.
 - **Never edit labels outside your stage.** The label state machine
   (`queued → claimed → pr-open → in-review → docs-pending → done`) is owned by
   the workflow's stages. Touch only the transition your stage owns.

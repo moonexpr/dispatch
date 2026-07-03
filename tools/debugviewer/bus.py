@@ -2,7 +2,7 @@
 """bus.py — an in-process event bus + observer + runner for live session watching.
 
 A run is one observed execution of a workflow. The engine's ``Interpreter`` calls
-a :class:`~engine.actions.Observer` on every state enter/leave and completion
+a :class:`~foundation.actions.Observer` on every state enter/leave and completion
 event; :class:`BusObserver` turns those callbacks into JSON events on a
 :class:`Run`, which fans them out to any number of SSE subscribers *and* keeps a
 replayable backlog. The server exposes runs over ``/api/sessions*``.
@@ -13,7 +13,7 @@ engine the roundabout demo drives. The run is *paced* (a small per-state delay i
 the observer) so the statechart visibly steps through its states in the viewer;
 pacing is watch-only telemetry and never changes the run's outcome.
 
-Stdlib only; imports the engine + ``src/baseworkflow`` lazily inside the runner.
+Stdlib only; imports ``foundation`` + ``baseworkflow`` lazily inside the runner.
 """
 from __future__ import annotations
 
@@ -166,13 +166,22 @@ class Bus:
             run.finish("errored")
 
     def _run_baseworkflow(self, run: Run, pace: float) -> None:
-        if REPO_ROOT not in sys.path:
-            sys.path.insert(0, REPO_ROOT)
-        bw_dir = os.path.join(REPO_ROOT, "src", "baseworkflow")
-        if bw_dir not in sys.path:
-            sys.path.insert(0, bw_dir)
-        import baseworkflow as bw  # noqa: E402
-        from engine.actions import MockActionFactory  # noqa: E402
+        import importlib
+
+        # `import baseworkflow` MUST resolve to the PACKAGE (its __init__ is the
+        # composition root that registers the Tuning service before any subsystem
+        # resolves it) — so REPO_ROOT must win over the baseworkflow/ dir on the
+        # path. The dir is still needed on the path for the package's bare-internal
+        # imports (`import bindings`, `import decompose`). Force order: REPO_ROOT
+        # first, baseworkflow/ second, regardless of prior sys.path state.
+        bw_dir = os.path.join(REPO_ROOT, "baseworkflow")
+        for p in (bw_dir, REPO_ROOT):
+            if p in sys.path:
+                sys.path.remove(p)
+        sys.path.insert(0, bw_dir)
+        sys.path.insert(0, REPO_ROOT)
+        bw = importlib.import_module("baseworkflow")
+        from foundation.actions import MockActionFactory  # noqa: E402
 
         run.emit({"type": "run-start", "workflow": run.workflow})
         wf = bw.BaseWorkflow(MockActionFactory(), job=DEMO_JOB, triage=DEMO_TRIAGE)

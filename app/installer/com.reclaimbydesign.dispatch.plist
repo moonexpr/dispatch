@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.reclaimbydesign.dispatch.plist — launchd agent for WORKSTATION (macOS),
+  where systemd is not native. Fires one unattended LIVE tick every 2 hours
+  (12x/day), matching app/installer/dispatch.timer.
+
+  Install:
+    cp app/installer/com.reclaimbydesign.dispatch.plist ~/Library/LaunchAgents/
+    # edit the ProgramArguments path below to your repo's app/installer/dispatch-tick.sh
+    launchctl load -w ~/Library/LaunchAgents/com.reclaimbydesign.dispatch.plist
+    launchctl list | grep dispatch          # confirm loaded
+    tail -f /tmp/dispatch-tick.log          # watch ticks
+  Uninstall:
+    launchctl unload -w ~/Library/LaunchAgents/com.reclaimbydesign.dispatch.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.reclaimbydesign.dispatch</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- Adjust to your repo location: -->
+        <string>/Users/jc/Mendotree/dispatch/app/installer/dispatch-tick.sh</string>
+    </array>
+
+    <!-- Every 2 hours on the hour = 12 ticks/day (00,02,…,22). -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/tmp/dispatch-tick.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/dispatch-tick.log</string>
+</dict>
+</plist>

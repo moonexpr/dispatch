@@ -4,7 +4,7 @@
 # action tokens into phases. Each token is defined by its own interface-rule file
 # under actions/<namespace>/<name>.yml (pulled in by `uses:`), where the action's
 # kind, governors and I/O contract live. End users edit this file and the action
-# files — no Python. Validate with:  python -m engine.workflow app/workflows/baseworkflow.yml
+# files — no Python. Validate with:  python -m foundation.workflow app/workflows/baseworkflow.yml
 name: baseworkflow
 
 uses:

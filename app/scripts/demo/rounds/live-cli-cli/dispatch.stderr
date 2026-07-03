@@ -1,0 +1,44 @@
+dispatch: intake fetched 20 item(s)
+ranker: offline deterministic dependency + priority ranking
+  #13527: depth=0 — foundational (no deps)
+  #13542: depth=0 — foundational (no deps)
+  #13546: depth=0 — foundational (no deps)
+  #13551: depth=0 — foundational (no deps)
+  #13552: depth=0 — foundational (no deps)
+  #13555: depth=0 — foundational (no deps)
+  #13564: depth=0 — foundational (no deps)
+  #13571: depth=0 — foundational (no deps)
+  #13575: depth=0 — foundational (no deps)
+  #13585: depth=0 — foundational (no deps)
+  #13608: depth=0 — foundational (no deps)
+  #13629: depth=0 — foundational (no deps)
+  #13643: depth=0 — foundational (no deps)
+  #13647: depth=0 — foundational (no deps)
+  #13678: depth=0 — foundational (no deps)
+  #13687: depth=0 — foundational (no deps)
+  #13706: depth=0 — foundational (no deps)
+  #13709: depth=0 — foundational (no deps)
+  #13717: depth=0 — foundational (no deps)
+  #13732: depth=0 — foundational (no deps)
+── ADMIN: queue ranked by independence/blocking ──
+  1. #13527 [xs/gen-local conf 0.56] implement — eligible: Install GitHub Copilot CLI non-interactively via `gh copilot`
+  2. #13542 [xs/gen-local conf 0.9] implement — eligible: A "no skills found" error occurs during `gh skill update` when using hidden directories.
+  3. #13546 [m/gen-default conf 0.7] implement — eligible: Preserve percent-encoded branch names in gh pr create display URLs
+  4. #13551 [m/gen-default conf 0.7] implement — eligible: gh extension install --pin <tag> --force ignores pin when extension is already installed
+  5. #13552 [m/gen-default conf 0.58] implement — eligible: `gh skill preview`/`install` fail to discover a root-level `SKILL.md` skill repository
+  6. #13555 [m/gen-default conf 0.7] implement — eligible: Support gitfile-based repositories in gh repo create --source .
+  7. #13564 [l/gen-frontier conf 0.78] implement — eligible: Supports installing GitHub CLI via DEB822 format
+  8. #13571 [m/gen-default conf 0.7] implement — eligible: Different exit code for `gh pr create` if pull request already exists
+  9. #13575 [m/gen-default conf 0.58] implement — eligible: gh pr edit --body requires read:org scope unnecessarily
+  10. #13585 [m/gen-default conf 0.7] implement — eligible: https://cli.github.com/ only provides installation instructions for the OS it auto-detects
+  11. #13608 [xs/gen-local conf 0.68] implement — eligible: UI: Enhance 'repo view' with clean visual hierarchy and padding
+  12. #13629 [m/gen-default conf 0.58] implement — eligible: gh skill search: allow selecting multiple target agents when installing
+  13. #13643 [m/gen-default conf 0.58] implement — eligible: `gh skill search` support for GitHub Enterprise Cloud (GHEC)
+  14. #13647 [m/gen-default conf 0.58] implement — eligible: `gh auth login` prompts for SSH key title but silently discards it when an existing key is reused
+  15. #13678 [l/gen-frontier conf 0.68] implement — eligible: gh search quotes a single-argument query with multiple qualifiers as one qualifier value
+  16. #13687 [m/gen-default conf 0.7] implement — eligible: `gh run view --log` should make it possible to get line-based output even if step name is multi-line
+  17. #13706 [m/gen-default conf 0.7] implement — eligible: Add gh skill uninstall/remove command
+  18. #13709 [m/gen-default conf 0.7] implement — eligible: `gh auth refresh --remove-scopes gist` has no effect
+  19. #13717 [m/gen-default conf 0.7] implement — eligible: Allow configuring a custom API endpoint per host
+  20. #13732 [xs/gen-local conf 0.8] implement — eligible: Enable modernize linter
+── ARCHITECT: primary #13527 (scope xs, route gen-local, budget 20,000 tok) ──

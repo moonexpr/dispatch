@@ -1,12 +1,12 @@
 # tuning.yml — declarative tuning surface for the dispatch pipeline.
-# Converted from the legacy src/tuning.json (#142). Edit values here to fine-tune
+# Converted from the legacy tuning.json (#142). Edit values here to fine-tune
 # WORK SELECTION and PROMPT GENERATION without touching Python. Loaded + validated
-# by src/tuning.py via engine.filesys (deep-merged over the in-code DEFAULTS).
+# by tuning.py via foundation.filesys (deep-merged over the in-code DEFAULTS).
 # Keys beginning with '_' are documentation and ignored by the loader.
 # A typo'd key or malformed file now fails LOUD at load (#156), not silent-fallback.
 _doc: 'Declarative tuning surface for the dispatch pipeline. Edit values here to fine-tune WORK SELECTION
   (which issue is picked) and PROMPT GENERATION (how the work order reads) without touching Python. Loaded
-  by src/tuning.py, which deep-merges this file over baked-in defaults — so a missing or partial file
+  by tuning.py, which deep-merges this file over baked-in defaults — so a missing or partial file
   still works (and reproduces current behavior). Keys beginning with ''_'' are documentation and ignored
   by the loader. Override the file path with the DISPATCH_TUNING_FILE env var. Determinism is a hard requirement:
   changing a value changes the work order, but two runs with the same config stay byte-identical.'
@@ -88,7 +88,7 @@ selection:
       l: gen-frontier
     vocab:
       _doc: 'Controlled vocabularies (the TriageResult enums) — which actions/scopes/routes are valid.
-        Content only; the classification LOGIC stays in src/classifier/classify.py. epic_prefix is the
+        Content only; the classification LOGIC stays in classifier/classify.py. epic_prefix is the
         (lowercased) title marker that flags an [Epic] container issue for decomposition.'
       actions:
       - implement
@@ -300,24 +300,23 @@ generation:
       function: writer
       domain: developer documentation
     - any:
-      - path_startswith: src/intake/
+      - path_startswith: intake/
       function: engineer
       domain: data-pipeline (Python)
     - any:
-      - path_startswith: src/classifier/
+      - path_startswith: classifier/
       function: engineer
       domain: ML / classification (Python)
     - any:
-      - path_startswith: engine/models
+      - path_startswith: foundation/models
       function: engineer
       domain: LLM integration (Python)
     - any:
-      - path_startswith: src/architect/
+      - path_startswith: architect/
       function: engineer
       domain: orchestration (Python)
     - any:
       - basename_endswith: .py
-      - path_startswith: src/
       function: engineer
       domain: backend (Python)
     - default: true
@@ -433,7 +432,7 @@ recovery:
     timeout above (which recovers silently crashed/stuck ''claimed'' issues).'
 routing:
   _doc: 'Routing policy (#137/#144) — declarative DATA the orchestration layer interprets; the matchers
-    stay Python (src/orchestration/common.py route_for_scope/tier_for_attempt + fix_dispatch.py). scope_route:
+    stay Python (orchestration/common.py route_for_scope/tier_for_attempt + fix_dispatch.py). scope_route:
     runtime scope -> generation model group (mirrors selection.classify.scope_route, which the classifier
     uses at triage time). default_route: fallback for an unknown scope. fix_ladder: stringified CI fix-attempt
     number -> model tier; an attempt past the last rung (or 0/invalid) yields needs_human_route. fix_attempt_cap:

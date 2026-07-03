@@ -6,30 +6,31 @@ Project-specific conventions established during spec phase. Fill in each section
 
 ## Development Status
 
-**`Development Status: 1.0`** (released).
+**`Development Status: 1.0`** (released — **production mode**).
 
-This line is the authoritative signal for the push policy in [`CLAUDE.md`](./CLAUDE.md)
-→ "Development mode": while it reads `development`, operator *and* pipeline sessions may
-commit (signed) and **push directly to `main` without per-push confirmation** — no PRs,
-no branches, no branch protection. Change it to `released` (or otherwise
-non-`development`) when the repo leaves solo dev; that re-arms the PR / branch-protection
-/ review flow and the push pre-authorization lapses.
+The repo has left solo dev, so the dev-mode push pre-authorization has **lapsed**:
+operator and pipeline sessions no longer push to `main`. The PR / branch-protection /
+review flow is in force. Branch discipline (see **Branch strategy** below):
 
-**The repo is released**, so the PR flow is in force: `main` is protected and work merges
-through PRs targeting **`beta`** (the integration branch — see **Git & PRs** below), not
-`main`.
+- **All work lands via PR into `beta`** — the integration branch.
+- **`main` receives releases only.** Only a release merge moves `beta` → `main`; no
+  feature, fix, or pipeline branch targets `main`. Direct pushes to `main` are blocked
+  by branch protection.
+
+This line stays the authoritative signal: were `Development Status` ever set back to
+`development`, the [`CLAUDE.md`](./CLAUDE.md) dev-mode push-to-`main` pre-authorization
+would re-arm.
 
 ---
 
 ## Running a live engine tick test
 
 The pipeline is pure Python; the unit-of-work lifecycle is the YAML **BaseWorkflow**
-(`app/workflows/baseworkflow.yml`, engine in `engine/workflow/`), driven through the
-orchestration tick in `src/orchestration/`. Entry points:
+(`app/workflows/baseworkflow.yml`, engine in `foundation/workflow/`), driven directly
+by `./dispatch`. Entry point:
 
-- `./dispatch [FLAGS]` — canonical entry; defaults the Engineer to the Claude
-  Agent SDK engineer (`src/orchestration/engineer_sdk.py`).
-- `./pipeline [FLAGS]` — bash wrapper to the same `python3 -m src.orchestration`.
+- `./dispatch [FLAGS]` — canonical entry; runs the BaseWorkflow engine directly,
+  with the Engineer running in-process via the Claude Agent SDK.
 
 Tick stages: `intake → workorder → prep → engineer → intake-invoice → closure`. The
 architect selects which issues to work during `intake` — epics are flagged
@@ -43,8 +44,8 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 
 1. **Validate the workflow YAML** — offline, instant:
    ```bash
-   python3 -m engine.workflow app/workflows/baseworkflow.yml \
-     --registry src.baseworkflow.bindings:build_registry
+   python3 -m foundation.workflow app/workflows/baseworkflow.yml \
+     --registry baseworkflow.bindings:build_registry
    ```
    Expect `[PASS] … (structure + data-flow + tokens; 3 phases)`.
 
@@ -52,7 +53,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
    issue data with a MockActionFactory: real subsystem logic, **no model, no network
    mutations, no PRs**:
    ```bash
-   python3 scripts/demo/roundabout-baseworkflow.py OWNER/REPO ISSUE [ISSUE...]
+   python3 app/scripts/demo/roundabout-baseworkflow.py OWNER/REPO ISSUE [ISSUE...]
    ```
    Prints a per-issue statechart trace, budget meters, and deliverables; ends with
    `roundabout summary: N/N green`.
@@ -82,7 +83,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 | `-r/--repo OWNER/REPO` | target repo (sets `PIPELINE_REPO`) |
 | `-l/--live` | `PIPELINE_DRY_RUN=0` — mutate GitHub (default: dry-run) |
 | `-b/--bootstrap` | provision pipeline labels on the repo first |
-| `-e/--engineer BIN` | Engineer binary (default: SDK engineer; `scripts/mock-engineer.sh` for offline) |
+| `-e/--engineer BIN` | Engineer binary (default: SDK engineer; `app/scripts/mock-engineer.sh` for offline) |
 | `-f/--fixture FILE` | issue-list JSON for fully offline intake |
 | `-u/--until STAGE` | halt after STAGE (dumps artifacts) |
 | `--from STAGE -a/--artifact FILE` | replay from a captured artifact |
@@ -117,7 +118,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 > Are PRs preferred over direct pushes to main?
 
 - **Commit convention**: conventional commits (signed)
-- **Branch strategy**: **`beta` is the integration branch — all PRs merge into `beta`, never into `main`.** `main` is the protected release/stable branch; `beta` is promoted to `main` only at a release. Work on a feature branch (`feat/…`, `fix/…`, or `pipeline/issue-<n>`), then open a PR with `--base beta`. (The old "push directly to `main`" posture applied only while `Development Status: development`; the repo is now released — see **Development Status** above.)
+- **Branch strategy**: production mode — all work lands via PR into `beta` (the integration branch); `main` receives **releases only** (`beta` → `main` on release). Direct pushes to `main` are blocked by branch protection. (Dev-mode direct-push-to-`main` applies only while `Development Status: development`; see **Development Status** above.)
 
 ---
 
@@ -148,6 +149,69 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
 
 - **Destination**: <!-- e.g. GitHub issues (via /document), Linear project, Notion page, docs/requests/<slug>.md -->
 - **Promotion path**: <!-- how do deferred entries become tracked work? -->
+
+---
+
+## API Documentation (for developers and agents)
+
+The live packages — `foundation`, `baseworkflow`, `websitewf`, `agents` — carry an
+**auto-generated API reference** built by the [`.github/api_docs/`](./.github/api_docs/)
+package (see [`.github/api_docs/README.md`](./.github/api_docs/README.md)). It is derived **statically from
+source docstrings with `ast`** — it never imports the documented code, so it is
+deterministic, version-independent, and immune to the Python 3.14 SDK-import hang.
+`visitor/` (dead graveyard) and the empty `engine/`/`src/` husks are excluded.
+
+Two surfaces, one core:
+
+- **Humans** — a static HTML site, published to **GitHub Pages** by
+  `.github/workflows/docs.yml` on every push to `beta` (the integration branch,
+  so the live site can be refined pre-release) and `main` (republished on
+  release). Live at <https://reclaimbydesign.github.io/dispatch/>. *Visibility
+  note:* on the Team plan this Pages site is **public** even though the repo is
+  private (private/access-controlled Pages is Enterprise-only) — it exposes the
+  internal API surface to anyone with the URL.
+- **Agents** — an MCP server `dispatch-apidocs` (registered in `.mcp.json`):
+  `list_index`, `lookup` (pydoc for a symbol), `find_usage`, `get_source`. It
+  needs the `mcp` package: `python3 -m pip install -r requirements-docs.txt`.
+
+### How an AGENT looks up API information (use context mode)
+
+Prefer these over reading source files into context — they return only the
+answer, not the file. Two equivalent paths:
+
+**A. The MCP tools** (when the `dispatch-apidocs` server is connected). Call them
+directly — each returns a compact, token-light result:
+
+- `list_index("foundation.workflow")` — browse the index, scoped to a prefix.
+- `lookup("baseworkflow.BaseWorkflow")` or `lookup("chat")` — signature + full
+  docstring + location (a bare name that is ambiguous returns a candidate list).
+- `find_usage("make_backend")` — every reference across the source, def sites flagged.
+- `get_source("foundation.models.chat")` — the exact source of one definition.
+
+**B. The CLI through context-mode** (always available, no server needed). Run the
+`api_docs` CLI inside `ctx_execute` so its output is **indexed in the sandbox** and
+only the summary enters your context — the Think-in-Code path. The package lives
+under `.github/`, so prefix `PYTHONPATH=.github`:
+
+```
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs index foundation")
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs lookup BaseWorkflow")
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs usage make_backend")
+```
+
+For repeated questions about the same area, index the generated site or the
+source once and then query it cheaply:
+
+```
+ctx_execute(language: "shell", code: "cd <repo> && PYTHONPATH=.github python3 -m api_docs build --out site")
+ctx_index(path: "<repo>/site")          # or ctx_index the package dirs directly
+ctx_search(queries: ["how does BaseWorkflow seed the input shelf",
+                     "where is make_backend called"])
+```
+
+The rule: **ask the index, don't grep the tree.** `lookup`/`find_usage` (or a
+`ctx_search` over the indexed site) answer "what is this / where is it used" for
+O(answer) tokens instead of O(files-read).
 
 ---
 

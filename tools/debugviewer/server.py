@@ -3,7 +3,7 @@
 
 A tiny ``http.server`` that discovers every workflow YAML under
 ``app/workflows/``, compiles each to a drawable graph via
-``engine.workflow.workflow_to_graph``, and serves a single-page SVG viewer that
+``foundation.workflow.workflow_to_graph``, and serves a single-page SVG viewer that
 draws the states as a graph and lets you switch between workflows.
 
 Endpoints
@@ -43,7 +43,7 @@ if REPO_ROOT not in sys.path:
 
 import queue  # noqa: E402
 
-from engine.workflow import load_workflow, workflow_to_graph  # noqa: E402
+from foundation.workflow import load_workflow, workflow_to_graph  # noqa: E402
 
 from .bus import BUS  # noqa: E402
 

@@ -1,4 +1,5 @@
 # Secrets live ONLY in env (HANDOFF §8) — never commit the filled-in file.
+.env
 pipeline.env
 tokens.txt
 
@@ -29,6 +30,8 @@ __pycache__/
 
 # Transient run/test output
 test_results.txt
+# Generated API docs site (apidocs build output; published by docs.yml from CI, never committed).
+/site/
 
 # Editor / OS
 .DS_Store

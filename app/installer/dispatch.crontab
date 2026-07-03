@@ -1,0 +1,39 @@
+# dispatch — example crontab for unattended ticks (HANDOFF Pillar 1, issue #29)
+# ===========================================================================
+# This is the RECOMMENDED 1.0 prototype scheduler: a plain host crontab entry
+# that runs the pipeline a few times a day under a lock. Edit the paths and the
+# repo below, then install with:
+#
+#     crontab app/installer/dispatch.crontab
+#
+# DRY-RUN IS THE DEFAULT. The tick line below sets PIPELINE_DRY_RUN=0
+# EXPLICITLY to go live — change it to PIPELINE_DRY_RUN=1 (or delete the
+# assignment) to keep previewing without mutating GitHub. Never let a
+# copy-paste accidentally run live: the explicit value is intentional.
+#
+# Overlapping ticks are serialized by the in-process flock the pipeline ships
+# (E1-1, DISPATCH_LOCK_FILE) — a second tick that starts while one is running
+# logs and exits 0 without double-claiming. The outer `flock -n` on the cron
+# line is a belt-and-suspenders guard so a long-running tick never stacks.
+#
+# Logs are redirected to a file so each tick leaves a trace even though log()
+# writes to stderr; the per-tick run record (E1-2, DISPATCH_RUN_RECORD) gives a
+# structured start/end heartbeat alongside it.
+
+# --- edit these to match your install -------------------------------------
+DISPATCH_HOME=/opt/dispatch
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# --- the tick: every 2 hours (12x/day) at 00:07, 02:07, 04:07, … 22:07 ----
+# Fields: min hour dom mon dow  command
+# `*/2` in the hour field fires on every even hour; the `:07` minute offset
+# keeps each tick off the top-of-hour and away from contention.
+# `cd $DISPATCH_HOME` so common.sh finds pipeline.env; the inline env vars are
+# set explicitly (PIPELINE_REPO + the deliberate live flag); the outer flock
+# guards against overlap; stdout+stderr append to the cron log.
+7 */2 * * * cd /opt/dispatch && PIPELINE_REPO=owner/your-repo PIPELINE_DRY_RUN=0 flock -n /tmp/dispatch.cron.lock ./entrypoint.sh --repo owner/your-repo >> /opt/dispatch/dispatch.cron.log 2>&1
+
+# Upgrade paths (NOT the 1.0 default — see README "Scheduling unattended ticks"):
+#   (a) OpenClaw Gateway — scheduler + webhook receiver + operator chat I/O.
+#   (c) billy.maic VPS   — always-on remote host; see existing issue #15.

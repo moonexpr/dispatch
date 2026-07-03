@@ -8,8 +8,8 @@
 # the engineer to carry that contract, and bumps the budget for the larger scope.
 #
 # Validate with:
-#   python3 -m engine.workflow app/workflows/websitewf-backend-feature.yml \
-#     --registry src.websitewf.usecases.backend_feature:build_registry
+#   python3 -m foundation.workflow app/workflows/websitewf-backend-feature.yml \
+#     --registry websitewf.usecases.backend_feature:build_registry
 name: websitewf-backend-feature
 
 extends: baseworkflow            # the base document is never edited — this file is a diff
@@ -17,7 +17,7 @@ extends: baseworkflow            # the base document is never edited — this fi
 uses:
   # Manifests for THIS use case's web:* actions live in their own subdir so the base
   # websitewf.yml's single-star glob never picks them up (the 5 verticals never collide).
-  - ../../src/websitewf/actions/backend_feature/*.yml
+  - ../../websitewf/actions/backend_feature/*.yml
 
 # A bigger budget for the larger scope (backend + page/route). The loader merges
 # overlay budgets over the base buckets (budgets = {**base, **overlay}).
