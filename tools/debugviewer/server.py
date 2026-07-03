@@ -12,6 +12,9 @@ Endpoints
     GET  /api/workflows             -> [{name, file, ok, error, phases, node_count}]
     GET  /api/workflows/<name>      -> the graph {name, phases, budgets, nodes, edges}
     GET  /api/sessions              -> {runs: [...], runnable: [...]}
+    POST /api/probe                 -> run ONE action in isolation against the mock
+                                       engine; body {workflow, token, inputs, payload}
+                                       -> {ok, result, outputs, raised, trace}
     POST /api/sessions/run          -> start an observed run; {id, workflow, status}
                                        body/query: workflow=<name>&pace=<seconds>
     GET  /api/sessions/<id>/stream  -> SSE: live enter/leave/event/status stream
@@ -134,6 +137,98 @@ def list_sessions() -> Dict[str, Any]:
     return {"runs": BUS.list(), "runnable": BUS.runnable()}
 
 
+# -- single-action probe ----------------------------------------------------
+def _json_safe(v: Any) -> Any:
+    """Coerce anything into a JSON-encodable shape (non-serialisable → str)."""
+    return json.loads(json.dumps(v, default=str))
+
+
+def _mock_services() -> Any:
+    """The offline service family, so a probed action that resolves a service need
+    (``ctx.service``) has something to reach. Best-effort — ``None`` if unavailable
+    (the action then fails its service lookup, which the probe surfaces)."""
+    try:
+        import importlib
+
+        return importlib.import_module("baseworkflow.services").build_mock_services()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def probe_action(workflow: str, token: str, inputs: Dict[str, Any], payload: Any = None) -> Dict[str, Any]:
+    """Run ONE action in isolation against the mock engine: seed the given shelf
+    values, execute the action's compiled body (governors and all), and report its
+    ``Result``, what it wrote to its declared outputs, and any events it raised
+    (e.g. a supersede request). Forced dry-run + mock factory: no network, no real
+    mutation. ``inputs`` maps ``"shelf.key" -> value`` (the refs the action reads)."""
+    os.environ["PIPELINE_DRY_RUN"] = "1"  # a probe never mutates anything real
+    reg = _registry_for(workflow)
+    if reg is None:
+        return {"error": f"{workflow!r} has no token registry wired, so its actions can't be probed."}
+    fn = next((f for f in _workflow_files() if _name_of(f) == workflow), None)
+    if fn is None:
+        return {"error": f"no workflow named {workflow!r}"}
+    doc = load_workflow(os.path.join(WORKFLOWS_DIR, fn))
+    manifest = (getattr(doc, "manifests", {}) or {}).get(token)
+    if manifest is None:
+        return {"error": f"no action {token!r} in {workflow!r}"}
+
+    from foundation.actions import BudgetMeter, Context, MockActionFactory
+    from foundation.workflow.nodes import ActionRefNode
+    from foundation.workflow.visitor import CompileVisitor
+
+    factory = MockActionFactory()
+    cv = CompileVisitor(factory, reg)
+    cv.budgets = dict(doc.budgets or {})  # so a budget-Governor cap lookup resolves
+    try:
+        action = cv.visit_action_ref(ActionRefNode(token=token, manifest=manifest))
+    except Exception as exc:  # noqa: BLE001 — unregistered bind etc.
+        return {"error": f"could not build {token!r}: {type(exc).__name__}: {exc}"}
+
+    shelves = factory.shelves()
+    ctx = Context(shelves=shelves, meter=BudgetMeter(10 ** 12, label="probe"),
+                  dry_run=True, services=_mock_services())
+    seeded: List[str] = []
+    for ref, value in (inputs or {}).items():
+        if "." not in str(ref):
+            continue
+        shelf, key = str(ref).split(".", 1)
+        try:
+            getattr(shelves, shelf).put(key, value)
+            seeded.append(ref)
+        except AttributeError:
+            pass
+
+    result = action.run(payload, ctx)  # Action.run traps exceptions into an Error Result
+    outputs: Dict[str, Any] = {}
+    for r in manifest.outputs:
+        try:
+            outputs[r.ref] = getattr(shelves, r.shelf).get(r.key)
+        except Exception:  # noqa: BLE001
+            pass
+    raised = []
+    for e in getattr(ctx, "raised", []):
+        p = getattr(e, "payload", None)
+        p = p.to_dict() if hasattr(p, "to_dict") else p  # SupersedeRequest → readable dict
+        name = e.name.strip("_") if str(e.name).startswith("__") else e.name  # "__supersede__" → "supersede"
+        raised.append({"name": name, "payload": _json_safe(p)})
+    return _json_safe({
+        "ok": bool(result.ok),
+        "token": token,
+        "seeded": seeded,
+        "result": {
+            "ok": bool(result.ok),
+            "value": getattr(result, "value", None),
+            "meta": getattr(result, "meta", {}) or {},
+            "detail": getattr(result, "detail", "") or None,
+            "error": None if result.ok else str(getattr(result, "error", "")),
+        },
+        "outputs": outputs,
+        "raised": raised,
+        "trace": ctx.trace,
+    })
+
+
 # -- HTTP handler -----------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
     server_version = "dispatch-debugviewer/0.1"
@@ -170,6 +265,15 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         return {k: v[0] for k, v in q.items()}
 
+    def _json_body(self) -> Dict[str, Any]:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8")) or {}
+        except (ValueError, UnicodeDecodeError):
+            return {}
+
     # -- routing ------------------------------------------------------------
     def do_HEAD(self) -> None:  # noqa: N802
         self.do_GET()
@@ -204,7 +308,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         route = unquote(urlparse(self.path).path)
         try:
-            if route == "/api/sessions/run":
+            if route == "/api/probe":
+                body = self._json_body()
+                res = probe_action(
+                    str(body.get("workflow") or ""),
+                    str(body.get("token") or ""),
+                    body.get("inputs") or {},
+                    body.get("payload"),
+                )
+                self._json(res, 200 if not res.get("error") else 400)
+            elif route == "/api/sessions/run":
                 q = self._query()
                 workflow = q.get("workflow", "baseworkflow")
                 try:

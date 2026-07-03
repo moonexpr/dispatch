@@ -77,6 +77,26 @@
   ul.io { margin: 4px 0 0; padding-left: 16px; }
   ul.io li { color: var(--ink); }
 
+  /* probe panel */
+  .probe { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .probe .cap { padding: 0 0 6px; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+  .probe .pf { margin: 6px 0; }
+  .probe .pf label { display: block; color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
+  .probe textarea { width: 100%; resize: vertical; min-height: 26px; background: #0d1117; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: 11px/1.4 ui-monospace, Menlo, monospace; }
+  .probe textarea:focus { outline: none; border-color: var(--accent); }
+  .probe .pf-none { color: var(--muted); font-size: 11px; margin: 4px 0; }
+  .probe details.pf-adv summary { color: var(--muted); font-size: 11px; cursor: pointer; margin: 4px 0; }
+  button.probe-run { border-color: var(--accent); color: var(--accent); margin-top: 8px; width: 100%; }
+  .probe-out { margin-top: 10px; }
+  .probe-out .pres { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+  .probe-out .pres.ok { color: var(--ok); } .probe-out .pres.err { color: var(--err); }
+  .probe-out .plabel { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; margin: 8px 0 2px; }
+  .probe-out pre.pj { margin: 0; background: #0d1117; border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 8px; font: 10.5px/1.45 ui-monospace, Menlo, monospace; color: #a5d6ff; overflow-x: auto; max-height: 240px; white-space: pre; }
+  .probe-out .perr { color: var(--err); font-size: 11.5px; word-break: break-word; }
+  .probe-out .muted { color: var(--muted); font-size: 11px; }
+
   .sessions { border-top: 1px solid var(--line); padding: 12px 14px; background: var(--panel2); display: flex; flex-direction: column; min-height: 0; max-height: 46%; }
   .sessions .cap { padding: 0 0 6px; }
   .sessions .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -288,7 +308,61 @@ function inspect(n) {
     if (n.supersede_target)
       rows.push(kv("entered by", "<code>ctx.supersede</code> — a superseding state spawns this variation at run time, preempting the active plan (ADR-003 · #190). It lights up live only if a run routes into it."));
   }
-  el("insp").innerHTML = rows.join("");
+  el("insp").innerHTML = rows.join("") + (n.kind === "action" ? probeForm(n) : "");
+  if (n.kind === "action") wireProbe(n);
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function parseVal(s){ s = (s||"").trim(); if (!s) return undefined; try { return JSON.parse(s); } catch(e){ return s; } }
+
+function probeForm(n){
+  const ins = n.inputs || [];
+  const fields = ins.length
+    ? ins.map(ref => `<div class="pf"><label>${ref}</label><textarea class="pin" data-ref="${ref}" rows="1" placeholder="JSON, or plain text"></textarea></div>`).join("")
+    : `<div class="pf-none">no declared inputs — runs on an empty shelf</div>`;
+  return `<div class="probe">
+    <div class="cap">probe · send data → see output</div>
+    ${fields}
+    <details class="pf-adv"><summary>payload (optional)</summary>
+      <textarea id="probe-payload" rows="1" placeholder="JSON payload arg (most actions ignore it)"></textarea></details>
+    <button class="probe-run" id="probe-run">▶ run this state (mock, dry-run)</button>
+    <div class="probe-out" id="probe-out"></div>
+  </div>`;
+}
+
+function wireProbe(n){
+  const btn = el("probe-run"); if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const inputs = {};
+    document.querySelectorAll(".pin").forEach(t => { const v = parseVal(t.value); if (v !== undefined) inputs[t.dataset.ref] = v; });
+    const pv = parseVal((el("probe-payload")||{}).value);
+    btn.disabled = true;
+    el("probe-out").innerHTML = `<div class="muted">running ${n.label}…</div>`;
+    try {
+      const res = await (await fetch("/api/probe", {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ workflow: SEL_WF, token: n.label, inputs, payload: pv })
+      })).json();
+      el("probe-out").innerHTML = renderProbe(res);
+    } catch(e) {
+      el("probe-out").innerHTML = `<div class="perr">✕ ${escapeHtml(e)}</div>`;
+    }
+    btn.disabled = false;
+  });
+}
+
+function renderProbe(r){
+  if (r.error) return `<div class="perr">✕ ${escapeHtml(r.error)}</div>`;
+  const j = o => `<pre class="pj">${escapeHtml(JSON.stringify(o, null, 2))}</pre>`;
+  const has = o => o && (typeof o !== "object" || Object.keys(o).length);
+  let h = `<div class="pres ${r.ok ? "ok" : "err"}">${r.ok ? "✓ ok" : "✕ error"}</div>`;
+  if (r.result && r.result.error) h += `<div class="plabel">error</div><div class="perr">${escapeHtml(r.result.error)}</div>`;
+  if (r.result && r.result.value != null) h += `<div class="plabel">result.value</div>` + j(r.result.value);
+  if (has(r.outputs)) h += `<div class="plabel">writes → shelves</div>` + j(r.outputs);
+  if (r.raised && r.raised.length) h += `<div class="plabel">raised events</div>` + j(r.raised);
+  if (has(r.result && r.result.meta)) h += `<div class="plabel">meta</div>` + j(r.result.meta);
+  if (r.seeded && r.seeded.length) h += `<div class="plabel">seeded</div><div class="muted">${r.seeded.map(escapeHtml).join(", ")}</div>`;
+  return h;
 }
 
 async function loadWorkflowList() {
