@@ -50,6 +50,43 @@ from .bus import BUS  # noqa: E402
 WORKFLOWS_DIR = os.path.join(REPO_ROOT, "app", "workflows")
 STATIC_DIR = os.path.join(_HERE, "static")
 
+# Optional token registries, so ``controller:`` references (and dynamic supersede
+# targets, ADR-003) expand into their action subgraphs instead of drawing as
+# single unresolved boundary nodes. Best-effort: a workflow with no mapped (or
+# un-importable) registry still draws — its controllers just stay collapsed.
+_REGISTRIES: Dict[str, str] = {
+    "baseworkflow": "baseworkflow.bindings:build_registry",
+    "websitewf": "websitewf.bindings:build_registry",
+}
+_registry_cache: Dict[str, Any] = {}
+
+
+def _registry_for(name: str) -> Any:
+    """Resolve (and cache) the token registry for a workflow, or ``None``. Mirrors
+    ``bus.py``'s sys.path discipline: ``import baseworkflow`` must hit the PACKAGE
+    (its __init__ is the composition root), so REPO_ROOT wins over baseworkflow/,
+    which is still needed for the package's bare-internal imports."""
+    if name in _registry_cache:
+        return _registry_cache[name]
+    spec = _REGISTRIES.get(name)
+    reg = None
+    if spec:
+        try:
+            import importlib
+
+            bw_dir = os.path.join(REPO_ROOT, "baseworkflow")
+            for p in (bw_dir, REPO_ROOT):
+                if p in sys.path:
+                    sys.path.remove(p)
+            sys.path.insert(0, bw_dir)
+            sys.path.insert(0, REPO_ROOT)
+            mod_name, _, fn = spec.partition(":")
+            reg = getattr(importlib.import_module(mod_name), fn or "build_registry")()
+        except Exception:  # noqa: BLE001 — draw-only fallback; a bad registry never breaks the viewer
+            reg = None
+    _registry_cache[name] = reg
+    return reg
+
 
 # -- workflow discovery / compilation --------------------------------------
 def _workflow_files() -> List[str]:
@@ -67,7 +104,7 @@ def _name_of(filename: str) -> str:
 
 def _compile_graph(filename: str) -> Dict[str, Any]:
     path = os.path.join(WORKFLOWS_DIR, filename)
-    return workflow_to_graph(load_workflow(path))
+    return workflow_to_graph(load_workflow(path), registry=_registry_for(_name_of(filename)))
 
 
 def list_workflows() -> List[Dict[str, Any]]:

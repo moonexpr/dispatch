@@ -61,7 +61,10 @@
   .edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
   .edge.loop-back { stroke: var(--edge-loop); stroke-dasharray: 5 4; }
   .edge.fork, .edge.join { stroke: var(--accent2); }
+  .edge.supersede { stroke: var(--accent2); stroke-dasharray: 6 4; }
   .edgelabel { fill: var(--edge-loop); font-size: 9.5px; }
+  .node.controller rect { stroke-width: 2; }
+  .node.supersede text { fill: var(--accent2); }
 
   aside.insp { grid-area: insp; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; }
   .insp .cap { padding: 10px 14px 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
@@ -129,7 +132,7 @@ const NS_COLORS = {
   github: "#1f6feb", architect: "#8957e5", budget: "#238636",
   admin: "#9e6a03", engineer: "#0969da", loop: "#bb8009",
 };
-const KIND_STROKE = { action:"#3d444d", loop:"#d29922", fork:"#d2a8ff", join:"#d2a8ff", start:"#3fb950", end:"#f85149" };
+const KIND_STROKE = { action:"#3d444d", loop:"#d29922", fork:"#d2a8ff", join:"#d2a8ff", start:"#3fb950", end:"#f85149", controller:"#39c5cf" };
 const el = id => document.getElementById(id);
 const svgNS = "http://www.w3.org/2000/svg";
 let SEL_WF = null, SEL_NODE = null, GRAPH = null, autoTimer = null;
@@ -147,6 +150,7 @@ function fillFor(node) {
   if (node.kind === "fork" || node.kind === "join") return "#2a2140";
   if (node.kind === "start") return "#123020";
   if (node.kind === "end") return "#3a1517";
+  if (node.kind === "controller") return node.supersede_target ? "#241a33" : "#0d2a30";
   return "#30363d";
 }
 
@@ -212,7 +216,8 @@ function draw(graph) {
   // edges
   graph.edges.forEach(e => {
     const a = pos[e.from], b = pos[e.to]; if (!a||!b) return;
-    const marker = e.kind==="loop-back" ? "url(#arrowl)" : (e.kind==="fork"||e.kind==="join") ? "url(#arrowp)" : "url(#arrow)";
+    const marker = e.kind==="loop-back" ? "url(#arrowl)"
+      : (e.kind==="fork"||e.kind==="join"||e.kind==="supersede") ? "url(#arrowp)" : "url(#arrow)";
     let d;
     if (e.kind === "loop-back") {
       // bulge out to the right, back up to the head
@@ -235,15 +240,22 @@ function draw(graph) {
   graph.nodes.forEach(n => {
     const p = pos[n.id]; if (!p) return;
     const w = p.w, h = 40, x = p.x - w/2, y = p.y - h/2;
-    const g = mk("g", {class:"node" + (SEL_NODE===n.id?" sel":""), "data-id":n.id});
+    const cls = "node" + (SEL_NODE===n.id?" sel":"")
+      + (n.kind==="controller"?" controller":"") + (n.supersede_target?" supersede":"");
+    const g = mk("g", {class:cls, "data-id":n.id});
     if (n.state_id) { g.setAttribute("data-state", n.state_id); NODE_BY_STATE[n.state_id] = g; }
-    g.appendChild(mk("rect",{x, y, width:w, height:h, rx:8, fill:fillFor(n), stroke:KIND_STROKE[n.kind]||"#3d444d"}));
-    const label = n.label.length>26 ? n.label.slice(0,25)+"…" : n.label;
+    const rectAttrs = {x, y, width:w, height:h, rx: n.kind==="controller"?10:8, fill:fillFor(n),
+      stroke: n.supersede_target ? "#d2a8ff" : (KIND_STROKE[n.kind]||"#3d444d")};
+    if (n.supersede_target) rectAttrs["stroke-dasharray"] = "6 4";
+    g.appendChild(mk("rect", rectAttrs));
+    const raw = (n.kind==="controller"? "⧉ " : "") + n.label;
+    const label = raw.length>26 ? raw.slice(0,25)+"…" : raw;
     g.appendChild(mk("text",{x:p.x, y:p.y-2, "text-anchor":"middle"}, [txt(label)]));
     let sub = "";
     if (n.kind==="action") sub = n.action_kind + (n.budget? " · $"+n.budget : "");
     else if (n.kind==="loop") sub = "↻ ≤"+n.max_iterations;
     else if (n.kind==="fork") sub = "parallel";
+    else if (n.kind==="controller") sub = n.supersede_target ? "supersede target" : "controller";
     if (sub) g.appendChild(mk("text",{class:"sub", x:p.x, y:p.y+11, "text-anchor":"middle"}, [txt(sub)]));
     g.addEventListener("click", () => { SEL_NODE = n.id; inspect(n); draw(graph); });
     svg.appendChild(g);
@@ -269,6 +281,12 @@ function inspect(n) {
     if (n.exit_when) rows.push(kv("until (exit when)", `<code>${n.exit_when}</code>`));
     if (n.abort_when) rows.push(kv("abort when", `<code>${n.abort_when}</code>`));
     if (n.while_) rows.push(kv("while", `<code>${n.while_}</code>`));
+  } else if (n.kind === "controller") {
+    rows.push(kv("controller", n.controller || n.label));
+    if (n.needs) rows.push(kv("service needs", pills(n.needs)));
+    if (n.unresolved) rows.push(kv("note", "collapsed — no registry to expand its actions"));
+    if (n.supersede_target)
+      rows.push(kv("entered by", "<code>ctx.supersede</code> — a superseding state spawns this variation at run time, preempting the active plan (ADR-003 · #190). It lights up live only if a run routes into it."));
   }
   el("insp").innerHTML = rows.join("");
 }
@@ -309,10 +327,11 @@ async function refresh() {
 }
 
 function renderLegend() {
-  const items = [["action","#30363d"],["loop","#3a2f0b"],["parallel","#2a2140"],["start","#123020"],["end","#3a1517"]];
+  const items = [["action","#30363d"],["controller","#0d2a30"],["loop","#3a2f0b"],["parallel","#2a2140"],["start","#123020"],["end","#3a1517"]];
   el("legend").innerHTML = "<span>states:</span>" +
     items.map(([k,c])=>`<span><span class="sw" style="background:${c}"></span>${k}</span>`).join("") +
-    `<span><span class="sw" style="background:#d29922"></span>loop-back edge</span>`;
+    `<span><span class="sw" style="background:#d29922"></span>loop-back</span>` +
+    `<span><span class="sw" style="background:#241a33;border-color:#d2a8ff;border-style:dashed"></span>supersede target</span>`;
 }
 
 async function loadSessions() {
