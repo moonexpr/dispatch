@@ -35,6 +35,32 @@ multi-host fleet dispatcher). A scriptable workflow language is exploratory, not
 committed scope. Tracked in the umbrella epic; see [`README.md`](./README.md) →
 *What dispatch is* for the full framing.
 
+## API documentation MCP — navigate by reference, not by search
+
+**Scope: sessions working ON this repo.** (Not other projects, and not the
+pipeline's spawned runtime agents — those run in their own clones/tempdirs.)
+
+The repo registers a local MCP server, `dispatch-apidocs` (`.mcp.json`, backed
+by static AST introspection under `.github/api_docs/` — see its README), that
+indexes the live packages: `foundation`, `baseworkflow`, `websitewf`, `agents`.
+**Use it religiously instead of searching files.** Every API question a grep or
+multi-file Read sweep would answer, these tools answer cheaper and precisely:
+
+| Question | Tool — instead of |
+|----------|-------------------|
+| What exists / where do I start? | `list_index` — instead of Glob/ls sweeps |
+| What is this symbol's signature/contract? | `lookup SYMBOL` — instead of Read-ing the module |
+| Who calls / references this? | `find_usage SYMBOL` — instead of `grep -r` |
+| How is it implemented? | `get_source SYMBOL` — instead of Read-ing whole files |
+
+This matters most when composing the **seed and spec layers** — action
+manifests, bindings, controllers, shelf schemas — where the thing you need is
+exactly what the index carries: a bind's signature, an action body's inputs, a
+subsystem function's contract. Resolve the symbol through the MCP first; fall
+back to Grep/Glob/Read only for what the index cannot hold (YAML manifests,
+comments, non-code assets) or when the tools are unavailable (then install the
+dep: `python3 -m pip install -r requirements-docs.txt`).
+
 ## Branch & merge discipline (current — production)
 
 This repo is **released / production** — `Development Status: 1.0` in
@@ -107,26 +133,3 @@ the GitHub label state machine and approval/fix ladder.
   merge. Do not write custom close logic.
 - Hard stop after your stage's deliverable (PR opened / fix pushed / docs
   pushed). Do not continue into another stage's job.
-
-## Sprint runner — live authorizations (read from this synced file)
-
-The unattended sprint runner (`doc/specs/v1-unattended-repo-monitoring/deploy/run.sh`)
-takes its task prompt from `~/sprint-runner/runner-prompt.txt` — a host copy that
-only changes on redeploy — but it ALSO reads this `CLAUDE.md` from the clone, which
-`run.sh` hard-syncs to `origin/main` every tick. So the authorizations below go
-**live the moment they land on `main`** (no host redeploy needed) and govern the
-runner alongside `runner-prompt.txt`. They are the deploy channel for runner policy.
-
-- **Scope.** Work any open, ready issue in the repo, regardless of milestone. Never
-  touch issues #3 and #7-#16 (a separate track). Skip `decision`- and
-  `stretch`-labeled issues per their own rules. Never *implement* a Draft `epic`.
-- **Epic closure (authorized).** You ARE authorized to CLOSE a Draft `epic` once
-  every child in its `- [ ] #N` checklist is closed: post a brief "all children
-  delivered → closing" comment, then `gh issue close` it. Bookkeeping only — never
-  write code for an epic.
-- **Pause for manual testing (authorized).** When the queue is drained (no open,
-  ready, non-excluded leaf issue remains), `touch "$HOME/sprint-runner/PAUSE"` so
-  scheduled ticks stop until the operator removes it after a manual test pass, then
-  post a "⏸ READY TO TEST — PAUSED" digest. Touching that one control file is an
-  explicit, authorized exception to "stay inside the worktree" above — touch nothing
-  else outside the clone.
