@@ -139,6 +139,23 @@ class Interpreter:
         except Exception:  # noqa: BLE001 — an observer must never break the run
             pass
 
+    # -- observer notification ---------------------------------------------
+    def _notify(self, method: str, *args: Any) -> None:
+        """Fire an observer hook. The observer lives on ``ctx.observer`` (so it
+        rides ``ctx.descend`` into nested Programs) or on this interpreter. It is
+        passive: any exception it raises is swallowed so telemetry can never break
+        the run."""
+        obs = self.observer or getattr(self.ctx, "observer", None)
+        if obs is None:
+            return
+        fn = getattr(obs, method, None)
+        if fn is None:
+            return
+        try:
+            fn(*args)
+        except Exception:  # noqa: BLE001 — an observer must never break the run
+            pass
+
     # -- dispatch -----------------------------------------------------------
     def _run_state(self, state: State, payload: Any) -> Result:
         if state.kind == LEAF:
