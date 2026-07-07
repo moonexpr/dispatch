@@ -286,7 +286,9 @@ def _backend_cli(
     prompt = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
     model_id = _CLI_MODEL_IDS.get(model)
     # Pass prompt via stdin to avoid hitting shell argument length limits on large payloads.
-    cmd = [claude_bin, "-p", "-"]
+    # --strict-mcp-config: a plain chat completion must not boot the operator's MCP
+    # servers — one that blocks on interactive input stalls the call to its timeout.
+    cmd = [claude_bin, "-p", "-", "--strict-mcp-config"]
     if model_id:
         cmd += ["--model", model_id]
     # Strip ANTHROPIC_API_KEY so claude uses its OAuth subscription, not API credits.

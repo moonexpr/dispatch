@@ -106,7 +106,7 @@ The target may be a **new** repo: the pipeline's `admin:prep` stage creates it
 (`gh repo create … --private --add-readme`) on the first live tick if it is
 missing, so a generated name that does not yet exist is fine — it does not have to
 be created by hand first. Record the settled `owner/repo` so Step 3 can play it
-back and Step 4 can hand it onward.
+back and Step 5 can hand it onward.
 
 ## Step 3 — confirm the specification
 
@@ -116,7 +116,58 @@ stack, constraints, explicit non-goals, and the **target `owner/repo`**. Use one
 confirm: **Looks right — proceed**, **Adjust** (reopen the interview), or
 **Stop**. Do not proceed on assumptions the user has not confirmed.
 
-## Step 4 — route
+## Step 4 — lock down the dispatch invariants (before routing)
+
+A confirmed *specification* is not yet a *dispatchable* unit. The pipeline
+generates code and then checks it against the unit's acceptance criteria — so any
+criterion that depends on external credentials or live infrastructure that does
+**not exist at dispatch time** cannot be verified, and the pipeline will either
+stall or, worse, treat generated code as a passed check. Before routing, lock
+down these invariants for **every** unit and record the result into the
+specification so it travels downstream. This gate has the same status as *never
+route without a settled target repo*: do not route until it holds.
+
+1. **Credential & secret inventory.** From the acceptance criteria (not just "does
+   it run"), enumerate every external credential, provider key, shared secret, or
+   token the unit needs to *pass its checks*: database/hosting/auth/payment keys,
+   webhook or HMAC secrets, bearer/ingest tokens, cron secrets. For each, classify
+   it — **present** (already in the target env; verify by name, never print
+   values), **mintable** (a management/API token is available to create it), or
+   **missing**. A single missing provider key can invalidate a whole unit's
+   acceptance.
+
+2. **Self-issued vs provider-issued.** Separate secrets the operator or agent
+   generates locally (random strings — ingest tokens, cron secrets, webhook
+   secrets) from provider-issued values that require a real account/project to
+   exist first (DB URLs, anon/service keys, project IDs). Self-issued ones can be
+   minted up front; provider-issued ones block on their gate unit.
+
+3. **Operator-gate units.** Identify units whose acceptance is credential- or
+   account-bound and **cannot be verified by the pipeline** — account/project
+   creation, provider linking, registering a webhook in a provider UI, DNS,
+   billing. These are operator gates: the pipeline must **stop and hand them to the
+   operator**, never self-report them done. Any `GATE (operator)` marking in an
+   operator-supplied build order is authoritative and must be preserved as a stop.
+
+4. **Acceptance verifiability.** For each unit, confirm its acceptance check is
+   verifiable in the environment the pipeline runs in. If a check needs live
+   external state that will not exist at dispatch (a real inserted row, a realtime
+   `SUBSCRIBED` event, a deployed URL, a webhook delivery), either (a) sequence its
+   provisioning gate first, or (b) explicitly downgrade the unit to
+   code-generation-only and record that its acceptance is **deferred** to a human
+   or a later run. Never let generated code stand in for a passed acceptance check.
+
+5. **Lock-down decision.** Surface the missing/mintable set and the operator-gate
+   list with one `AskUserQuestion`. The operator either supplies the missing
+   credentials, authorizes minting the self-issued ones (and provisioning via any
+   available management token), or accepts explicit deferral. Record the settled
+   inventory — required secrets, who issues each, which units are gates, which
+   acceptances are deferred — into the specification so `/dispatch:scope` and
+   `/dispatch:decompose` carry it and `/dispatch:tick` enforces it. Do not route
+   until every unit is either fully credentialed-and-verifiable or explicitly
+   deferred with the operator's acknowledgement.
+
+## Step 5 — route
 
 With a confirmed specification (including the settled `owner/repo`):
 
@@ -138,6 +189,11 @@ and branch protection.
 ## Guardrails
 
 - Interviewing is mandatory for a vague ask; skipping it defeats the skill.
+- **The credential & infrastructure invariants (Step 4) are a hard precondition**,
+  not advice: do not route a unit whose acceptance depends on a missing secret or
+  on live infrastructure that will not exist at dispatch, unless its acceptance is
+  explicitly deferred with the operator's acknowledgement. Preserve every operator
+  gate as a stop; the pipeline never self-reports a credential-bound step done.
 - This skill files and routes; it does not run the pipeline live and does not
   merge.
 - If the user resists specifying and the ask stays vague, say plainly that the

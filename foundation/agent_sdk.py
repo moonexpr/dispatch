@@ -304,6 +304,13 @@ class CliBackend(AgentBackend):
             "--permission-mode", spec.permission_mode,
             "--model", spec.model,
             "--add-dir", spec.cwd,
+            # The seeded .claude.json carries the operator's user-scoped MCP
+            # servers; booting them in a headless agent is unwanted surface and
+            # a hang source (an MCP server that blocks on interactive input —
+            # e.g. a password manager with no session token — stalls session
+            # init until the wall-clock timeout). Isolation means NO inherited
+            # MCP servers.
+            "--strict-mcp-config",
         ]
         if spec.system_prompt:
             # Append (not replace) so the archetype persona layers onto the CLI's
