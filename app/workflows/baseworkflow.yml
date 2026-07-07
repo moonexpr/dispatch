@@ -13,6 +13,12 @@ uses:
   # this file's directory).
   - ../config/actions/**/*.yml  # #base-style include of every action interface file
 
+# The declarative shelf-key contract: typed I/O for every "shelf.key" the actions
+# read/write, authored once per key (schema.py). Drives typed debug-viewer probe
+# forms and opt-in engine enforcement (DISPATCH_ENFORCE_SCHEMA).
+schemas:
+  - ../config/schemas/*.yml
+
 inputs: [request, job, triage]  # provided at run time (seeded onto the input shelf)
 
 # The parties to the contract (ADR-003): controllers the workflow references —

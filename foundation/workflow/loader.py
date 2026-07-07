@@ -22,6 +22,7 @@ from typing import Any, Dict
 from foundation import filesys
 
 from .manifest import ActionManifest, load_manifests
+from .schema import parse_schemas
 from .nodes import (
     ActionRefNode,
     ControllerRefNode,
@@ -175,6 +176,32 @@ def _apply_header(merged: WorkflowNode, doc: Dict[str, Any], base: WorkflowNode)
     )
 
 
+def load_schemas(base_dir: str, spec: Any) -> Dict[str, Any]:
+    """Resolve a workflow's ``schemas:`` declaration into ``{"shelf.key": ShelfSchema}``.
+
+    ``spec`` may be an **inline map** (``ref -> schema``) or a **list of file globs**
+    (each file a ``ref -> schema`` map), resolved relative to ``base_dir`` — the
+    ``#base`` convention, exactly like ``uses:``. Later files/keys win on collision.
+    The declarative-file form is the DRY authoring model: a key like ``input.job`` is
+    declared once and shared by every action that reads it."""
+    if not spec:
+        return {}
+    if isinstance(spec, dict):
+        return parse_schemas(spec, where="schemas")
+    import glob as _glob
+
+    import yaml
+
+    merged: Dict[str, Any] = {}
+    for g in spec:
+        pattern = g if os.path.isabs(g) else os.path.join(base_dir, g)
+        for path in sorted(_glob.glob(pattern, recursive=True)):
+            with open(path, encoding="utf-8") as fh:
+                d = yaml.safe_load(fh) or {}
+            merged.update(parse_schemas(d, where=os.path.relpath(path, base_dir)))
+    return merged
+
+
 def load_workflow(relpath: str) -> WorkflowNode:
     """Read + parse a workflow YAML into a ``WorkflowNode``. ``relpath`` resolves
     via :func:`_resolve_path`; ``uses:`` manifest globs resolve relative to the
@@ -189,17 +216,19 @@ def load_workflow(relpath: str) -> WorkflowNode:
         doc = yaml.safe_load(fh) or {}
     wf_dir = os.path.dirname(os.path.abspath(path))
     manifests = load_manifests(wf_dir, doc.get("uses") or [])
+    schemas = load_schemas(wf_dir, doc.get("schemas"))
+
+    from dataclasses import replace
 
     extends = doc.get("extends")
     if extends:
-        from dataclasses import replace
-
         from .overlay import apply_overlays
 
         base = load_workflow(os.path.join(wf_dir, f"{extends}.yml"))
         merged = apply_overlays(base, doc.get("overlays") or [], manifests, source=relpath)
         # The merged tree's interface library is the base's plus the overlay's own.
         merged = replace(merged, manifests={**base.manifests, **manifests})
-        return _apply_header(merged, doc, base)
+        # Contract likewise extends the base's (overlay keys override same refs).
+        return replace(_apply_header(merged, doc, base), schemas={**base.schemas, **schemas})
 
-    return parse_document(doc, manifests, source=relpath)
+    return replace(parse_document(doc, manifests, source=relpath), schemas=schemas)

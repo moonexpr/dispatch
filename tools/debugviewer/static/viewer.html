@@ -4,21 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dispatch · workflow debug viewer</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cirrus-ui@0.8.0/dist/cirrus.min.css">
 <style>
   :root {
     --bg: #0e1116; --panel: #161b22; --panel2: #1c232c; --line: #2b333d;
     --ink: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --accent2: #d2a8ff;
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
     --edge: #566; --edge-loop: #d29922;
+    --insp-w: 300px;   /* inspector width — the drag handle rewrites this */
+    --input-bg: #0d1117;   /* form fields, code + event panes */
+    --dot: #1b2129;        /* canvas dot-grid */
+    --code-ink: #a5d6ff;   /* JSON output text */
+    --node-ink: #e6edf3;   /* graph node label — stays light on the dark node fills */
+    --node-sub: #8b949e;   /* graph node sub-label */
+    color-scheme: dark;    /* theme native controls (number spinners, checkbox, select, scrollbars) */
+  }
+  /* light theme: chrome goes light; the graph keeps its dark node fills, so node
+     text/sub (--node-ink/--node-sub) stay light and readable in both modes. */
+  :root[data-theme="light"] {
+    --bg: #f6f8fa; --panel: #ffffff; --panel2: #eef1f4; --line: #d0d7de;
+    --ink: #1f2328; --muted: #656d76; --accent: #0969da; --accent2: #8250df;
+    --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
+    --edge: #8c959f; --edge-loop: #9a6700;
+    --input-bg: #ffffff; --dot: #e3e8ee; --code-ink: #0550ae;
+    color-scheme: light;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
     background: var(--bg); color: var(--ink);
     font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    display: grid; grid-template-columns: 232px 1fr 300px; grid-template-rows: 46px 1fr;
+    display: grid; grid-template-columns: 232px 1fr var(--insp-w); grid-template-rows: 46px 1fr;
     grid-template-areas: "head head head" "side canvas insp";
-    height: 100vh; overflow: hidden;
+    height: 100vh; overflow: hidden; padding: 0;
   }
   header {
     grid-area: head; display: flex; align-items: center; gap: 14px;
@@ -31,7 +49,11 @@
   select, button {
     background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
     border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer;
+    /* undo Cirrus's global button/select reset that overflows the header */
+    text-transform: none; letter-spacing: normal; min-width: 0; margin: 0;
+    line-height: 1.45; vertical-align: middle;
   }
+  select { width: auto; }
   button:hover, select:hover { border-color: var(--accent); }
   button.on { border-color: var(--accent); color: var(--accent); }
 
@@ -44,20 +66,21 @@
   .wf .m { color: var(--muted); font-size: 11px; }
   .wf .bad { color: var(--err); font-size: 11px; }
 
-  main.canvas { grid-area: canvas; position: relative; overflow: auto; background:
-    radial-gradient(circle at 1px 1px, #1b2129 1px, transparent 0) 0 0 / 22px 22px, var(--bg); }
-  svg { display: block; }
+  main.canvas { grid-area: canvas; position: relative; overflow: auto;
+    display: flex; align-items: safe center; justify-content: safe center; background:
+    radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0) 0 0 / 22px 22px, var(--bg); }
+  svg { display: block; max-width: none; height: auto; }
   .phaseband { fill-opacity: .06; }
   .phaselabel { fill: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; }
   .node rect { stroke-width: 1.5; rx: 8; cursor: pointer; }
-  .node text { fill: var(--ink); font-size: 11.5px; pointer-events: none; }
-  .node .sub { fill: var(--muted); font-size: 9.5px; }
+  .node text { fill: var(--node-ink); font-size: 11.5px; pointer-events: none; }
+  .node .sub { fill: var(--node-sub); font-size: 9.5px; }
   .node.sel rect { stroke: var(--accent); stroke-width: 2.5; }
   .node.active rect { stroke: #58a6ff; stroke-width: 3; filter: drop-shadow(0 0 6px #58a6ff); animation: pulse 1s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { filter: drop-shadow(0 0 3px #58a6ff);} 50% { filter: drop-shadow(0 0 9px #58a6ff);} }
   .node.done-ok rect { stroke: var(--ok); }
   .node.done-err rect { stroke: var(--err); stroke-width: 2.5; }
-  .node.active .sub, .node.done-ok .sub { fill: var(--ink); }
+  .node.active .sub, .node.done-ok .sub { fill: var(--node-ink); }
   .edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
   .edge.loop-back { stroke: var(--edge-loop); stroke-dasharray: 5 4; }
   .edge.fork, .edge.join { stroke: var(--accent2); }
@@ -66,10 +89,25 @@
   .node.controller rect { stroke-width: 2; }
   .node.supersede text { fill: var(--accent2); }
 
-  aside.insp { grid-area: insp; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; }
+  aside.insp { grid-area: insp; position: relative; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; }
+  /* drag handle: sits on the inspector's left edge; drag to resize, double-click to reset */
+  .insp-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 6; }
+  .insp-resize::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: transparent; transition: background .15s; }
+  .insp-resize:hover::after, body.resizing .insp-resize::after { background: var(--accent); }
+  body.resizing { cursor: col-resize; user-select: none; }
   .insp .cap { padding: 10px 14px 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
   .insp .body { padding: 4px 14px 14px; flex: 1; }
   .insp .placeholder { color: var(--muted); padding: 14px; }
+  .insp-title { margin-bottom: 6px; }
+  /* collapsible attribute block */
+  details.attr-fold { border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+  details.attr-fold > summary { list-style: none; cursor: pointer; color: var(--muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .8px; padding: 2px 0 6px; user-select: none; display: flex; align-items: center; gap: 6px; }
+  details.attr-fold > summary::-webkit-details-marker { display: none; }
+  details.attr-fold > summary::before { content: "▸"; font-size: 9px; transition: transform .12s; }
+  details.attr-fold[open] > summary::before { transform: rotate(90deg); }
+  details.attr-fold > summary:hover { color: var(--accent); }
+  .attr-body { padding-bottom: 2px; }
   .kv { margin: 8px 0; }
   .kv .k { color: var(--muted); font-size: 11px; }
   .kv .v { word-break: break-word; }
@@ -82,30 +120,56 @@
   .probe .cap { padding: 0 0 6px; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
   .probe .pf { margin: 6px 0; }
   .probe .pf label { display: block; color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
-  .probe textarea { width: 100%; resize: vertical; min-height: 26px; background: #0d1117; color: var(--ink);
+  .probe textarea { width: 100%; resize: vertical; min-height: 26px; background: var(--input-bg); color: var(--ink);
     border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: 11px/1.4 ui-monospace, Menlo, monospace; }
   .probe textarea:focus { outline: none; border-color: var(--accent); }
   .probe .pf-none { color: var(--muted); font-size: 11px; margin: 4px 0; }
+
+  /* schema-driven typed fields */
+  .pgroup { margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: var(--input-bg); }
+  .pgroup-h { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .pgroup-ref { color: var(--accent); font-size: 11px; font-weight: 600; }
+  .pf-src { font-size: 9px; color: var(--ok); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; line-height: 15px; }
+  .pf-src.raw { color: var(--muted); }
+  .pf.pf-inline { display: flex; align-items: center; gap: 8px; }
+  .pf.pf-inline label { margin-bottom: 0; }
+  .tk { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .4px; }
+  .probe input.pfield, .probe textarea.pfield, .probe select.pfield { width: 100%; background: var(--input-bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font: 11px/1.4 ui-monospace, Menlo, monospace; }
+  .probe textarea.pfield { resize: vertical; min-height: 24px; }
+  .probe input.pf-bool { width: auto; }
+  .probe input.pfield:focus, .probe textarea.pfield:focus, .probe select.pfield:focus { outline: none; border-color: var(--accent); }
+  .req { color: var(--err); font-weight: 700; margin-left: 2px; }
+  .pgroup.invalid { border-color: var(--err); }
+  .pf-errs { margin-top: 3px; }
+  .pf-err { color: var(--err); font-size: 10px; line-height: 1.35; word-break: break-word; }
+  .probe .pf-rawjson { width: 100%; resize: vertical; min-height: 26px; background: var(--input-bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: 11px/1.4 ui-monospace, Menlo, monospace; }
+  .probe .pf-rawjson:focus { outline: none; border-color: var(--accent); }
   .probe details.pf-adv summary { color: var(--muted); font-size: 11px; cursor: pointer; margin: 4px 0; }
   button.probe-run { border-color: var(--accent); color: var(--accent); margin-top: 8px; width: 100%; }
   .probe-out { margin-top: 10px; }
   .probe-out .pres { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
   .probe-out .pres.ok { color: var(--ok); } .probe-out .pres.err { color: var(--err); }
   .probe-out .plabel { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; margin: 8px 0 2px; }
-  .probe-out pre.pj { margin: 0; background: #0d1117; border: 1px solid var(--line); border-radius: 6px;
-    padding: 7px 8px; font: 10.5px/1.45 ui-monospace, Menlo, monospace; color: #a5d6ff; overflow-x: auto; max-height: 240px; white-space: pre; }
+  .probe-out pre.pj { margin: 0; background: var(--input-bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 8px; font: 10.5px/1.45 ui-monospace, Menlo, monospace; color: var(--code-ink); overflow-x: auto; max-height: 240px; white-space: pre; }
   .probe-out .perr { color: var(--err); font-size: 11.5px; word-break: break-word; }
   .probe-out .muted { color: var(--muted); font-size: 11px; }
 
-  .sessions { border-top: 1px solid var(--line); padding: 12px 14px; background: var(--panel2); display: flex; flex-direction: column; min-height: 0; max-height: 46%; }
+  /* compact panel pinned to the foot of the inspector column (the #insp body above
+     is flex:1 and pushes it down). flex:0 0 auto = size to content, not 46% of panel. */
+  .sessions { border-top: 1px solid var(--line); padding: 12px 14px; background: var(--panel2); display: flex; flex-direction: column; flex: 0 0 auto; }
   .sessions .cap { padding: 0 0 6px; }
-  .sessions .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  /* flex:0 0 auto + padding:0 override Cirrus's global `.row{flex:1;padding:.5rem 0}`,
+     which otherwise makes this row grow and open big vertical gaps. */
+  .sessions .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex: 0 0 auto; padding: 0; }
   .sessions .row .st { margin-left: auto; font-size: 11px; }
   .st.running { color: var(--accent); } .st.succeeded { color: var(--ok); }
   .st.failed, .st.errored { color: var(--err); } .st.idle { color: var(--muted); }
   button.run { border-color: var(--ok); color: var(--ok); }
   button:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
-  .elog { flex: 1; overflow-y: auto; font-size: 10.5px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: #0d1117; min-height: 60px; }
+  .elog { height: 168px; overflow-y: auto; font-size: 10.5px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--input-bg); }
   .elog .ev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .elog .en { color: var(--accent); } .elog .lv { color: var(--muted); }
   .elog .lv.err { color: var(--err); } .elog .ok { color: var(--ok); }
@@ -122,6 +186,7 @@
   <select id="wfsel"></select>
   <button id="refresh" title="Recompile graph from YAML">↻ refresh</button>
   <button id="auto" title="Auto-refresh every 3s">● live</button>
+  <button id="theme" title="Toggle light / dark mode">◐ theme</button>
 </header>
 
 <aside class="side">
@@ -135,10 +200,11 @@
 </main>
 
 <aside class="insp">
+  <div class="insp-resize" id="inspResize" title="Drag to resize · double-click to reset"></div>
   <div class="cap">inspector</div>
   <div class="body" id="insp"><div class="placeholder">Click a state to inspect its action, budget, permissions and I/O.</div></div>
   <div class="sessions">
-    <div class="cap">live session</div>
+    <div class="cap">mocked session</div>
     <div class="row">
       <button class="run" id="runbtn" title="Run this workflow under the mock engine and watch it live">▶ run &amp; watch</button>
       <span class="st idle" id="runstatus">idle</span>
@@ -157,6 +223,10 @@ const el = id => document.getElementById(id);
 const svgNS = "http://www.w3.org/2000/svg";
 let SEL_WF = null, SEL_NODE = null, GRAPH = null, autoTimer = null;
 let RUNNABLE = [], NODE_BY_STATE = {}, ES = null, CUR_RUN = null;
+let ATTR_OPEN = true;   // inspector "attributes" fold state, preserved across node clicks
+// The declarative shelf-key contract for the selected workflow (graph.schemas):
+// "shelf.key" -> {type, description, fields:[{name,type,required,enum,...}]}.
+function schemaFor(ref){ return (GRAPH && GRAPH.schemas && GRAPH.schemas[ref]) || null; }
 
 function mk(tag, attrs, kids) {
   const n = document.createElementNS(svgNS, tag);
@@ -287,8 +357,8 @@ function inspect(n) {
   const rows = [];
   const kv = (k,v) => `<div class="kv"><div class="k">${k}</div><div class="v">${v}</div></div>`;
   const pills = a => a.map(x=>`<span class="pill">${x}</span>`).join("");
-  rows.push(`<div class="kv"><div class="v" style="font-size:14px;font-weight:600">${n.label}</div>
-    <div class="k">${n.kind}${n.phase?" · phase "+n.phase:""}</div></div>`);
+  const title = `<div class="kv insp-title"><div class="v" style="font-size:14px;font-weight:600">${n.label}</div>
+    <div class="k">${n.kind}${n.phase?" · phase "+n.phase:""}</div></div>`;
   if (n.kind === "action") {
     rows.push(kv("action kind", n.action_kind));
     if (n.namespace) rows.push(kv("namespace", n.namespace));
@@ -308,21 +378,90 @@ function inspect(n) {
     if (n.supersede_target)
       rows.push(kv("entered by", "<code>ctx.supersede</code> — a superseding state spawns this variation at run time, preempting the active plan (ADR-003 · #190). It lights up live only if a run routes into it."));
   }
-  el("insp").innerHTML = rows.join("") + (n.kind === "action" ? probeForm(n) : "");
+  const attrs = rows.length
+    ? `<details class="attr-fold" id="attrFold"${ATTR_OPEN ? " open" : ""}><summary>attributes</summary>
+        <div class="attr-body">${rows.join("")}</div></details>`
+    : "";
+  el("insp").innerHTML = title + attrs + (n.kind === "action" ? probeForm(n) : "");
+  const fold = el("attrFold"); if (fold) fold.addEventListener("toggle", () => { ATTR_OPEN = fold.open; });
   if (n.kind === "action") wireProbe(n);
 }
 
 function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function escAttr(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function parseVal(s){ s = (s||"").trim(); if (!s) return undefined; try { return JSON.parse(s); } catch(e){ return s; } }
 
+// -- contract-driven probe form: render typed controls from the DECLARED schema --
+// (graph.schemas, authored in app/config/schemas/*.yml — one schema per shelf.key).
+// Each field carries {name,type,required,description,enum,items,format,default,example,
+// minimum,maximum}. The control, its validation and its coercion all derive from that.
+function prefillOf(f){ return f.example !== undefined ? f.example : f.default; }
+function fieldControl(ref, f){
+  const req = f.required ? `<span class="req" title="required">*</span>` : "";
+  const desc = f.description ? ` title="${escAttr(f.description)}"` : "";
+  const tag = f.type + (f.items ? `[${f.items}]` : "");
+  const label = f.name ? `<label${desc}>${escapeHtml(f.name)} <span class="tk">${tag}</span>${req}</label>` : "";
+  const pre = prefillOf(f);
+  const da = `data-ref="${escAttr(ref)}" data-key="${escAttr(f.name||"")}" data-kind="${f.type}"`
+    + (f.items ? ` data-items="${escAttr(f.items)}"` : "");
+  if (f.enum && f.enum.length){
+    const opts = [`<option value=""></option>`].concat(f.enum.map(v => {
+      const sel = (pre !== undefined && String(pre) === String(v)) ? " selected" : "";
+      return `<option value="${escAttr(v)}"${sel}>${escapeHtml(v)}</option>`;
+    })).join("");
+    return `<div class="pf">${label}<select class="pfield" ${da}>${opts}</select></div>`;
+  }
+  if (f.type === "boolean")
+    return `<div class="pf pf-inline">${label}<input class="pfield pf-bool" type="checkbox" ${da} ${pre?"checked":""}></div>`;
+  if (f.type === "integer" || f.type === "number"){
+    const step = f.type === "integer" ? "1" : "any";
+    const mn = f.minimum != null ? ` min="${f.minimum}"` : "";
+    const mx = f.maximum != null ? ` max="${f.maximum}"` : "";
+    return `<div class="pf">${label}<input class="pfield" type="number" step="${step}"${mn}${mx} ${da} value="${escAttr(pre ?? "")}"></div>`;
+  }
+  if (f.type === "array"){
+    const listy = (f.items === "string" || f.items === "integer" || f.items === "number");
+    const txt = Array.isArray(pre) ? (listy ? pre.join("\n") : JSON.stringify(pre, null, 2)) : (pre !== undefined ? JSON.stringify(pre) : "");
+    return `<div class="pf">${label}<textarea class="pfield" ${da} rows="2" placeholder="${listy?"one per line":"JSON array"}">${escapeHtml(txt)}</textarea></div>`;
+  }
+  if (f.type === "object" || f.type === "any"){
+    const txt = pre !== undefined ? JSON.stringify(pre, null, 2) : "";
+    return `<div class="pf">${label}<textarea class="pfield" ${da} rows="3" placeholder="JSON">${escapeHtml(txt)}</textarea></div>`;
+  }
+  if (f.format === "multiline")
+    return `<div class="pf">${label}<textarea class="pfield" ${da} rows="2">${escapeHtml(pre ?? "")}</textarea></div>`;
+  return `<div class="pf">${label}<input class="pfield" type="text" ${da} value="${escAttr(pre ?? "")}"></div>`;
+}
 function probeForm(n){
   const ins = n.inputs || [];
-  const fields = ins.length
-    ? ins.map(ref => `<div class="pf"><label>${ref}</label><textarea class="pin" data-ref="${ref}" rows="1" placeholder="JSON, or plain text"></textarea></div>`).join("")
-    : `<div class="pf-none">no declared inputs — runs on an empty shelf</div>`;
+  if (!ins.length)
+    var groups = `<div class="pf-none">no declared inputs — runs on an empty shelf</div>`;
+  else groups = ins.map(ref => {
+    const sc = schemaFor(ref);
+    let mode, badge, body;
+    if (sc && sc.type === "object" && sc.fields && sc.fields.length){
+      mode = "object";
+      badge = `<span class="pf-src" title="${escAttr(sc.description || "declared contract")}">◆ contract</span>`;
+      body = sc.fields.map(f => fieldControl(ref, f)).join("");
+    } else if (sc){
+      mode = "scalar";
+      badge = `<span class="pf-src" title="${escAttr(sc.description || "declared contract")}">◆ contract</span>`;
+      body = fieldControl(ref, {name:"", type:sc.type, items:sc.items, enum:sc.enum, example:sc.example});
+    } else {
+      mode = "raw";
+      badge = `<span class="pf-src raw" title="no declared contract for this ref">untyped</span>`;
+      body = `<div class="pf"><textarea class="pfield" data-ref="${escAttr(ref)}" data-key="" data-kind="any" rows="2" placeholder="JSON or text"></textarea></div>`;
+    }
+    const rawJson = mode === "raw" ? "" :
+      `<details class="pf-adv"><summary>edit as JSON</summary>
+        <textarea class="pf-rawjson" data-ref="${escAttr(ref)}" rows="3" placeholder="overrides the fields above"></textarea></details>`;
+    return `<div class="pgroup" data-ref="${escAttr(ref)}" data-mode="${mode}">
+      <div class="pgroup-h"><span class="pgroup-ref">${escapeHtml(ref)}</span> ${badge}</div>
+      ${body}${rawJson}<div class="pf-errs" data-ref="${escAttr(ref)}"></div></div>`;
+  }).join("");
   return `<div class="probe">
-    <div class="cap">probe · send data → see output</div>
-    ${fields}
+    <div class="cap">probe · contract-driven · send data → see output</div>
+    ${groups}
     <details class="pf-adv"><summary>payload (optional)</summary>
       <textarea id="probe-payload" rows="1" placeholder="JSON payload arg (most actions ignore it)"></textarea></details>
     <button class="probe-run" id="probe-run">▶ run this state (mock, dry-run)</button>
@@ -330,11 +469,95 @@ function probeForm(n){
   </div>`;
 }
 
+function coerceField(e){
+  const kind = e.dataset.kind, items = e.dataset.items;
+  if (kind === "boolean") return e.checked;
+  if (kind === "integer") { const v = e.value.trim(); if (v === "") return undefined; const n = parseInt(v, 10); return isNaN(n) ? v : n; }
+  if (kind === "number")  { const v = e.value.trim(); if (v === "") return undefined; const n = Number(v);      return isNaN(n) ? v : n; }
+  if (kind === "array"){
+    if (!e.value.trim()) return [];
+    if (items === "string") return e.value.split("\n").map(s => s.trim()).filter(Boolean);
+    if (items === "integer" || items === "number") return e.value.split("\n").map(s => s.trim()).filter(Boolean).map(Number);
+    return parseVal(e.value);   // array of objects/any → JSON
+  }
+  if (kind === "object" || kind === "any") return parseVal(e.value);
+  const v = e.value;   // string (incl. multiline)
+  return v === "" ? undefined : v;
+}
+function collectInputs(){
+  const inputs = {};
+  document.querySelectorAll(".pgroup").forEach(g => {
+    const ref = g.dataset.ref, mode = g.dataset.mode;
+    const raw = g.querySelector(".pf-rawjson");        // whole-ref JSON override wins when filled
+    if (raw && raw.value.trim()) { const v = parseVal(raw.value); if (v !== undefined) inputs[ref] = v; return; }
+    const fields = [...g.querySelectorAll(".pfield")];
+    if (mode === "object") {
+      const obj = {};
+      fields.forEach(e => { const val = coerceField(e); if (val !== undefined) obj[e.dataset.key] = val; });
+      inputs[ref] = obj;
+    } else if (fields[0]) {
+      const val = coerceField(fields[0]); if (val !== undefined) inputs[ref] = val;
+    }
+  });
+  return inputs;
+}
+
+// -- client mirror of ShelfSchema.validate (instant feedback; server is authoritative) --
+function typeOk(v, t){
+  if (t === "any" || !t) return true;
+  if (t === "string")  return typeof v === "string";
+  if (t === "integer") return typeof v === "number" && Number.isInteger(v);
+  if (t === "number")  return typeof v === "number";
+  if (t === "boolean") return typeof v === "boolean";
+  if (t === "array")   return Array.isArray(v);
+  if (t === "object")  return v && typeof v === "object" && !Array.isArray(v);
+  return true;
+}
+function validateField(f, value, path){
+  if (value === undefined || value === null) return [];
+  if (!typeOk(value, f.type)) return [`${path}: expected ${f.type}`];
+  const errs = [];
+  if (f.enum && f.enum.length && !f.enum.map(String).includes(String(value)))
+    errs.push(`${path}: ${JSON.stringify(value)} not in [${f.enum.join(", ")}]`);
+  if (f.type === "number" || f.type === "integer"){
+    if (f.minimum != null && value < f.minimum) errs.push(`${path}: ${value} < ${f.minimum}`);
+    if (f.maximum != null && value > f.maximum) errs.push(`${path}: ${value} > ${f.maximum}`);
+  }
+  if (f.type === "array" && f.items) (value || []).forEach((it, i) => {
+    if (!typeOk(it, f.items)) errs.push(`${path}[${i}]: expected ${f.items}`);
+  });
+  if (f.type === "object" && f.fields) f.fields.forEach(sub => {
+    const present = value && Object.prototype.hasOwnProperty.call(value, sub.name);
+    if (sub.required && !present) errs.push(`${path}.${sub.name}: required`);
+    else if (present) errs.push(...validateField(sub, value[sub.name], `${path}.${sub.name}`));
+  });
+  return errs;
+}
+function validateInputs(inputs){
+  const byRef = {};
+  Object.entries(inputs).forEach(([ref, value]) => {
+    const sc = schemaFor(ref);
+    if (!sc) return;
+    const errs = validateField({type:sc.type, items:sc.items, enum:sc.enum, fields:sc.fields}, value, ref);
+    if (errs.length) byRef[ref] = errs;
+  });
+  return byRef;
+}
+function showFieldErrors(byRef){
+  document.querySelectorAll(".pf-errs").forEach(d => { d.innerHTML = ""; d.parentElement.classList.remove("invalid"); });
+  Object.entries(byRef || {}).forEach(([ref, errs]) => {
+    const d = document.querySelector(`.pf-errs[data-ref="${cssEsc(ref)}"]`);
+    if (d){ d.innerHTML = errs.map(e => `<div class="pf-err">✕ ${escapeHtml(e)}</div>`).join(""); d.parentElement.classList.add("invalid"); }
+  });
+}
+function cssEsc(s){ return String(s).replace(/["\\]/g, "\\$&"); }
+
 function wireProbe(n){
   const btn = el("probe-run"); if (!btn) return;
   btn.addEventListener("click", async () => {
-    const inputs = {};
-    document.querySelectorAll(".pin").forEach(t => { const v = parseVal(t.value); if (v !== undefined) inputs[t.dataset.ref] = v; });
+    const inputs = collectInputs();
+    const clientErrs = validateInputs(inputs);
+    showFieldErrors(clientErrs);      // instant, contract-checked feedback before the round trip
     const pv = parseVal((el("probe-payload")||{}).value);
     btn.disabled = true;
     el("probe-out").innerHTML = `<div class="muted">running ${n.label}…</div>`;
@@ -343,6 +566,7 @@ function wireProbe(n){
         method: "POST", headers: {"Content-Type":"application/json"},
         body: JSON.stringify({ workflow: SEL_WF, token: n.label, inputs, payload: pv })
       })).json();
+      if (res.validation && Object.keys(res.validation).length) showFieldErrors(res.validation);  // authoritative
       el("probe-out").innerHTML = renderProbe(res);
     } catch(e) {
       el("probe-out").innerHTML = `<div class="perr">✕ ${escapeHtml(e)}</div>`;
@@ -355,7 +579,13 @@ function renderProbe(r){
   if (r.error) return `<div class="perr">✕ ${escapeHtml(r.error)}</div>`;
   const j = o => `<pre class="pj">${escapeHtml(JSON.stringify(o, null, 2))}</pre>`;
   const has = o => o && (typeof o !== "object" || Object.keys(o).length);
-  let h = `<div class="pres ${r.ok ? "ok" : "err"}">${r.ok ? "✓ ok" : "✕ error"}</div>`;
+  let h = "";
+  if (r.validation && Object.keys(r.validation).length){
+    const n = Object.values(r.validation).reduce((a, e) => a + e.length, 0);
+    h += `<div class="pres err">⚠ ${n} contract violation${n===1?"":"s"}</div>`
+      + `<div class="muted">inputs don't conform to the declared schema — see the fields above</div>`;
+  }
+  h += `<div class="pres ${r.ok ? "ok" : "err"}">${r.ok ? "✓ ok" : "✕ error"}</div>`;
   if (r.result && r.result.error) h += `<div class="plabel">error</div><div class="perr">${escapeHtml(r.result.error)}</div>`;
   if (r.result && r.result.value != null) h += `<div class="plabel">result.value</div>` + j(r.result.value);
   if (has(r.outputs)) h += `<div class="plabel">writes → shelves</div>` + j(r.outputs);
@@ -391,7 +621,7 @@ async function selectWorkflow(name) {
   el("insp").innerHTML = `<div class="placeholder">Click a state to inspect it.</div>`;
   const g = await (await fetch("/api/workflows/" + encodeURIComponent(name))).json();
   if (g.error) { el("svg").innerHTML=""; el("insp").innerHTML = `<div class="placeholder">${g.error}</div>`; return; }
-  draw(g);
+  draw(g);   // g.schemas rides along on the graph — the probe forms read it via schemaFor()
   updateRunButton();
 }
 
@@ -485,6 +715,35 @@ el("auto").addEventListener("click", () => {
   if (autoTimer) { clearInterval(autoTimer); autoTimer=null; b.classList.remove("on"); }
   else { autoTimer = setInterval(refresh, 3000); b.classList.add("on"); }
 });
+
+// -- inspector resize: drag the handle to widen/narrow, double-click to reset --
+const INSP_MIN = 260, INSP_DEFAULT = 300;
+function setInspWidth(px) {
+  const max = Math.max(INSP_MIN, window.innerWidth - 420);   // keep the canvas usable
+  const w = Math.min(max, Math.max(INSP_MIN, px));
+  document.documentElement.style.setProperty("--insp-w", w + "px");
+  try { localStorage.setItem("dbg-insp-w", String(w)); } catch(e) {}
+}
+(function wireResize(){
+  const h = el("inspResize"); if (!h) return;
+  let dragging = false;
+  h.addEventListener("mousedown", e => { dragging = true; document.body.classList.add("resizing"); e.preventDefault(); });
+  window.addEventListener("mousemove", e => { if (dragging) setInspWidth(window.innerWidth - e.clientX); });
+  window.addEventListener("mouseup", () => { if (dragging) { dragging = false; document.body.classList.remove("resizing"); } });
+  h.addEventListener("dblclick", () => setInspWidth(INSP_DEFAULT));
+  const saved = parseInt(localStorage.getItem("dbg-insp-w") || "", 10);
+  if (saved) setInspWidth(saved);
+})();
+
+// -- light / dark theme toggle (persisted) --
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  const b = el("theme"); if (b) b.textContent = (t === "light") ? "☀ light" : "☾ dark";
+  try { localStorage.setItem("dbg-theme", t); } catch(e) {}
+}
+el("theme").addEventListener("click", () =>
+  applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
+applyTheme(localStorage.getItem("dbg-theme") || "dark");
 
 renderLegend();
 loadSessions();

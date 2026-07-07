@@ -11,6 +11,9 @@ Endpoints
     GET  /                          -> the viewer (static/viewer.html)
     GET  /api/workflows             -> [{name, file, ok, error, phases, node_count}]
     GET  /api/workflows/<name>      -> the graph {name, phases, budgets, nodes, edges}
+    GET  /api/workflows/<name>/examples
+                                    -> {ok, examples}: realistic "shelf.key"->value
+                                       snapshot from the offline mock, for typed probe forms
     GET  /api/sessions              -> {runs: [...], runnable: [...]}
     POST /api/probe                 -> run ONE action in isolation against the mock
                                        engine; body {workflow, token, inputs, payload}
@@ -173,6 +176,18 @@ def probe_action(workflow: str, token: str, inputs: Dict[str, Any], payload: Any
     if manifest is None:
         return {"error": f"no action {token!r} in {workflow!r}"}
 
+    # Validate the seeded inputs against the declared contract (the tooling surface
+    # of the staged enforcement). Non-blocking: a probe still runs so you can see
+    # what a malformed value does, but the violations are reported to the UI.
+    schemas = getattr(doc, "schemas", {}) or {}
+    validation: Dict[str, List[str]] = {}
+    for ref, value in (inputs or {}).items():
+        schema = schemas.get(str(ref))
+        if schema is not None:
+            errs = schema.validate(value)
+            if errs:
+                validation[str(ref)] = errs
+
     from foundation.actions import BudgetMeter, Context, MockActionFactory
     from foundation.workflow.nodes import ActionRefNode
     from foundation.workflow.visitor import CompileVisitor
@@ -216,6 +231,7 @@ def probe_action(workflow: str, token: str, inputs: Dict[str, Any], payload: Any
         "ok": bool(result.ok),
         "token": token,
         "seeded": seeded,
+        "validation": validation,  # {ref: [contract violations]} — empty when inputs conform
         "result": {
             "ok": bool(result.ok),
             "value": getattr(result, "value", None),
@@ -227,6 +243,68 @@ def probe_action(workflow: str, token: str, inputs: Dict[str, Any], payload: Any
         "raised": raised,
         "trace": ctx.trace,
     })
+
+
+# -- example shelf snapshots (schema-driven probe forms) --------------------
+# Canonical, deterministic fixtures fed to a workflow's offline mock so we can
+# read back *real* shelf values and reflect their shapes into typed form fields.
+_EXAMPLE_JOB = {
+    "issue": 9001,
+    "title": "Add retry with backoff to fetch",
+    "body": "Implement retry.\n\n## Acceptance criteria\n- retries 3x\n- exponential backoff\n- gives up after cap",
+    "labels": ["enhancement"],
+    "discovered": ["foundation/proc.py", "foundation/runtime.py"],
+}
+_EXAMPLE_TRIAGE = {"action": "implement", "scope": "m", "route": "gen-default", "confidence": 0.82}
+
+# Workflows with a deterministic offline mock runner we can introspect (mirrors
+# ``_REGISTRIES``). A draw-only workflow simply yields no examples and the probe
+# UI falls back to freeform inputs.
+_EXAMPLE_RUNNERS: Dict[str, str] = {"baseworkflow": "baseworkflow.baseworkflow:run_mock"}
+_example_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def example_shelf(workflow: str) -> Dict[str, Any]:
+    """A realistic ``"shelf.key" -> value`` snapshot of every ref a workflow's
+    actions read/write, derived by running its offline mock once (no model, no
+    network) and reading the input + deliverables shelves. The probe UI reflects
+    these value shapes into typed, prefilled form controls. Best-effort and
+    cached: an un-runnable workflow returns ``{}`` (UI falls back to freeform)."""
+    if workflow in _example_cache:
+        return _example_cache[workflow]
+    spec = _EXAMPLE_RUNNERS.get(workflow)
+    examples: Dict[str, Any] = {}
+    if spec:
+        try:
+            import contextlib
+            import importlib
+            import io
+
+            # Same sys.path discipline as ``_registry_for``: the package __init__
+            # is the composition root, so REPO_ROOT must win, but baseworkflow/
+            # is still needed for the package's bare-internal imports.
+            bw_dir = os.path.join(REPO_ROOT, "baseworkflow")
+            for p in (bw_dir, REPO_ROOT):
+                if p in sys.path:
+                    sys.path.remove(p)
+            sys.path.insert(0, bw_dir)
+            sys.path.insert(0, REPO_ROOT)
+            os.environ["PIPELINE_DRY_RUN"] = "1"  # the mock never mutates anything real
+            mod_name, _, fn = spec.partition(":")
+            run_mock = getattr(importlib.import_module(mod_name), fn or "run_mock")
+            with contextlib.redirect_stdout(io.StringIO()):  # swallow the mock's DRY-RUN chatter
+                summary = run_mock(_EXAMPLE_JOB, _EXAMPLE_TRIAGE)
+            wf = summary.get("workflow")
+            shelves = getattr(wf, "shelves", None)
+            for kind in ("input", "deliverables", "shared"):
+                shelf = getattr(shelves, kind, None)
+                snap = shelf.snapshot() if shelf is not None and hasattr(shelf, "snapshot") else {}
+                for key, value in (snap or {}).items():
+                    examples[f"{kind}.{key}"] = _json_safe(value)
+        except Exception:  # noqa: BLE001 — best-effort; the UI falls back to freeform inputs
+            examples = {}
+    _example_cache[workflow] = examples
+    return examples
 
 
 # -- HTTP handler -----------------------------------------------------------
@@ -285,6 +363,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("viewer.html", "text/html; charset=utf-8")
             elif route == "/api/workflows":
                 self._json(list_workflows())
+            elif route.startswith("/api/workflows/") and route.endswith("/examples"):
+                name = route[len("/api/workflows/"):-len("/examples")]
+                ex = example_shelf(name)
+                self._json({"ok": bool(ex), "examples": ex})
             elif route.startswith("/api/workflows/"):
                 name = route[len("/api/workflows/"):]
                 graph = graph_for(name)

@@ -203,6 +203,9 @@ class GraphVisitor(WorkflowVisitor):
             "budgets": dict(node.budgets or {}),
             "inputs": list(node.inputs or ()),
             "controllers": list(getattr(node, "controllers", ()) or ()),
+            # The declarative shelf-key contract, as JSON, keyed by "shelf.key" — the
+            # viewer reflects these into typed, validated probe forms.
+            "schemas": {ref: s.to_dict() for ref, s in (getattr(node, "schemas", {}) or {}).items()},
             "nodes": self.nodes,
             "edges": self.edges,
         }

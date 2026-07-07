@@ -1,0 +1,179 @@
+# baseworkflow.yml — the declarative shelf-key contract (typed I/O).
+#
+# Each top-level key is a "shelf.key"; its value is the schema for what that key
+# holds. A key is declared ONCE here and shared by every action that reads or
+# writes it (input.job is read by 11 actions) — the DRY, single-source contract.
+# The debug viewer reflects these into typed, validated probe forms; the engine
+# validates written values against them when DISPATCH_ENFORCE_SCHEMA is set
+# (opt-in, off by default).
+#
+# Field spec keys: type (string|integer|number|boolean|array|object|any),
+# required, description, enum, items (array element type), format (e.g.
+# multiline), default, example, minimum, maximum, fields (nested object).
+# Pulled in by app/workflows/baseworkflow.yml via `schemas: [../config/schemas/*.yml]`.
+
+# -- run-time inputs (seeded onto the input shelf) --------------------------
+input.job:
+  type: object
+  description: The unit of work from intake — the GitHub issue (or synthesized job) the pipeline implements.
+  fields:
+    issue:      {type: integer, required: true, description: "Issue number", example: 9001}
+    title:      {type: string,  required: true, description: "One-line summary", example: "Add retry with backoff to fetch"}
+    body:       {type: string,  format: multiline, description: "Full body / acceptance criteria", example: "Implement retry.\n\n## Acceptance criteria\n- retries 3x\n- exponential backoff"}
+    labels:     {type: array, items: string, description: "GitHub labels (drive purpose classification)", example: [enhancement]}
+    discovered: {type: array, items: string, description: "Files surfaced during triage", example: ["foundation/proc.py", "foundation/runtime.py"]}
+
+input.triage:
+  type: object
+  description: The architect's routing decision for this job.
+  fields:
+    action:     {type: string, required: true, enum: [implement, fix, docs], description: "Kind of work", example: implement}
+    scope:      {type: string, enum: [s, m, l], description: "Rough size", example: m}
+    route:      {type: string, description: "Generation route / model lane", example: gen-default}
+    confidence: {type: number, minimum: 0, maximum: 1, description: "Triage confidence (0–1)", example: 0.82}
+
+input.config:
+  type: object
+  description: Per-run pipeline configuration (defaulted when absent).
+  fields:
+    engineering_budget: {type: integer, minimum: 0, description: "Token budget for the engineering phase", example: 450000}
+    verify_cmd:         {type: string, description: "Command that validates the produced work", example: "bash scripts/smoke.sh"}
+
+input.request:
+  type: object
+  description: The seed controller's raw intake envelope (ADR-003) — how the work entered.
+  fields:
+    source: {type: string, required: true, enum: [job, github], description: "Intake source", example: job}
+    job:    {type: object, description: "Synthesized job (source=job): title / goal / acceptance"}
+    repo:   {type: string, description: "owner/repo (source=github)"}
+    issue:  {type: integer, description: "Issue number (source=github)"}
+    fields: {type: object, description: "Structured intake fields"}
+
+# -- deliverables read downstream (an action's inputs) ----------------------
+deliverables.purpose:
+  type: object
+  description: The classified purpose of the work — selects the engineering harness.
+  fields:
+    purpose:           {type: string, description: "Classification", example: new-feature}
+    source:            {type: string, enum: [label, keyword, default], description: "How it was classified"}
+    harness:           {type: string, description: "Selected engineering harness/skill"}
+    harness_ref:       {type: string, description: "Harness source ref"}
+    harness_setup:     {type: string, format: multiline, description: "Setup commands"}
+    harness_rationale: {type: string, format: multiline, description: "Why this harness"}
+
+deliverables.plan:
+  type: object
+  description: The decomposed work plan — units plus agent staffing.
+  fields:
+    units:    {type: array, items: object, description: "Work units (id, deliverable, files, phase, acceptance)"}
+    staffing: {type: object, description: "Agent staffing / wave plan"}
+    criteria: {type: array, description: "Acceptance criteria"}
+
+deliverables.strategy:
+  type: object
+  description: Parallelization strategy across the work units.
+  fields:
+    strategy:                            {type: string, description: "Chosen strategy"}
+    summary:                             {type: string, format: multiline}
+    requires_parallelization_rationale:  {type: boolean}
+    parallelization_rationale:           {type: string, format: multiline}
+    parallel_units:                      {type: array, items: string}
+    n_parallel:                          {type: integer, minimum: 0}
+    abc:                                 {type: string}
+
+deliverables.bucket:
+  type: object
+  description: The budget bucket the work falls into.
+  fields:
+    bucket:    {type: string, description: "Bucket label"}
+    k_units:   {type: integer, minimum: 0, description: "Unit count"}
+    rationale: {type: string, format: multiline}
+
+deliverables.budget:
+  type: object
+  description: The engineering budget authorization envelope.
+  fields:
+    authorization:      {type: object, description: "Session authorization (id, branch, route, budgets…)"}
+    k_units:            {type: integer, minimum: 0}
+    engineering_budget: {type: integer, minimum: 0}
+
+deliverables.orchestration_script:
+  type: object
+  description: The compiled multi-agent orchestration script (foundation.actions.script).
+  fields:
+    phases:      {type: array, items: object, description: "PhaseSpec list"}
+    permission:  {type: string, description: "Permission posture", example: deny-by-default}
+    allow_tools: {type: array, items: string}
+    budget:      {type: integer, minimum: 0}
+
+deliverables.work_plan:
+  type: object
+  description: The consolidated architect work plan handed to the engineer.
+  fields:
+    issue:    {type: integer}
+    purpose:  {type: object}
+    strategy: {type: object}
+    plan:     {type: object}
+    budget:   {type: object}
+
+deliverables.engineering_result:
+  type: object
+  description: The engineer's output for the work unit.
+  fields:
+    ok:    {type: boolean, required: true, description: "Did the engineer succeed"}
+    value: {type: string, format: multiline, description: "Produced artifact / summary"}
+    meta:  {type: object, description: "usage, model, source, budget"}
+
+deliverables.docs:
+  type: object
+  description: The docs update produced for the work.
+  fields:
+    issue:    {type: integer}
+    summary:  {type: string, format: multiline}
+    sections: {type: array, items: string}
+
+deliverables.consolidation:
+  type: object
+  description: The PR consolidation record (branch, PR, mutations).
+  fields:
+    issue:     {type: string}
+    status:    {type: string}
+    pr_number: {type: integer, description: "PR number (null until opened)"}
+    pr_url:    {type: string}
+    branch:    {type: string}
+    base:      {type: string}
+    skipped:   {type: boolean}
+    dry_run:   {type: boolean}
+    mutations: {type: array, description: "gh mutations performed (or dry-run)"}
+
+# -- shared shelf (seed variant ↔ lifecycle hand-off, ADR-003) --------------
+shared.envelope:
+  type: object
+  description: The intake envelope passed between seed variants.
+  fields:
+    source: {type: string, enum: [job, github, interactive]}
+    repo:   {type: string}
+    issue:  {type: integer, description: "Issue number (null for job source)"}
+    fields: {type: object, description: "title / goal / acceptance"}
+
+shared.intake:
+  type: object
+  description: The seed controller's intake decision.
+  fields:
+    source:   {type: string}
+    variant:  {type: string, description: "Which seed variant handled it"}
+    accepted: {type: boolean, required: true}
+    unmet:    {type: array, description: "Unmet needs"}
+    missing:  {type: array, description: "Missing fields"}
+    reason:   {type: string, format: multiline}
+
+shared.payload:
+  type: object
+  description: The normalized work payload the seed hands to spec.
+  fields:
+    title:      {type: string, required: true}
+    goal:       {type: string, format: multiline}
+    acceptance: {type: string, format: multiline}
+    labels:     {type: array, items: string}
+    open_needs: {type: array, items: string}
+    provenance: {type: object, description: "kind + origin"}
