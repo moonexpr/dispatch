@@ -37,6 +37,13 @@ architect selects which issues to work during `intake` — epics are flagged
 `wontdo_parent_issue` (with child links), leaves are ranked and claimed up to
 `PIPELINE_CONCURRENCY`.
 
+Workflow phases (the HFSM superstates in `baseworkflow.yml`): `seed → intake →
+research → spec → work → build`. Intake composes the dossier + the admin's
+question ledger; research loops its own pipeline (research.pipeline controller,
+File/Web researchers) until the questions are satisfied; spec runs the
+architect's deliberate planning pipeline (units → slices → team assignments)
+under the admin's work-order sufficiency gate.
+
 ### Safe-to-live progression
 
 Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
@@ -47,7 +54,7 @@ Each rung is more "live" than the last. Use a **throwaway target repo** (e.g.
    python3 -m foundation.workflow app/workflows/baseworkflow.yml \
      --registry baseworkflow.bindings:build_registry
    ```
-   Expect `[PASS] … (structure + data-flow + tokens; 3 phases)`.
+   Expect `[PASS] … (structure + data-flow + tokens; 6 phases)`.
 
 2. **Deterministic e2e ("roundabout")** — the full spec→work→build lifecycle over real
    issue data with a MockActionFactory: real subsystem logic, **no model, no network

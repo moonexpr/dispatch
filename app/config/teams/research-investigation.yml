@@ -1,0 +1,12 @@
+# Agent-team manifest — loaded by teams:roster (bindings/teams.py).
+name: research-investigation
+description: Researcher pair for research-phase units — repo-grounded + external.
+capabilities:
+  - research / investigation
+  - researcher
+  - research
+agents:
+  - role: file-researcher
+    archetype: file-researcher
+  - role: web-researcher
+    archetype: web-researcher

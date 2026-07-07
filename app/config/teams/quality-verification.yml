@@ -1,0 +1,11 @@
+# Agent-team manifest — loaded by teams:roster (bindings/teams.py).
+name: quality-verification
+description: Single-seat QA team for the integration/verify tail and diagnosis units.
+capabilities:
+  - QA / test automation
+  - diagnostics / root-cause
+  - verify
+  - analyst
+agents:
+  - role: verifier
+    archetype: engineer

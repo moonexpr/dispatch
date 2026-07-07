@@ -1,0 +1,19 @@
+# research:investigate — the round's judgment: answer the planned research
+# tasks. An INFERENCE: dry-run/mock run the deterministic repo-grounded oracle
+# (bind body); LIVE, the worker dispatches "repo" tasks to the FileResearcher
+# (grounded in a shallow clone of the target repo) and "web" tasks to the
+# WebResearcher (novelty-penalty judgment over external technology), layered on
+# the baseline and fail-safe back to it.
+token: research:investigate
+kind: inference
+fmt: json
+bind: research_investigate
+permission: []
+budget: research
+interface:
+  in:
+    research_tasks: shared.research_tasks
+    intake: deliverables.intake_dossier
+    config: input.config
+  out:
+    findings: shared.findings

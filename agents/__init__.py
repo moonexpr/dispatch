@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """agents — backend-agnostic agent archetypes (the abstraction side of a Bridge).
 
-Three concrete role definitions — :class:`EngineerAgent`, :class:`ArchitectAgent`,
-:class:`AdminAgent` — each a reusable profile (persona + tool access + default route)
+Five concrete role definitions — :class:`EngineerAgent`, :class:`ArchitectAgent`,
+:class:`AdminAgent`, :class:`FileResearcher`, :class:`WebResearcher` — each a
+reusable profile (persona + tool access + default route)
 you **puppet** by passing a per-session prompt. The execution backend (the ``claude``
 CLI, the Agent SDK, or a single-shot chat model via OpenRouter / HuggingFace) is
 chosen at ``run()`` time through :func:`foundation.agent_sdk.make_runner`; the definition
@@ -21,9 +22,11 @@ from foundation.agents import AgentOutcome, BaseAgent
 from agents.admin import AdminAgent
 from agents.architect import ArchitectAgent
 from agents.engineer import EngineerAgent
+from agents.file_researcher import FileResearcher
+from agents.web_researcher import WebResearcher
 
 __all__ = ["BaseAgent", "AgentOutcome", "EngineerAgent", "ArchitectAgent", "AdminAgent",
-           "make_agent"]
+           "FileResearcher", "WebResearcher", "make_agent"]
 
 #: role name -> archetype class. Mirrors ``foundation.agent_sdk._RUNNERS`` (the backend
 #: registry) on the definition side.
@@ -31,6 +34,8 @@ _ARCHETYPES: Dict[str, Type[Agent]] = {
     "engineer": EngineerAgent,
     "architect": ArchitectAgent,
     "admin": AdminAgent,
+    "file-researcher": FileResearcher,
+    "web-researcher": WebResearcher,
 }
 
 

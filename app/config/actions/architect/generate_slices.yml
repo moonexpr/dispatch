@@ -1,0 +1,18 @@
+# A3b — the SECOND deliberate planning step: arrange the decomposed unit DAG
+# into SLICES — the parallel/sequential split, the execution waves, the per-unit
+# specialists — and emit the plan the rest of spec consumes. Reads the units as
+# its declared input; never re-derives them.
+# An INFERENCE: dry-run/mock run the deterministic oracle (bind body); LIVE, a
+# worker puppets the ArchitectAgent on this ONE thought (the wave arrangement),
+# fail-safe to the oracle.
+token: architect:generate_slices
+kind: inference
+fmt: json
+bind: generate_slices
+permission: []
+budget: architect
+interface:
+  in:
+    units: deliverables.units
+  out:
+    plan: deliverables.plan
