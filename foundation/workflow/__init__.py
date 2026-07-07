@@ -28,7 +28,14 @@ from typing import Any, List, Optional
 
 from .controller import CompiledWorkflow, YamlController
 from .graph import GraphVisitor, workflow_to_graph
-from .loader import SchemaError, load_workflow, parse_document
+from .loader import SchemaError, load_schemas, load_workflow, parse_document
+from .schema import (
+    FieldSchema,
+    SchemaContractError,
+    ShelfSchema,
+    parse_schema,
+    parse_schemas,
+)
 from .manifest import (
     ActionManifest,
     IORef,
@@ -74,6 +81,8 @@ __all__ = [
     "TokenRegistry", "ActionBinding", "ControllerSpec", "TokenError", "UnknownToken",
     # manifest
     "ActionManifest", "IORef", "ManifestError", "load_manifests", "manifest_from_dict",
+    # schema (the declarative shelf-key contract)
+    "ShelfSchema", "FieldSchema", "SchemaContractError", "parse_schema", "parse_schemas", "load_schemas",
     # nodes
     "Node", "WorkflowNode", "PhaseNode", "SequenceNode", "ParallelNode", "LoopNode",
     "ActionRefNode", "ControllerRefNode",

@@ -32,6 +32,7 @@ workflow leaves.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 
@@ -42,6 +43,7 @@ from .controller import CompiledWorkflow
 from .loader import SchemaError, _parse_step
 from .nodes import ActionRefNode, ControllerRefNode, SequenceNode
 from .predicate import PredicateError, PredicateValidator, compile_predicate, parse_predicate
+from .schema import SchemaContractError
 
 # Per-inference deterministic mock cost + default route — preserve the old
 # base workflow values so the budget meters and spend are identical.
@@ -150,12 +152,24 @@ def _read_inputs(manifest: Any, ctx: Any) -> Dict[str, Any]:
     return inputs
 
 
-def _write_outputs(manifest: Any, ctx: Any, out: Any) -> None:
+def _write_outputs(manifest: Any, ctx: Any, out: Any, schemas: Optional[Dict[str, Any]] = None) -> None:
     if not isinstance(out, dict):
         return
+    # Staged enforcement (ADR: contract with teeth). Off by default; a run with
+    # ``DISPATCH_ENFORCE_SCHEMA`` set validates every written shelf value against
+    # its declared contract and fails the step on a violation. With no schemas
+    # wired (the common case) this is a no-op — zero cost to the live pipeline.
+    enforce = bool(schemas) and bool(os.environ.get("DISPATCH_ENFORCE_SCHEMA"))
     for ref in manifest.outputs:
         if ref.alias in out:
-            getattr(ctx.shelves, ref.shelf).put(ref.key, out[ref.alias])
+            value = out[ref.alias]
+            if enforce:
+                schema = schemas.get(ref.ref)
+                if schema is not None:
+                    errs = schema.validate(value)
+                    if errs:
+                        raise SchemaContractError(f"{manifest.token} wrote {ref.ref}: " + "; ".join(errs))
+            getattr(ctx.shelves, ref.shelf).put(ref.key, value)
 
 
 # -- compile ----------------------------------------------------------------
@@ -166,11 +180,13 @@ class CompileVisitor(WorkflowVisitor):
         self.factory = factory
         self.registry = registry
         self.budgets: Dict[str, int] = {}
+        self.schemas: Dict[str, Any] = {}  # declared shelf-key contract (for opt-in enforcement)
         self.terminal: Optional[Callable[[Any, Any], bool]] = None
         self._expanding: Set[str] = set()  # cyclic controller-reference guard
 
     def visit_workflow(self, node: Any) -> CompiledWorkflow:
         self.budgets = dict(node.budgets or {})
+        self.schemas = dict(getattr(node, "schemas", {}) or {})
         # Compile the optional declarative early-completion predicate first, so the
         # per-phase Sequences built below can carry it (and the lifecycle too).
         tw = getattr(node, "terminal_when", None)
@@ -270,11 +286,13 @@ class CompileVisitor(WorkflowVisitor):
 
             return raw_body
 
+        schemas = getattr(self, "schemas", None)  # captured for opt-in output enforcement
+
         def body(payload: Any, ctx: Any) -> Any:
             inputs = _read_inputs(manifest, ctx)
             out = fn(inputs, ctx) if binding.needs_ctx else fn(inputs)
             if not manifest.raw:
-                _write_outputs(manifest, ctx, out)
+                _write_outputs(manifest, ctx, out, schemas=schemas)
             return out
 
         return body

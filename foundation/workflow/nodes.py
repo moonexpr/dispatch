@@ -121,6 +121,11 @@ class WorkflowNode(Node):
     # declared-only controllers (dynamic supersede targets, never in a phase)
     # can still be expanded, needs-checked and materialized.
     manifests: Dict[str, Any] = field(default_factory=dict)
+    # The declared shelf-key contract (``"shelf.key" -> ShelfSchema``): typed I/O
+    # for the workflow, authored once per key (``schemas:`` include) and shared by
+    # every action that touches it. Drives typed debug-viewer forms and the
+    # opt-in engine enforcement (``DISPATCH_ENFORCE_SCHEMA``).
+    schemas: Dict[str, Any] = field(default_factory=dict)
     admin_spec_split: float = 0.5
     # Optional declarative early-completion: a registered predicate name. When a
     # step completes *successfully* and this predicate admits its Result, the whole
