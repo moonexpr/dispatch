@@ -128,9 +128,22 @@ class AdhocSession(Session):
         # follow-up (the legacy classifier lived in the retired visitor lineage).
         triage = {"action": "implement", "scope": "m", "route": "gen-default", "confidence": 0.9}
 
+        # The kernel initializes the SEED controller (ADR-003) via the request it
+        # boots. DISPATCH_JOB_REQUEST=<json file> injects a non-interactive job
+        # request (accepted or rejected on request satisfaction); the fetched
+        # issue is the default GitHub-source request; the engines synthesize a
+        # legacy job request when None.
+        request = None
+        job_file = os.environ.get("DISPATCH_JOB_REQUEST", "")
+        if job_file:
+            with open(job_file, encoding="utf-8") as fh:
+                request = {"source": "job", "job": json.load(fh)}
+        elif spec.issue is not None:
+            request = {"source": "github", "repo": spec.repo, "issue": spec.issue}
+
         mode = "LIVE" if spec.live else "dry-run"
         print(f"dispatch: engine={engine} repo={spec.repo} issue=#{job['issue']} mode={mode}")
-        summary = mod.run_live(job, triage, dry_run=not spec.live)
+        summary = mod.run_live(job, triage, dry_run=not spec.live, request=request)
 
         result = summary["result"]
         deliv = summary.get("deliverables") or {}

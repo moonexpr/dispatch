@@ -11,7 +11,7 @@ dependency edge pointing the right way — callers import ``foundation``;
 ``foundation`` never imports its callers — exactly the leaf discipline the rest of
 ``foundation`` follows.
 
-Two token namespaces:
+Three token namespaces:
 
   * **actions** — ``bind_name -> callable``. The callable is the action *body*. A
     plain body is ``fn(inputs) -> {out_alias: value}`` (pure; the compiler wires
@@ -21,13 +21,21 @@ Two token namespaces:
     recursion/sub-program seam.
   * **predicates** — ``name -> (result, ctx) -> bool``. Referenced from a Loop's
     ``until``/``abort_when`` predicate expression.
+  * **controllers** — ``name -> ControllerSpec`` (ADR-003). A controller is the
+    code-owned coordination layer between the workflow (which references
+    controllers) and the actions (which the controller's ``steps`` reference,
+    in the same step grammar a workflow phase uses). The spec is *declarative*
+    on purpose: the needs union — "a controller's needs are the union of its
+    actions'" — stays computable without executing anything.
 
-Leaf module: stdlib only; no imports from ``foundation.*`` or from callers.
+Leaf module: stdlib only; no imports from ``foundation.*`` or from callers
+(``ControllerSpec.needs`` entries are opaque objects the workflow layer
+interprets — this module never touches them).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 
 class TokenError(Exception):
@@ -60,13 +68,29 @@ class ActionBinding:
     needs_factory: bool = False
 
 
+@dataclass(frozen=True)
+class ControllerSpec:
+    """A registered controller: an ordered composition of action tokens (or
+    structural mappings — the loader's step grammar), plus any controller-level
+    extra ``needs`` beyond the union of its members', and a description for the
+    needs report. The workflow layer expands/compiles it; this record only holds
+    the declaration."""
+
+    name: str
+    steps: Tuple[Any, ...]
+    needs: Tuple[Any, ...] = ()
+    description: str = ""
+
+
 class TokenRegistry:
-    """Mutable registry of action bindings and predicate functions. Created and
-    populated by the caller (the bind), then passed into the workflow compiler."""
+    """Mutable registry of action bindings, predicate functions and controller
+    specs. Created and populated by the caller (the bind), then passed into the
+    workflow compiler."""
 
     def __init__(self) -> None:
         self._actions: Dict[str, ActionBinding] = {}
         self._predicates: Dict[str, Callable[[Any, Any], bool]] = {}
+        self._controllers: Dict[str, ControllerSpec] = {}
 
     # -- actions ------------------------------------------------------------
     def register_action(
@@ -127,3 +151,32 @@ class TokenRegistry:
 
     def predicate_names(self) -> Set[str]:
         return set(self._predicates)
+
+    # -- controllers ----------------------------------------------------------
+    def register_controller(
+        self,
+        name: str,
+        steps,
+        *,
+        needs: Any = (),
+        description: str = "",
+    ) -> ControllerSpec:
+        """Register a controller under ``name``: an ordered ``steps`` composition
+        of action tokens (loader step grammar) plus optional extra ``needs``."""
+        spec = ControllerSpec(
+            name=name, steps=tuple(steps), needs=tuple(needs or ()), description=description
+        )
+        self._controllers[name] = spec
+        return spec
+
+    def controller_spec(self, name: str) -> ControllerSpec:
+        try:
+            return self._controllers[name]
+        except KeyError:
+            raise UnknownToken("controller", name, self._controllers.keys())
+
+    def has_controller(self, name: str) -> bool:
+        return name in self._controllers
+
+    def controller_names(self) -> Set[str]:
+        return set(self._controllers)

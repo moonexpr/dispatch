@@ -39,6 +39,21 @@ class ActionRefNode(Node):
 
 
 @dataclass(frozen=True)
+class ControllerRefNode(Node):
+    """A reference to a registered controller (ADR-003): the workflow names the
+    party; the controller's registered ``ControllerSpec`` supplies the action
+    composition. Resolution is deferred to the visitors (the registry is not
+    available at load time — the same discipline as action binds), so the node
+    carries the loaded ``manifests`` its expansion will resolve tokens against."""
+
+    name: str
+    manifests: Dict[str, ActionManifest] = field(default_factory=dict)
+
+    def accept(self, visitor: Any) -> Any:
+        return visitor.visit_controller_ref(self)
+
+
+@dataclass(frozen=True)
 class SequenceNode(Node):
     """Children run one at a time, in order (compiles to an OR-superstate)."""
 
@@ -91,13 +106,21 @@ class PhaseNode(Node):
 @dataclass(frozen=True)
 class WorkflowNode(Node):
     """The root: name, the declared runtime ``inputs``, the static ``seed``, the
-    named ``budgets``, and the ordered ``phases``."""
+    named ``budgets``, the ordered ``phases``, and the declared ``controllers``
+    — every party to the contract, including controllers only entered
+    dynamically (supersede targets), so the workflow's aggregate needs are
+    computable even where the phase graph is not the whole story (ADR-003)."""
 
     name: str
     phases: Tuple[PhaseNode, ...]
     inputs: Tuple[str, ...] = ()
     seed: Dict[str, Any] = field(default_factory=dict)
     budgets: Dict[str, int] = field(default_factory=dict)
+    controllers: Tuple[str, ...] = ()
+    # The workflow's resolved interface library (token -> manifest), carried so
+    # declared-only controllers (dynamic supersede targets, never in a phase)
+    # can still be expanded, needs-checked and materialized.
+    manifests: Dict[str, Any] = field(default_factory=dict)
     admin_spec_split: float = 0.5
     # Optional declarative early-completion: a registered predicate name. When a
     # step completes *successfully* and this predicate admits its Result, the whole

@@ -1,0 +1,12 @@
+# seed:classify — request satisfaction (ADR-003): match the envelope's source to
+# a seed variant, check the variant's NeedSet against the live provisions, and
+# for a non-interactive job request decide accept/reject on required-field
+# completeness. Writes the routing decision the route step acts on.
+token: seed:classify
+kind: procedure
+bind: seed_classify
+interface:
+  in:
+    envelope: shared.envelope
+  out:
+    intake: shared.intake

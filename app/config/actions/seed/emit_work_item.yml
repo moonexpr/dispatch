@@ -1,0 +1,12 @@
+# seed:emit_work_item — every variant converges here: emit the source-agnostic
+# work item (the #188 seam — GitHub issues are one intake among peers; the
+# engine's consumable is this generic envelope).
+token: seed:emit_work_item
+kind: procedure
+bind: seed_emit_work_item
+interface:
+  in:
+    envelope: shared.envelope
+    payload: shared.payload
+  out:
+    work_item: deliverables.work_item

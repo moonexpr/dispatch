@@ -378,6 +378,120 @@ def publish(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     }}
 
 
+# --------------------------------------------------------------------------- #
+# M6.4 — apply the app's DB migrations to the hosting database (a build STATE).  #
+# The engineer commits migration files (``supabase/migrations/*.sql``) but        #
+# nothing applies them, so a "completed" build whose DB was never migrated looks  #
+# green yet cannot run (the app's queries 404 on tables that don't exist). This   #
+# state closes that gap. It applies each migration via the Supabase Management    #
+# API query endpoint — which authorizes with the personal access token ALONE (no  #
+# DB password, no CLI), the path that works in a headless pipeline (``supabase db  #
+# push`` needs a password + linked ref the pipeline rarely has, which is why       #
+# publish's Supabase provider silently skips). Network-MUTATING, so gated on       #
+# ``ctx.dry_run``; fail-safe like publish: absent creds / no migrations ->         #
+# recorded skip, a failed statement -> recorded stop, never an exception (pushing  #
+# the work is not contingent on a successful migration).                          #
+# --------------------------------------------------------------------------- #
+_SUPABASE_QUERY_API = "https://api.supabase.com/v1/projects/{ref}/database/query"
+# The Management API sits behind Cloudflare, which 1010-blocks the default urllib
+# user-agent; a browser UA is required for the request to reach the API.
+_SUPABASE_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
+
+def _migration_files(project_dir: Optional[str]) -> List[str]:
+    """The app's migration files, in apply order (timestamp-prefixed names sort
+    lexically). Empty when there is no clone (dry-run / in-process) or no dir."""
+    if not project_dir:
+        return []
+    import glob
+
+    return sorted(glob.glob(os.path.join(project_dir, "supabase", "migrations", "*.sql")))
+
+
+def _supabase_apply(ref: str, token: str, sql: str, *, timeout: int = 60) -> None:
+    """Apply one migration's SQL via the Management API. Raises on any non-2xx
+    (the caller records and stops — failures travel as recorded data, not up the
+    stack). The token is a Bearer header, never a logged/recorded value."""
+    import urllib.request
+
+    req = urllib.request.Request(
+        _SUPABASE_QUERY_API.format(ref=ref),
+        data=json.dumps({"query": sql}).encode(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": _SUPABASE_UA,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # HTTPError on non-2xx
+        resp.read()
+
+
+def migrate(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+    """M6.4 — apply the app's DB migrations to the hosting database (build state).
+
+    Applies every ``supabase/migrations/*.sql`` in the engineer's clone, in order,
+    to the target Supabase project via the Management API. Only a ``completed``
+    result migrates; under ``ctx.dry_run`` the intended files are recorded and no
+    network call is made. Fail-safe: missing credentials, no migrations, or a
+    failed statement are RECORDED — never raised — so the tick continues. Writes
+    ``migration`` to the deliverables shelf."""
+    engineering_result = inputs.get("engineering_result") or {}
+    job = inputs.get("job") or {}
+    issue = job.get("issue")
+    issue = "" if issue is None else str(issue)
+    status = _invoice_status(engineering_result)
+    dry = bool(getattr(ctx, "dry_run", True))
+
+    def record(**kw: Any) -> Dict[str, Any]:
+        base: Dict[str, Any] = {
+            "issue": issue, "provider": "supabase", "status": status,
+            "dry_run": dry, "applied": [], "planned": [], "skipped": False,
+        }
+        base.update(kw)
+        return {"migration": base}
+
+    if status != "completed":
+        common.log(f"migrate: issue=#{issue} status={status} — nothing to migrate (skip)")
+        return record(skipped=True, reason="engineering not completed")
+
+    files = _migration_files(_clone_dir(engineering_result))
+    names = [os.path.basename(f) for f in files]
+
+    if dry:
+        common.log(f"migrate: issue=#{issue} dry-run — would apply {len(names)} migration(s): "
+                   f"{', '.join(names) or '(none)'}")
+        return record(planned=names)
+
+    environ = _env.Environment()
+    token = environ.get("SUPABASE_ACCESS_TOKEN") or os.environ.get("SUPABASE_ACCESS_TOKEN")
+    ref = environ.get("SUPABASE_PROJECT_REF") or os.environ.get("SUPABASE_PROJECT_REF")
+    if not (token and ref):
+        reason = "set SUPABASE_ACCESS_TOKEN + SUPABASE_PROJECT_REF to migrate"
+        common.log(f"migrate: issue=#{issue} skipped — {reason}")
+        return record(skipped=True, reason=reason, planned=names)
+    if not files:
+        common.log(f"migrate: issue=#{issue} no supabase/migrations/*.sql in the clone (skip)")
+        return record(skipped=True, reason="no migrations found")
+
+    applied: List[str] = []
+    for path, name in zip(files, names):
+        try:
+            _supabase_apply(ref, token, open(path, encoding="utf-8").read())
+        except Exception as exc:  # noqa: BLE001 — recorded, never raised (fail-safe)
+            common.log(f"migrate: issue=#{issue} {name} failed ({type(exc).__name__}) — stopping")
+            return record(applied=applied, planned=names, ok=False,
+                          error=f"{name}: {type(exc).__name__}")
+        applied.append(name)
+        common.log(f"migrate: issue=#{issue} applied {name}")
+    common.log(f"migrate: issue=#{issue} applied {len(applied)}/{len(files)} migration(s)")
+    return record(applied=applied, planned=names, ok=True)
+
+
 def store(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     """M7 — persist work plan, orchestration script, engineering result, analytics."""
     stored = {
@@ -811,6 +925,7 @@ def register(reg: Any) -> None:
     reg.register_action("write_adversarial", write_adversarial)
     reg.register_action("update_docs", update_docs)
     reg.register_action("publish", publish, needs_ctx=True)
+    reg.register_action("migrate", migrate, needs_ctx=True)
     reg.register_action("store", store, needs_ctx=True)
     reg.register_action("verify_ci", verify_ci, needs_ctx=True)
     reg.register_action("consolidate_pr", consolidate_pr, needs_ctx=True)

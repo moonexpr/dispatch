@@ -1,0 +1,15 @@
+# seed:resolve_needs — the interactive intake: acquire missing required fields
+# through the operator INTERACTIVE service. The party may decline — requirements
+# can stay open (recorded on the payload as open_needs), which is exactly what
+# distinguishes this facet from access.
+token: seed:resolve_needs
+kind: procedure
+bind: seed_resolve_needs
+needs:
+  - service: operator.interactive
+interface:
+  in:
+    envelope: shared.envelope
+    intake: shared.intake
+  out:
+    payload: shared.payload

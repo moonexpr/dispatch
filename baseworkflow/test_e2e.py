@@ -51,7 +51,7 @@ EXPECTED_DELIVERABLES = {
     "purpose", "work_unit", "plan", "strategy", "bucket", "budget",
     "orchestration_script", "work_plan", "submission",
     "env", "adversarial_tests", "engineering_result", "docs", "stored",
-    "intake",
+    "intake", "migration",
 }
 
 _RESULTS: list = []
@@ -165,9 +165,11 @@ def test_machine_is_serializable_statechart() -> None:
     check("compiles to a Statechart", isinstance(chart, Statechart))
     ids = list(chart.index.keys())
     check("every state has a stable, non-empty id", all(ids) and len(ids) == len(set(ids)), f"n={len(ids)}")
-    # the three phases are addressable by stable path id
-    expected_phase_ids = {"baseworkflow/0.spec", "baseworkflow/1.work", "baseworkflow/2.build"}
-    check("phase states addressable by id", expected_phase_ids <= set(ids), f"have spec/work/build={expected_phase_ids <= set(ids)}")
+    # the four phases (seed intake first — ADR-003) are addressable by stable path id
+    expected_phase_ids = {
+        "baseworkflow/0.seed", "baseworkflow/1.spec", "baseworkflow/2.work", "baseworkflow/3.build",
+    }
+    check("phase states addressable by id", expected_phase_ids <= set(ids), f"have seed/spec/work/build={expected_phase_ids <= set(ids)}")
     # first-class transitions on the lifecycle compound
     root = chart.root
     check("lifecycle has first-class transitions", len(root.transitions) > 0, f"n={len(root.transitions)}")
@@ -285,7 +287,7 @@ def test_yaml_workflow() -> None:
     # compiled-from-YAML statechart carries the pinned phase ids
     ctrl = compile_workflow(doc, registry=reg, factory=MockActionFactory())
     ids = set(ctrl.compile().index.keys())
-    pinned = {"baseworkflow/0.spec", "baseworkflow/1.work", "baseworkflow/2.build"}
+    pinned = {"baseworkflow/0.seed", "baseworkflow/1.spec", "baseworkflow/2.work", "baseworkflow/3.build"}
     check("compiled-from-YAML phase ids match pinned set", pinned <= ids, f"missing={pinned - ids}")
 
     # predicate grammar: composite parses; unknown ref is caught (visitor-validated)
@@ -312,7 +314,8 @@ def test_yaml_workflow() -> None:
           any("not_registered" in str(e) for e in validate(unbound_doc, reg)), "should flag missing bind")
 
     # advanced node types compile: sequence + parallel + loop (with predicates)
-    a_ref = doc.phases[0].steps[0]  # github:generate_work_units (in: input.job)
+    spec_phase = next(p for p in doc.phases if p.name == "spec")
+    a_ref = spec_phase.steps[0]  # github:generate_work_units (in: input.job)
     syn = WorkflowNode(
         name="syn",
         phases=(PhaseNode("only", (
@@ -328,7 +331,7 @@ def test_yaml_workflow() -> None:
     # render visitor serializes the node tree back to a dict (round-trip)
     rendered = RenderVisitor().visit(doc)
     check("render visitor serializes workflow",
-          isinstance(rendered, dict) and set(rendered.get("phases", {})) == {"spec", "work", "build"},
+          isinstance(rendered, dict) and set(rendered.get("phases", {})) == {"seed", "spec", "work", "build"},
           f"phases={sorted(rendered.get('phases', {}))}")
 
 

@@ -91,7 +91,7 @@ def test_overlay_merge() -> None:
     doc = load_workflow(_WORKFLOW)
     _ok(doc.name == "websitewf-feedback-ticket",
         "overlay header: name is 'websitewf-feedback-ticket'")
-    spec = _phase_tokens(doc.phases[0])
+    spec = _phase_tokens(next(p for p in doc.phases if p.name == "spec"))
     _ok(
         "web:generate_ticket_from_feedback" in spec
         and "github:generate_work_units" not in spec,

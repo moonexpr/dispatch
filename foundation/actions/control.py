@@ -219,6 +219,7 @@ class Controller(ABC):
         dry_run: bool = True,
         permissions: Any = None,
         log: Any = None,
+        services: Any = None,
     ) -> Context:
         kw: dict = {
             "shelves": self.shelves,
@@ -228,6 +229,8 @@ class Controller(ABC):
         }
         if log is not None:
             kw["log"] = log
+        if services is not None:
+            kw["services"] = services
         return Context(**kw)
 
     def run(self, payload: Any = None, ctx: Optional[Context] = None) -> Result:

@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dispatch · workflow debug viewer</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232c; --line: #2b333d;
+    --ink: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --accent2: #d2a8ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149;
+    --edge: #566; --edge-loop: #d29922;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    display: grid; grid-template-columns: 232px 1fr 300px; grid-template-rows: 46px 1fr;
+    grid-template-areas: "head head head" "side canvas insp";
+    height: 100vh; overflow: hidden;
+  }
+  header {
+    grid-area: head; display: flex; align-items: center; gap: 14px;
+    padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header h1 .dot { color: var(--accent); }
+  header .spacer { flex: 1; }
+  header label { color: var(--muted); font-size: 12px; }
+  select, button {
+    background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: var(--accent); }
+  button.on { border-color: var(--accent); color: var(--accent); }
+
+  aside.side { grid-area: side; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+  .side .cap { padding: 10px 14px 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+  .wf { padding: 9px 14px; border-left: 3px solid transparent; cursor: pointer; }
+  .wf:hover { background: var(--panel2); }
+  .wf.sel { background: var(--panel2); border-left-color: var(--accent); }
+  .wf .n { font-weight: 600; }
+  .wf .m { color: var(--muted); font-size: 11px; }
+  .wf .bad { color: var(--err); font-size: 11px; }
+
+  main.canvas { grid-area: canvas; position: relative; overflow: auto; background:
+    radial-gradient(circle at 1px 1px, #1b2129 1px, transparent 0) 0 0 / 22px 22px, var(--bg); }
+  svg { display: block; }
+  .phaseband { fill-opacity: .06; }
+  .phaselabel { fill: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; }
+  .node rect { stroke-width: 1.5; rx: 8; cursor: pointer; }
+  .node text { fill: var(--ink); font-size: 11.5px; pointer-events: none; }
+  .node .sub { fill: var(--muted); font-size: 9.5px; }
+  .node.sel rect { stroke: var(--accent); stroke-width: 2.5; }
+  .node.active rect { stroke: #58a6ff; stroke-width: 3; filter: drop-shadow(0 0 6px #58a6ff); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { filter: drop-shadow(0 0 3px #58a6ff);} 50% { filter: drop-shadow(0 0 9px #58a6ff);} }
+  .node.done-ok rect { stroke: var(--ok); }
+  .node.done-err rect { stroke: var(--err); stroke-width: 2.5; }
+  .node.active .sub, .node.done-ok .sub { fill: var(--ink); }
+  .edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+  .edge.loop-back { stroke: var(--edge-loop); stroke-dasharray: 5 4; }
+  .edge.fork, .edge.join { stroke: var(--accent2); }
+  .edge.supersede { stroke: var(--accent2); stroke-dasharray: 6 4; }
+  .edgelabel { fill: var(--edge-loop); font-size: 9.5px; }
+  .node.controller rect { stroke-width: 2; }
+  .node.supersede text { fill: var(--accent2); }
+
+  aside.insp { grid-area: insp; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; }
+  .insp .cap { padding: 10px 14px 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+  .insp .body { padding: 4px 14px 14px; flex: 1; }
+  .insp .placeholder { color: var(--muted); padding: 14px; }
+  .kv { margin: 8px 0; }
+  .kv .k { color: var(--muted); font-size: 11px; }
+  .kv .v { word-break: break-word; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; border: 1px solid var(--line); margin: 2px 3px 0 0; }
+  ul.io { margin: 4px 0 0; padding-left: 16px; }
+  ul.io li { color: var(--ink); }
+
+  /* probe panel */
+  .probe { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .probe .cap { padding: 0 0 6px; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+  .probe .pf { margin: 6px 0; }
+  .probe .pf label { display: block; color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
+  .probe textarea { width: 100%; resize: vertical; min-height: 26px; background: #0d1117; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: 11px/1.4 ui-monospace, Menlo, monospace; }
+  .probe textarea:focus { outline: none; border-color: var(--accent); }
+  .probe .pf-none { color: var(--muted); font-size: 11px; margin: 4px 0; }
+  .probe details.pf-adv summary { color: var(--muted); font-size: 11px; cursor: pointer; margin: 4px 0; }
+  button.probe-run { border-color: var(--accent); color: var(--accent); margin-top: 8px; width: 100%; }
+  .probe-out { margin-top: 10px; }
+  .probe-out .pres { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+  .probe-out .pres.ok { color: var(--ok); } .probe-out .pres.err { color: var(--err); }
+  .probe-out .plabel { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; margin: 8px 0 2px; }
+  .probe-out pre.pj { margin: 0; background: #0d1117; border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 8px; font: 10.5px/1.45 ui-monospace, Menlo, monospace; color: #a5d6ff; overflow-x: auto; max-height: 240px; white-space: pre; }
+  .probe-out .perr { color: var(--err); font-size: 11.5px; word-break: break-word; }
+  .probe-out .muted { color: var(--muted); font-size: 11px; }
+
+  .sessions { border-top: 1px solid var(--line); padding: 12px 14px; background: var(--panel2); display: flex; flex-direction: column; min-height: 0; max-height: 46%; }
+  .sessions .cap { padding: 0 0 6px; }
+  .sessions .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .sessions .row .st { margin-left: auto; font-size: 11px; }
+  .st.running { color: var(--accent); } .st.succeeded { color: var(--ok); }
+  .st.failed, .st.errored { color: var(--err); } .st.idle { color: var(--muted); }
+  button.run { border-color: var(--ok); color: var(--ok); }
+  button:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
+  .elog { flex: 1; overflow-y: auto; font-size: 10.5px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: #0d1117; min-height: 60px; }
+  .elog .ev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .elog .en { color: var(--accent); } .elog .lv { color: var(--muted); }
+  .elog .lv.err { color: var(--err); } .elog .ok { color: var(--ok); }
+  .elog .t { color: #586; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 14px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
+  .legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid #0006; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot">◆</span> dispatch <span style="color:var(--muted)">/ workflow debug viewer</span></h1>
+  <div class="spacer"></div>
+  <label for="wfsel">workflow</label>
+  <select id="wfsel"></select>
+  <button id="refresh" title="Recompile graph from YAML">↻ refresh</button>
+  <button id="auto" title="Auto-refresh every 3s">● live</button>
+</header>
+
+<aside class="side">
+  <div class="cap">workflows</div>
+  <div id="wflist"></div>
+  <div class="legend" id="legend"></div>
+</aside>
+
+<main class="canvas" id="canvas">
+  <svg id="svg" width="100" height="100"></svg>
+</main>
+
+<aside class="insp">
+  <div class="cap">inspector</div>
+  <div class="body" id="insp"><div class="placeholder">Click a state to inspect its action, budget, permissions and I/O.</div></div>
+  <div class="sessions">
+    <div class="cap">live session</div>
+    <div class="row">
+      <button class="run" id="runbtn" title="Run this workflow under the mock engine and watch it live">▶ run &amp; watch</button>
+      <span class="st idle" id="runstatus">idle</span>
+    </div>
+    <div class="elog" id="elog"><div class="ev lv">No run yet. “run &amp; watch” drives the workflow under the mock engine (no network) and lights up each state as it executes.</div></div>
+  </div>
+</aside>
+
+<script>
+const NS_COLORS = {
+  github: "#1f6feb", architect: "#8957e5", budget: "#238636",
+  admin: "#9e6a03", engineer: "#0969da", loop: "#bb8009",
+};
+const KIND_STROKE = { action:"#3d444d", loop:"#d29922", fork:"#d2a8ff", join:"#d2a8ff", start:"#3fb950", end:"#f85149", controller:"#39c5cf" };
+const el = id => document.getElementById(id);
+const svgNS = "http://www.w3.org/2000/svg";
+let SEL_WF = null, SEL_NODE = null, GRAPH = null, autoTimer = null;
+let RUNNABLE = [], NODE_BY_STATE = {}, ES = null, CUR_RUN = null;
+
+function mk(tag, attrs, kids) {
+  const n = document.createElementNS(svgNS, tag);
+  for (const k in (attrs||{})) n.setAttribute(k, attrs[k]);
+  for (const c of (kids||[])) n.appendChild(c);
+  return n;
+}
+function fillFor(node) {
+  if (node.kind === "action") return (NS_COLORS[node.namespace] || "#30363d");
+  if (node.kind === "loop") return "#3a2f0b";
+  if (node.kind === "fork" || node.kind === "join") return "#2a2140";
+  if (node.kind === "start") return "#123020";
+  if (node.kind === "end") return "#3a1517";
+  if (node.kind === "controller") return node.supersede_target ? "#241a33" : "#0d2a30";
+  return "#30363d";
+}
+
+// -- layered layout: longest-path rank over forward edges (loop-back excluded) --
+function layout(graph) {
+  const nodes = graph.nodes, byId = {}; nodes.forEach(n => byId[n.id] = n);
+  const fwd = graph.edges.filter(e => e.kind !== "loop-back");
+  const succ = {}, indeg = {}; nodes.forEach(n => { succ[n.id]=[]; indeg[n.id]=0; });
+  fwd.forEach(e => { if (byId[e.from] && byId[e.to]) { succ[e.from].push(e.to); indeg[e.to]++; } });
+  // Kahn topological order, then longest-path rank.
+  const rank = {}; nodes.forEach(n => rank[n.id]=0);
+  const q = nodes.filter(n => indeg[n.id]===0).map(n=>n.id);
+  const din = {...indeg}; const order = [];
+  while (q.length) {
+    const u = q.shift(); order.push(u);
+    for (const v of succ[u]) { rank[v]=Math.max(rank[v], rank[u]+1); if (--din[v]===0) q.push(v); }
+  }
+  // Any nodes left out of topo order (shouldn't happen) keep rank 0.
+  const rows = {}; nodes.forEach(n => { (rows[rank[n.id]] ||= []).push(n); });
+  const COLW = 210, ROWH = 92, PADX = 40, PADY = 54;
+  const maxRow = Math.max(1, ...Object.values(rows).map(r => r.length));
+  const width = Math.max(680, PADX*2 + maxRow*COLW);
+  const pos = {};
+  Object.keys(rows).map(Number).sort((a,b)=>a-b).forEach(r => {
+    const row = rows[r], k = row.length;
+    row.forEach((n,i) => {
+      const x = width * (i+1)/(k+1);
+      pos[n.id] = { x, y: PADY + r*ROWH, w: Math.min(190, 66 + n.label.length*6.4) };
+    });
+  });
+  const height = PADY*2 + (Math.max(0,...Object.values(rank)))*ROWH + 30;
+  return { pos, width, height, byId };
+}
+
+function draw(graph) {
+  GRAPH = graph;
+  NODE_BY_STATE = {};
+  const svg = el("svg"); svg.innerHTML = "";
+  const { pos, width, height, byId } = layout(graph);
+  svg.setAttribute("width", width); svg.setAttribute("height", height);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  // arrowhead defs
+  const defs = mk("defs");
+  for (const [id,color] of [["arrow","#566"],["arrowl","#d29922"],["arrowp","#d2a8ff"]]) {
+    defs.appendChild(mk("marker",
+      {id, viewBox:"0 0 10 10", refX:9, refY:5, markerWidth:7, markerHeight:7, orient:"auto-start-reverse"},
+      [mk("path",{d:"M0,0 L10,5 L0,10 z", fill:color})]));
+  }
+  svg.appendChild(defs);
+
+  // phase bands
+  const PHASE_COLOR = ["#58a6ff","#d2a8ff","#3fb950","#d29922","#f85149","#79c0ff"];
+  graph.phases.forEach((ph,i) => {
+    const ns = graph.nodes.filter(n => n.phase === ph).map(n => pos[n.id]).filter(Boolean);
+    if (!ns.length) return;
+    const ymin = Math.min(...ns.map(p=>p.y)) - 26, ymax = Math.max(...ns.map(p=>p.y)) + 30;
+    const c = PHASE_COLOR[i % PHASE_COLOR.length];
+    svg.appendChild(mk("rect",{class:"phaseband", x:6, y:ymin, width:width-12, height:ymax-ymin, rx:10, fill:c}));
+    svg.appendChild(mk("text",{class:"phaselabel", x:16, y:ymin+15, fill:c}, [txt(ph)]));
+  });
+
+  // edges
+  graph.edges.forEach(e => {
+    const a = pos[e.from], b = pos[e.to]; if (!a||!b) return;
+    const marker = e.kind==="loop-back" ? "url(#arrowl)"
+      : (e.kind==="fork"||e.kind==="join"||e.kind==="supersede") ? "url(#arrowp)" : "url(#arrow)";
+    let d;
+    if (e.kind === "loop-back") {
+      // bulge out to the right, back up to the head
+      const mx = Math.max(a.x,b.x) + 90;
+      d = `M ${a.x+ (a.w/2) } ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x + (b.w/2)} ${b.y}`;
+    } else {
+      const ay = a.y + 22, by = b.y - 22;
+      const my = (ay+by)/2;
+      d = `M ${a.x} ${ay} C ${a.x} ${my}, ${b.x} ${my}, ${b.x} ${by}`;
+    }
+    svg.appendChild(mk("path",{class:`edge ${e.kind}`, d, "marker-end":marker}));
+    if (e.label) {
+      const lx = (e.kind==="loop-back") ? Math.max(a.x,b.x)+96 : (a.x+b.x)/2;
+      const ly = (a.y+b.y)/2;
+      svg.appendChild(mk("text",{class:"edgelabel", x:lx, y:ly}, [txt(e.label)]));
+    }
+  });
+
+  // nodes
+  graph.nodes.forEach(n => {
+    const p = pos[n.id]; if (!p) return;
+    const w = p.w, h = 40, x = p.x - w/2, y = p.y - h/2;
+    const cls = "node" + (SEL_NODE===n.id?" sel":"")
+      + (n.kind==="controller"?" controller":"") + (n.supersede_target?" supersede":"");
+    const g = mk("g", {class:cls, "data-id":n.id});
+    if (n.state_id) { g.setAttribute("data-state", n.state_id); NODE_BY_STATE[n.state_id] = g; }
+    const rectAttrs = {x, y, width:w, height:h, rx: n.kind==="controller"?10:8, fill:fillFor(n),
+      stroke: n.supersede_target ? "#d2a8ff" : (KIND_STROKE[n.kind]||"#3d444d")};
+    if (n.supersede_target) rectAttrs["stroke-dasharray"] = "6 4";
+    g.appendChild(mk("rect", rectAttrs));
+    const raw = (n.kind==="controller"? "⧉ " : "") + n.label;
+    const label = raw.length>26 ? raw.slice(0,25)+"…" : raw;
+    g.appendChild(mk("text",{x:p.x, y:p.y-2, "text-anchor":"middle"}, [txt(label)]));
+    let sub = "";
+    if (n.kind==="action") sub = n.action_kind + (n.budget? " · $"+n.budget : "");
+    else if (n.kind==="loop") sub = "↻ ≤"+n.max_iterations;
+    else if (n.kind==="fork") sub = "parallel";
+    else if (n.kind==="controller") sub = n.supersede_target ? "supersede target" : "controller";
+    if (sub) g.appendChild(mk("text",{class:"sub", x:p.x, y:p.y+11, "text-anchor":"middle"}, [txt(sub)]));
+    g.addEventListener("click", () => { SEL_NODE = n.id; inspect(n); draw(graph); });
+    svg.appendChild(g);
+  });
+}
+function txt(s){ return document.createTextNode(s); }
+
+function inspect(n) {
+  const rows = [];
+  const kv = (k,v) => `<div class="kv"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const pills = a => a.map(x=>`<span class="pill">${x}</span>`).join("");
+  rows.push(`<div class="kv"><div class="v" style="font-size:14px;font-weight:600">${n.label}</div>
+    <div class="k">${n.kind}${n.phase?" · phase "+n.phase:""}</div></div>`);
+  if (n.kind === "action") {
+    rows.push(kv("action kind", n.action_kind));
+    if (n.namespace) rows.push(kv("namespace", n.namespace));
+    if (n.budget) rows.push(kv("budget bucket", n.budget));
+    if (n.permission) rows.push(kv("permission allow", pills(n.permission) || "<i>deny-all</i>"));
+    if (n.inputs) rows.push(kv("reads", `<ul class="io">${n.inputs.map(i=>`<li>${i}</li>`).join("")}</ul>`));
+    if (n.outputs) rows.push(kv("writes", `<ul class="io">${n.outputs.map(i=>`<li>${i}</li>`).join("")}</ul>`));
+  } else if (n.kind === "loop") {
+    rows.push(kv("max iterations", n.max_iterations));
+    if (n.exit_when) rows.push(kv("until (exit when)", `<code>${n.exit_when}</code>`));
+    if (n.abort_when) rows.push(kv("abort when", `<code>${n.abort_when}</code>`));
+    if (n.while_) rows.push(kv("while", `<code>${n.while_}</code>`));
+  } else if (n.kind === "controller") {
+    rows.push(kv("controller", n.controller || n.label));
+    if (n.needs) rows.push(kv("service needs", pills(n.needs)));
+    if (n.unresolved) rows.push(kv("note", "collapsed — no registry to expand its actions"));
+    if (n.supersede_target)
+      rows.push(kv("entered by", "<code>ctx.supersede</code> — a superseding state spawns this variation at run time, preempting the active plan (ADR-003 · #190). It lights up live only if a run routes into it."));
+  }
+  el("insp").innerHTML = rows.join("") + (n.kind === "action" ? probeForm(n) : "");
+  if (n.kind === "action") wireProbe(n);
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function parseVal(s){ s = (s||"").trim(); if (!s) return undefined; try { return JSON.parse(s); } catch(e){ return s; } }
+
+function probeForm(n){
+  const ins = n.inputs || [];
+  const fields = ins.length
+    ? ins.map(ref => `<div class="pf"><label>${ref}</label><textarea class="pin" data-ref="${ref}" rows="1" placeholder="JSON, or plain text"></textarea></div>`).join("")
+    : `<div class="pf-none">no declared inputs — runs on an empty shelf</div>`;
+  return `<div class="probe">
+    <div class="cap">probe · send data → see output</div>
+    ${fields}
+    <details class="pf-adv"><summary>payload (optional)</summary>
+      <textarea id="probe-payload" rows="1" placeholder="JSON payload arg (most actions ignore it)"></textarea></details>
+    <button class="probe-run" id="probe-run">▶ run this state (mock, dry-run)</button>
+    <div class="probe-out" id="probe-out"></div>
+  </div>`;
+}
+
+function wireProbe(n){
+  const btn = el("probe-run"); if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const inputs = {};
+    document.querySelectorAll(".pin").forEach(t => { const v = parseVal(t.value); if (v !== undefined) inputs[t.dataset.ref] = v; });
+    const pv = parseVal((el("probe-payload")||{}).value);
+    btn.disabled = true;
+    el("probe-out").innerHTML = `<div class="muted">running ${n.label}…</div>`;
+    try {
+      const res = await (await fetch("/api/probe", {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ workflow: SEL_WF, token: n.label, inputs, payload: pv })
+      })).json();
+      el("probe-out").innerHTML = renderProbe(res);
+    } catch(e) {
+      el("probe-out").innerHTML = `<div class="perr">✕ ${escapeHtml(e)}</div>`;
+    }
+    btn.disabled = false;
+  });
+}
+
+function renderProbe(r){
+  if (r.error) return `<div class="perr">✕ ${escapeHtml(r.error)}</div>`;
+  const j = o => `<pre class="pj">${escapeHtml(JSON.stringify(o, null, 2))}</pre>`;
+  const has = o => o && (typeof o !== "object" || Object.keys(o).length);
+  let h = `<div class="pres ${r.ok ? "ok" : "err"}">${r.ok ? "✓ ok" : "✕ error"}</div>`;
+  if (r.result && r.result.error) h += `<div class="plabel">error</div><div class="perr">${escapeHtml(r.result.error)}</div>`;
+  if (r.result && r.result.value != null) h += `<div class="plabel">result.value</div>` + j(r.result.value);
+  if (has(r.outputs)) h += `<div class="plabel">writes → shelves</div>` + j(r.outputs);
+  if (r.raised && r.raised.length) h += `<div class="plabel">raised events</div>` + j(r.raised);
+  if (has(r.result && r.result.meta)) h += `<div class="plabel">meta</div>` + j(r.result.meta);
+  if (r.seeded && r.seeded.length) h += `<div class="plabel">seeded</div><div class="muted">${r.seeded.map(escapeHtml).join(", ")}</div>`;
+  return h;
+}
+
+async function loadWorkflowList() {
+  const list = await (await fetch("/api/workflows")).json();
+  const sel = el("wfsel"); sel.innerHTML = "";
+  const box = el("wflist"); box.innerHTML = "";
+  list.forEach(w => {
+    if (w.ok) { const o = document.createElement("option"); o.value = w.name; o.textContent = w.name; sel.appendChild(o); }
+    const d = document.createElement("div");
+    d.className = "wf" + (w.name===SEL_WF?" sel":"");
+    d.innerHTML = w.ok
+      ? `<div class="n">${w.name}</div><div class="m">${w.node_count} states · ${w.phases.join(" → ")}</div>`
+      : `<div class="n">${w.name}</div><div class="bad">✕ ${w.error}</div>`;
+    if (w.ok) d.addEventListener("click", () => selectWorkflow(w.name));
+    box.appendChild(d);
+  });
+  if (!SEL_WF && list.some(w=>w.ok)) SEL_WF = list.find(w=>w.ok).name;
+  sel.value = SEL_WF || "";
+}
+
+async function selectWorkflow(name) {
+  SEL_WF = name; SEL_NODE = null;
+  stopStream(); CUR_RUN = null; setStatus("idle", "idle");
+  el("wfsel").value = name;
+  document.querySelectorAll(".wf").forEach(d => d.classList.toggle("sel", d.querySelector(".n").textContent===name));
+  el("insp").innerHTML = `<div class="placeholder">Click a state to inspect it.</div>`;
+  const g = await (await fetch("/api/workflows/" + encodeURIComponent(name))).json();
+  if (g.error) { el("svg").innerHTML=""; el("insp").innerHTML = `<div class="placeholder">${g.error}</div>`; return; }
+  draw(g);
+  updateRunButton();
+}
+
+async function refresh() {
+  await loadWorkflowList();
+  if (SEL_WF) await selectWorkflow(SEL_WF);
+}
+
+function renderLegend() {
+  const items = [["action","#30363d"],["controller","#0d2a30"],["loop","#3a2f0b"],["parallel","#2a2140"],["start","#123020"],["end","#3a1517"]];
+  el("legend").innerHTML = "<span>states:</span>" +
+    items.map(([k,c])=>`<span><span class="sw" style="background:${c}"></span>${k}</span>`).join("") +
+    `<span><span class="sw" style="background:#d29922"></span>loop-back</span>` +
+    `<span><span class="sw" style="background:#241a33;border-color:#d2a8ff;border-style:dashed"></span>supersede target</span>`;
+}
+
+async function loadSessions() {
+  try {
+    const s = await (await fetch("/api/sessions")).json();
+    RUNNABLE = s.runnable || [];
+    updateRunButton();
+  } catch(e){}
+}
+function updateRunButton() {
+  const b = el("runbtn");
+  const canRun = SEL_WF && RUNNABLE.includes(SEL_WF);
+  b.disabled = !canRun || (CUR_RUN && CUR_RUN.status === "running");
+  b.title = canRun ? "Run this workflow under the mock engine and watch it live"
+                   : `Only ${RUNNABLE.join(", ")} has a live mock runner; ${SEL_WF||"this"} is draw-only.`;
+}
+function setStatus(txt, cls) { const s = el("runstatus"); s.textContent = txt; s.className = "st " + cls; }
+function logEvent(html) {
+  const box = el("elog"); const d = document.createElement("div"); d.className = "ev"; d.innerHTML = html;
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+  while (box.childElementCount > 400) box.removeChild(box.firstChild);
+}
+function clearRunVisuals() {
+  document.querySelectorAll(".node.active,.node.done-ok,.node.done-err")
+    .forEach(g => g.classList.remove("active","done-ok","done-err"));
+}
+function shortState(s){ const p = s.split("/"); return p[p.length-1]; }
+
+function stopStream() { if (ES) { ES.close(); ES = null; } }
+
+async function runAndWatch() {
+  if (!SEL_WF || !RUNNABLE.includes(SEL_WF)) return;
+  stopStream(); clearRunVisuals();
+  el("elog").innerHTML = "";
+  setStatus("starting…", "running");
+  let run;
+  try {
+    run = await (await fetch(`/api/sessions/run?workflow=${encodeURIComponent(SEL_WF)}`, {method:"POST"})).json();
+  } catch(e) { setStatus("failed to start", "errored"); return; }
+  if (run.error) { setStatus(run.error, "errored"); logEvent(`<span class="lv err">${run.error}</span>`); return; }
+  CUR_RUN = run; updateRunButton();
+  setStatus(`${run.id} · running`, "running");
+  ES = new EventSource(`/api/sessions/${encodeURIComponent(run.id)}/stream`);
+  ES.onmessage = ev => handleRunEvent(JSON.parse(ev.data));
+  ES.onerror = () => { /* stream closed; status event already handled the outcome */ };
+}
+
+function handleRunEvent(e) {
+  const t = (e.t!=null) ? `<span class="t">${e.t.toFixed(2)}s</span> ` : "";
+  if (e.type === "enter") {
+    const g = NODE_BY_STATE[e.state];
+    if (g) { g.classList.add("active"); g.classList.remove("done-ok","done-err"); }
+    if (e.kind === "leaf" || e.kind === "loop")
+      logEvent(`${t}<span class="en">→ ${shortState(e.state)}</span>`);
+  } else if (e.type === "leave") {
+    const g = NODE_BY_STATE[e.state];
+    if (g) { g.classList.remove("active"); g.classList.add(e.ok ? "done-ok" : "done-err"); }
+  } else if (e.type === "event") {
+    logEvent(`${t}<span class="lv ${e.ok===false?'err':''}">· ${e.event||''} ${e.ok===false?'✕':''}</span>`);
+  } else if (e.type === "error") {
+    logEvent(`${t}<span class="lv err">✕ ${e.message||''}</span>`);
+  } else if (e.type === "status") {
+    const cls = e.status === "succeeded" ? "succeeded" : (e.status==="running"?"running":"errored");
+    setStatus(`${CUR_RUN?CUR_RUN.id:''} · ${e.status}`, cls);
+    if (["succeeded","failed","errored","stopped"].includes(e.status)) {
+      logEvent(`${t}<span class="ok">■ ${e.status}</span>`);
+      stopStream(); if (CUR_RUN) CUR_RUN.status = e.status; updateRunButton();
+    }
+  }
+}
+
+el("refresh").addEventListener("click", refresh);
+el("runbtn").addEventListener("click", runAndWatch);
+el("wfsel").addEventListener("change", e => selectWorkflow(e.target.value));
+el("auto").addEventListener("click", () => {
+  const b = el("auto");
+  if (autoTimer) { clearInterval(autoTimer); autoTimer=null; b.classList.remove("on"); }
+  else { autoTimer = setInterval(refresh, 3000); b.classList.add("on"); }
+});
+
+renderLegend();
+loadSessions();
+refresh();
+</script>
+</body>
+</html>

@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from .controller import CompiledWorkflow, YamlController
+from .graph import GraphVisitor, workflow_to_graph
 from .loader import SchemaError, load_workflow, parse_document
 from .manifest import (
     ActionManifest,
@@ -37,6 +38,7 @@ from .manifest import (
 )
 from .nodes import (
     ActionRefNode,
+    ControllerRefNode,
     LoopNode,
     Node,
     ParallelNode,
@@ -51,26 +53,39 @@ from .predicate import (
     compile_predicate,
     parse_predicate,
 )
-from .registry import ActionBinding, TokenError, TokenRegistry, UnknownToken
+from .registry import ActionBinding, ControllerSpec, TokenError, TokenRegistry, UnknownToken
 from .visitor import (
     CompileVisitor,
     RenderVisitor,
     ValidateVisitor,
     ValidationError,
     WorkflowVisitor,
+    compile_controller,
+    controller_needs,
+    expand_controller,
+    needs_report,
 )
+
+# The needs formalism (ADR-003) re-exported for consumers of this package.
+from foundation.needs import Need, NeedSet, Provision  # noqa: E402  (leaf sibling)
 
 __all__ = [
     # registry / binding interface
-    "TokenRegistry", "ActionBinding", "TokenError", "UnknownToken",
+    "TokenRegistry", "ActionBinding", "ControllerSpec", "TokenError", "UnknownToken",
     # manifest
     "ActionManifest", "IORef", "ManifestError", "load_manifests", "manifest_from_dict",
     # nodes
-    "Node", "WorkflowNode", "PhaseNode", "SequenceNode", "ParallelNode", "LoopNode", "ActionRefNode",
+    "Node", "WorkflowNode", "PhaseNode", "SequenceNode", "ParallelNode", "LoopNode",
+    "ActionRefNode", "ControllerRefNode",
     # predicate
     "parse_predicate", "compile_predicate", "PredicateError", "PredicateCompiler", "PredicateValidator",
     # visitors
     "WorkflowVisitor", "CompileVisitor", "ValidateVisitor", "RenderVisitor", "ValidationError",
+    # controllers + needs (ADR-003)
+    "compile_controller", "controller_needs", "expand_controller", "needs_report",
+    "Need", "NeedSet", "Provision",
+    # graph / debug viewer (#197)
+    "GraphVisitor", "workflow_to_graph",
     # loader
     "load_workflow", "parse_document", "SchemaError",
     # controller
@@ -89,10 +104,19 @@ class WorkflowValidationError(Exception):
         super().__init__(f"workflow validation failed ({len(self.errors)} error(s)):\n{body}")
 
 
-def validate(node: WorkflowNode, registry: Optional[TokenRegistry] = None) -> List[ValidationError]:
-    """Validate a parsed workflow. With ``registry``, also checks that every action
-    bind and loop predicate is registered; without it, structure + data-flow only."""
-    v = ValidateVisitor(registry, node.budgets, node.inputs, node.seed)
+def validate(
+    node: WorkflowNode,
+    registry: Optional[TokenRegistry] = None,
+    *,
+    services: Any = None,
+) -> List[ValidationError]:
+    """Validate a parsed workflow. With ``registry``, also checks that every
+    action bind, loop predicate and controller reference is registered (and
+    expands controllers for the data-flow check); with ``services`` (a
+    ``ServiceRegistry``), additionally checks needs satisfaction — every
+    non-optional ``service:``/``config:`` need met by the environment's
+    provisions (ADR-003). Without them, structure + data-flow only."""
+    v = ValidateVisitor(registry, node.budgets, node.inputs, node.seed, services=services)
     return v.visit(node)
 
 

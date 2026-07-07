@@ -64,6 +64,37 @@ For now, **YAML + Python** is expressive enough to convey function composition a
 implementation complexity; the abstraction boundary is what keeps the engine
 flexible enough to take on new workflow problems.
 
+### Watch it run — the debug viewer
+
+`./debug-viewer` draws every workflow as a live statechart and lights up each
+state as a tick executes it (mock engine, no network). It makes the three-layer
+model — and **superseedable states** — concrete.
+
+![The dispatch debug viewer: the seed phase, where the seed controller supersedes its own processing with a variation of itself](docs/assets/debug-viewer-supersede.png)
+
+Above is the shared **seed** phase (shown on `websitewf`, which inherits it from
+`baseworkflow`). The workflow references the `seed.intake` **controller** (cyan);
+the three dashed **supersede targets** — `seed.handle.github` / `.interactive` /
+`.job` — are variations of the seed controller entered *dynamically*. On a run,
+`seed:route` classifies the request and **supersedes its own processing** with the
+matching variant. The live-session log captures the preemption as it happens:
+
+```text
+0.61s → 2.seed:route
+0.91s · supersede.accepted
+0.91s → 4.seed.handle.job
+1.22s → 0.seed:accept_job
+1.52s → 1.seed:emit_work_item
+1.82s · supersede.completed
+```
+
+The variant takes over (policy `abandon`), the generic `seed:fallback` is skipped,
+and every intake source converges on one source-agnostic `work_item` before the
+lifecycle continues into `spec → work → build`. Because a supersede target's states
+carry the same ids the engine mints at run time, the dashed subgraph highlights
+live the moment a run routes into it — no special-casing. See
+[`docs/adr/003-controller-needs-supersede.md`](docs/adr/003-controller-needs-supersede.md).
+
 ### Roadmap
 
 The guiding principle: **1.x is refinement and discipline; 2.0 is expansion.** 1.x

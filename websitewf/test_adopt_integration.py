@@ -86,14 +86,14 @@ def test_overlay_merge() -> None:
     _ok(doc.name == "websitewf-adopt-integration",
         "overlay header: name is 'websitewf-adopt-integration'")
 
-    spec = _phase_tokens(doc.phases[0])
+    spec = _phase_tokens(next(p for p in doc.phases if p.name == "spec"))
     _ok(
         spec.index("web:classify_integration_addendum")
         == spec.index("architect:classify_strategy") + 1,
         "extend after: web:classify_integration_addendum follows architect:classify_strategy",
     )
 
-    work = doc.phases[1]
+    work = next(p for p in doc.phases if p.name == "work")
     _ok("web:adopt_integration" in _phase_tokens(work),
         "add: web:adopt_integration spliced into the work phase")
     pm = _kind_of(work, "engineer:execute_orchestration")

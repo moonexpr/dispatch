@@ -1,0 +1,13 @@
+# seed:pull_issue — the GitHub intake: read the issue behind the envelope via
+# the github ACCESS service (read-only). The service need is first-class: a host
+# without github.access statically fails this variant's satisfaction.
+token: seed:pull_issue
+kind: procedure
+bind: seed_pull_issue
+needs:
+  - service: github.access
+interface:
+  in:
+    envelope: shared.envelope
+  out:
+    payload: shared.payload
