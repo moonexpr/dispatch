@@ -23,5 +23,13 @@ interface:
     bucket: deliverables.bucket
     budget: deliverables.budget
     strategy: deliverables.strategy
+    # The intake -> research -> spec hand-off (final intake dossier, research
+    # dossier, agent-team roster + per-slice assignments). Inside the
+    # work-plan-review loop the prior round's admin gap notes
+    # (deliverables.plan_review) are a cross-iteration read, via ctx.
+    intake: deliverables.intake_dossier
+    research: deliverables.research
+    teams: deliverables.teams
+    team_assignments: deliverables.team_assignments
   out:
     work_plan: deliverables.work_plan

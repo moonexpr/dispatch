@@ -1,0 +1,22 @@
+# A3c — the THIRD deliberate planning step: staff every slice with an agent
+# TEAM from the roster, as its own separate input/thought.
+# A unit no existing team covers gets a dedicated team-CREATION slice prepended
+# to the plan (deliverable: the missing team's manifest under app/config/teams/)
+# and depends on it. Runs after decompose and BEFORE author_orchestration, so
+# creation slices are real units in the authored orchestration script.
+# An INFERENCE: dry-run/mock run the deterministic oracle (bind body — capability
+# matching through the shared staffing machinery); LIVE, a worker puppets the
+# ArchitectAgent on this ONE thought (per-unit team choice), fail-safe to the oracle.
+token: architect:assign_teams
+kind: inference
+fmt: json
+bind: assign_teams
+permission: []
+budget: architect
+interface:
+  in:
+    plan: deliverables.plan
+    teams: deliverables.teams
+  out:
+    plan: deliverables.plan
+    team_assignments: deliverables.team_assignments

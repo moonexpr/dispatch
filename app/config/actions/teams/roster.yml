@@ -1,0 +1,15 @@
+# teams:roster — enumerate the AVAILABLE agent teams from the declarative
+# manifests under app/config/teams/*.yml (defaulted to the #171
+# prototyper+tester engineering pair when none exist). The Architect's
+# assign_teams step staffs every work-plan slice against this roster; a slice
+# with no covering team gets a dedicated team-creation slice.
+token: teams:roster
+kind: procedure
+bind: teams_roster
+permission: []
+budget: architect
+interface:
+  in:
+    config: input.config
+  out:
+    teams: deliverables.teams

@@ -1,0 +1,14 @@
+# intake:refine — the intake↔research BOUNCE: fold the round's synthesized
+# research answers back into the intake dossier (research_context + a per-round
+# audit trail). Runs inside the research loop, after research.pipeline.
+token: intake:refine
+kind: procedure
+bind: intake_refine
+permission: []
+budget: admin
+interface:
+  in:
+    intake: deliverables.intake_dossier
+    research: deliverables.research
+  out:
+    intake: deliverables.intake_dossier

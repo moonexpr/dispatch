@@ -1,0 +1,17 @@
+# research:synthesize — fold the round's findings into the cumulative RESEARCH
+# DOSSIER (rounds, findings, per-question answers). Accumulates across loop
+# iterations (the prior dossier is a cross-iteration read, via ctx). Last step
+# of the research.pipeline controller; intake:refine bounces the result back
+# into the intake dossier.
+token: research:synthesize
+kind: procedure
+bind: research_synthesize
+permission: []
+budget: research
+interface:
+  in:
+    research_tasks: shared.research_tasks
+    findings: shared.findings
+    questions: deliverables.questions
+  out:
+    research: deliverables.research

@@ -33,6 +33,7 @@ controllers:
   - seed.handle.github
   - seed.handle.interactive
   - seed.handle.job
+  - research.pipeline
 
 # Early completion (ADR-003): when the seed controller did NOT hand the request
 # off to a variant (rejected job, unroutable source), its fallback records a
@@ -47,7 +48,8 @@ seed:                           # static input-shelf values
 
 budgets:                        # named budget buckets (unit = tokens, placeholder)
   total: 1000000
-  architect: 450000
+  architect: 400000
+  research: 50000
   engineering: 450000
   admin: 100000
 
@@ -66,17 +68,62 @@ phases:
   seed:
     - controller: seed.intake
 
-  # spec — the Architect's A1-A8 plus the Administrator's initial work. decompose
-  # (A3) runs before strategy (A2): the strategy resolver reads the plan.
-  spec:
+  # intake — the accepted request becomes the INTAKE DOSSIER, and the
+  # Administrator derives the question ledger the research loop must satisfy:
+  # existing technology? scaffolding needed? research vs. invent (novelty
+  # penalty)? external validators?
+  intake:
     - github:generate_work_units
-    - architect:decompose_phases
+    - intake:compose_dossier
+    - admin:generate_questions
+
+  # research — its own pipeline superstate (the research.pipeline CONTROLLER,
+  # ADR-003: plan -> investigate -> synthesize; investigate dispatches repo tasks
+  # to the FileResearcher and web tasks to the WebResearcher). Each round bounces
+  # the findings back into the intake dossier (intake:refine) and the
+  # Administrator re-evaluates; the loop ends when every question is satisfied,
+  # or cleanly when a round makes no progress (exhausted — spec's sufficiency
+  # gate then surfaces what stayed open).
+  research:
+    - loop:
+        name: research-loop
+        until: questions_satisfied or research_exhausted
+        max_iterations: 3
+        body:
+          sequence:
+            name: research-round
+            steps:
+              - controller: research.pipeline
+              - intake:refine
+              - admin:evaluate_research
+
+  # spec — the Architect, handed the final intake dossier + research dossier +
+  # the agent-team roster + budget. Planning is a DELIBERATE three-step pipeline
+  # (units -> slices -> teams, each with its own declared inputs), then strategy/
+  # budget, then the work-plan-review loop: the Administrator judges whether the
+  # drafted work order sufficiently addresses the intake; insufficient -> gap
+  # notes -> redraft (max 2 rounds). A slice with no covering agent team gets a
+  # dedicated team-creation slice (assign_teams).
+  spec:
+    - teams:roster
+    - architect:decompose_units
+    - architect:generate_slices
+    - architect:assign_teams
     - architect:classify_strategy
     - architect:select_bucket
     - budget:compute
     - architect:author_orchestration
     - budget:scope_orchestration
-    - architect:draft_work_plan
+    - loop:
+        name: work-plan-review
+        until: work_plan_sufficient
+        max_iterations: 2
+        body:
+          sequence:
+            name: plan-review-round
+            steps:
+              - architect:draft_work_plan
+              - admin:evaluate_work_plan
     - architect:submit
     - admin:prepare_env
     - admin:write_adversarial

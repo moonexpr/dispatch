@@ -1,0 +1,20 @@
+# intake:compose_dossier — consolidate the accepted request (job / triage /
+# request envelope + the classified purpose and work unit) into the INTAKE
+# DOSSIER: the single document the Administrator questions, the research loop
+# enriches (intake:refine), and the Architect specs against. The seed variant's
+# dynamic work_item enriches it at runtime via ctx (supersede outputs are not
+# part of the static phase data-flow).
+token: intake:compose_dossier
+kind: procedure
+bind: intake_compose_dossier
+permission: []
+budget: admin
+interface:
+  in:
+    job: input.job
+    triage: input.triage
+    request: input.request
+    purpose: deliverables.purpose
+    work_unit: deliverables.work_unit
+  out:
+    intake: deliverables.intake_dossier

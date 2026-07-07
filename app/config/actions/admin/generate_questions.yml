@@ -1,0 +1,18 @@
+# admin:generate_questions — the Administrator's question LEDGER over the intake
+# dossier: the four canonical axes the research loop must satisfy before the
+# Architect specs — existing technology, scaffolding, build-vs-research (novelty
+# penalty), external validators. An INFERENCE: dry-run/mock run the
+# deterministic canonical ledger (bind body); LIVE, a worker puppets the
+# AdminAgent to specialize/extend it, fail-safe back to the baseline.
+token: admin:generate_questions
+kind: inference
+fmt: json
+bind: generate_questions
+permission: []
+budget: admin
+interface:
+  in:
+    intake: deliverables.intake_dossier
+    job: input.job
+  out:
+    questions: deliverables.questions

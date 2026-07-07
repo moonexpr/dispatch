@@ -1,0 +1,17 @@
+# admin:evaluate_research — the research loop's GATE: mark each ledger question
+# satisfied when the research dossier answers it, and emit the loop verdict
+# (satisfied / open / exhausted). Deterministic by design — the loop's exit
+# condition must be auditable and convergent. The loop's until-expression
+# (`questions_satisfied or research_exhausted`) reads the verdict.
+token: admin:evaluate_research
+kind: procedure
+bind: evaluate_research
+permission: []
+budget: admin
+interface:
+  in:
+    questions: deliverables.questions
+    research: deliverables.research
+  out:
+    questions: deliverables.questions
+    research_verdict: deliverables.research_verdict

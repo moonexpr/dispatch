@@ -146,6 +146,97 @@ deliverables.consolidation:
     dry_run:   {type: boolean}
     mutations: {type: array, description: "gh mutations performed (or dry-run)"}
 
+# -- intake / research / teams (the intake -> research -> spec hand-off) ----
+deliverables.intake_dossier:
+  type: object
+  description: The intake dossier — the consolidated request the Administrator questions, research enriches, and the Architect specs against. (Distinct from admin:intake_invoice's deliverables.intake record.)
+  fields:
+    issue:            {type: integer, description: "Issue number"}
+    title:            {type: string, required: true}
+    goal:             {type: string, format: multiline}
+    acceptance:       {type: string, format: multiline}
+    labels:           {type: array, items: string}
+    source:           {type: string, description: "Intake source (github | job | interactive)"}
+    repo:             {type: string, description: "Target owner/repo (grounds the FileResearcher)"}
+    purpose:          {type: object, description: "Classified purpose (github:generate_work_units)"}
+    work_unit:        {type: object}
+    triage:           {type: object}
+    open_needs:       {type: array, items: string}
+    research_context: {type: object, description: "Per-question answers folded back by intake:refine"}
+    rounds:           {type: array, items: object, description: "Per-round bounce audit trail"}
+
+deliverables.questions:
+  type: object
+  description: The Administrator's question ledger over intake — the research loop's contract.
+  fields:
+    items:     {type: array, items: object, description: "Questions (id, axis, text, satisfied, answer, evidence)"}
+    satisfied: {type: boolean, required: true, description: "Every question answered"}
+
+deliverables.research:
+  type: object
+  description: The cumulative research dossier (accumulates across loop rounds).
+  fields:
+    rounds:   {type: integer, minimum: 0, description: "Rounds run so far"}
+    findings: {type: array, items: object, description: "All findings (question_id, answer, evidence, source)"}
+    answers:  {type: object, description: "question id -> settled answer"}
+
+deliverables.research_verdict:
+  type: object
+  description: The Administrator's per-round research verdict — the research loop's exit signal.
+  fields:
+    satisfied:   {type: boolean, required: true, description: "All questions answered"}
+    answered:    {type: integer, minimum: 0}
+    open:        {type: array, items: string, description: "Question ids still open"}
+    round:       {type: integer, minimum: 0}
+    new_answers: {type: integer, description: "Progress this round"}
+    exhausted:   {type: boolean, description: "No progress while questions stay open — stop looping"}
+
+deliverables.teams:
+  type: object
+  description: The available agent-team roster (app/config/teams/*.yml, defaulted when empty).
+  fields:
+    teams:  {type: array, items: object, description: "Teams (name, description, capabilities, agents)"}
+    source: {type: string, enum: [config, default], description: "Where the roster came from"}
+    dir:    {type: string, description: "Roster directory scanned"}
+
+deliverables.units:
+  type: object
+  description: "Architect planning step 1 of 3: the decomposed work-unit DAG (before slice generation)."
+  fields:
+    units:      {type: array, items: object, description: "Lettered, dependency-resolved work units"}
+    criteria:   {type: array, description: "Acceptance criteria"}
+    complexity: {type: object, description: "Complexity signal that drove the slice count"}
+    capped:     {type: boolean, description: "Swarm-max cap applied"}
+
+deliverables.team_assignments:
+  type: object
+  description: "Architect planning step 3 of 3: per-slice agent-team staffing (+ creation slices)."
+  fields:
+    assignments: {type: array, items: object, description: "Per-unit {unit, team, status}"}
+    created:     {type: array, items: string, description: "Teams that need a creation slice"}
+
+deliverables.plan_review:
+  type: object
+  description: The Administrator's work-order sufficiency verdict — the work-plan-review loop's exit signal.
+  fields:
+    sufficient: {type: boolean, required: true, description: "Work order sufficiently addresses the intake"}
+    gaps:       {type: array, items: string, description: "Gap notes the redraft must close"}
+    round:      {type: integer, minimum: 0}
+    checked:    {type: array, items: string, description: "Checklist dimensions evaluated"}
+
+# -- shared shelf (research round working state) -----------------------------
+shared.research_tasks:
+  type: object
+  description: This research round's planned tasks (open questions routed to a researcher by kind).
+  fields:
+    tasks: {type: array, items: object, description: "Tasks (question_id, axis, kind repo|web, query)"}
+
+shared.findings:
+  type: object
+  description: This research round's raw findings (before synthesis into the dossier).
+  fields:
+    findings: {type: array, items: object, description: "Findings (question_id, answer, evidence, source)"}
+
 # -- shared shelf (seed variant ↔ lifecycle hand-off, ADR-003) --------------
 shared.envelope:
   type: object

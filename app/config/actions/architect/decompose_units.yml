@@ -1,0 +1,19 @@
+# A3a — the FIRST deliberate planning step: decompose the issue into the
+# work-unit DAG (units + criteria + complexity) and nothing else. Slice
+# generation (A3b) and team assignment (A3c) are separate downstream steps with
+# their own declared inputs, forcing the architect to think about each in turn.
+# An INFERENCE: dry-run/mock run the deterministic oracle (bind body); LIVE, a
+# worker puppets the ArchitectAgent on this ONE thought, fail-safe to the oracle.
+token: architect:decompose_units
+kind: inference
+fmt: json
+bind: decompose_units
+permission: []
+budget: architect
+interface:
+  in:
+    job: input.job
+    config: input.config
+  out:
+    units: deliverables.units
+    discovered: deliverables.discovered

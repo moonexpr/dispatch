@@ -3,12 +3,12 @@
 
 This package is the entire "implement-with-code + bind" surface the YAML workflow
 needs. It is organised one module per token namespace (mirroring
-``app/config/actions/<namespace>/``) — ``github``, ``architect``, ``budget``,
-``admin``, ``engineer``, ``seed`` — and each module registers its bodies (and,
-for ``engineer``/``seed``, the loop/terminal predicates) into a
-``TokenRegistry``. The ``seed`` module additionally registers the seed
-CONTROLLERS (ADR-003): the coordination layer the workflow references instead
-of naming actions directly.
+``app/config/actions/<namespace>/``) — ``github``, ``intake``, ``teams``,
+``architect``, ``research``, ``budget``, ``admin``, ``engineer``, ``seed`` — and
+each module registers its bodies (and, for ``engineer``/``seed``/``research``/
+``admin``, the loop/terminal predicates) into a ``TokenRegistry``. The ``seed``
+and ``research`` modules additionally register CONTROLLERS (ADR-003): the
+coordination layer the workflow references instead of naming actions directly.
 
 The bodies are **pure** and **interface-driven**: an ordinary body is
 ``fn(inputs) -> {out_alias: value}`` (or ``fn(inputs, ctx)`` when it needs the run
@@ -51,9 +51,14 @@ from . import architect as _architect  # noqa: E402
 from . import budget as _budget  # noqa: E402
 from . import engineer as _engineer  # noqa: E402
 from . import github as _github  # noqa: E402
+from . import intake as _intake  # noqa: E402
+from . import research as _research  # noqa: E402
 from . import seed as _seed  # noqa: E402
+from . import teams as _teams  # noqa: E402
 
-_MODULES = (_seed, _github, _architect, _budget, _admin, _engineer)
+# architect first among the judgment modules: admin/research append their live
+# inference workers into its LIVE_INFERENCE_WORKERS dispatch at register() time.
+_MODULES = (_seed, _github, _intake, _teams, _architect, _research, _budget, _admin, _engineer)
 
 
 def build_registry() -> TokenRegistry:

@@ -1,0 +1,18 @@
+# admin:evaluate_work_plan — the spec phase's SUFFICIENCY GATE: does the drafted
+# work order sufficiently address the intake? A deterministic checklist over
+# acceptance criteria, the question ledger, and per-slice team staffing.
+# Insufficient -> gap notes land on deliverables.plan_review and the
+# work-plan-review loop redrafts against them; sufficient -> the
+# `work_plan_sufficient` predicate ends the loop.
+token: admin:evaluate_work_plan
+kind: procedure
+bind: evaluate_work_plan
+permission: []
+budget: admin
+interface:
+  in:
+    intake: deliverables.intake_dossier
+    work_plan: deliverables.work_plan
+    questions: deliverables.questions
+  out:
+    plan_review: deliverables.plan_review

@@ -79,7 +79,7 @@ class GraphVisitor(WorkflowVisitor):
         self._pathstack: List[str] = []
         self._as_target = False               # rendering a dynamic supersede target
         self._seen_controllers: set = set()    # phase-referenced controller names
-        self._superseders: List[str] = []      # node ids that can supersede (controller boundaries)
+        self._superseders: List[Any] = []      # (name, node id) of phase-referenced controller boundaries
         self._expanding: set = set()           # cyclic controller-reference guard
 
     # -- helpers ------------------------------------------------------------
@@ -181,9 +181,13 @@ class GraphVisitor(WorkflowVisitor):
         # Dynamic supersede targets: declared controllers no phase references. They
         # are entered at run time via ``ctx.supersede``; the interpreter runs the
         # spawned variant as a nested chart rooted at the variant's OWN name, so we
-        # mint their subgraph under that name (id parity → they light up live). A
-        # dashed ``supersede`` edge runs from every phase-referenced controller (the
-        # potential superseders) to each target.
+        # mint their subgraph under that name (id parity → they light up live). The
+        # dashed ``supersede`` edge is anchored to the target's NAMESPACE-KIN
+        # controller (``seed.handle.*`` ← ``seed.intake``): a variant is spawned by
+        # its own family's router, so wiring it to every phase-referenced controller
+        # would draw false "later phases supersede into seeding" edges (and drag the
+        # variant subgraphs into those phases' bands). Only when no kin exists does
+        # the edge fall back to every potential superseder.
         self._as_target = True
         self._phase = ""
         for name in (getattr(node, "controllers", ()) or ()):
@@ -193,7 +197,9 @@ class GraphVisitor(WorkflowVisitor):
                 ControllerRefNode(name=name, manifests=dict(getattr(node, "manifests", {}) or {})),
                 make_id("", name),
             )
-            for src in self._superseders:
+            ns = name.split(".", 1)[0]
+            kin = [nid for cname, nid in self._superseders if cname.split(".", 1)[0] == ns]
+            for src in (kin or [nid for _cname, nid in self._superseders]):
                 self._add_edge(src, entry, "supersede", label="supersede")
         self._as_target = False
 
@@ -236,7 +242,7 @@ class GraphVisitor(WorkflowVisitor):
         )
         if not target:
             self._seen_controllers.add(name)
-            self._superseders.append(nid)
+            self._superseders.append((name, nid))
         if not steps:
             return nid, [nid]
         self._expanding.add(name)

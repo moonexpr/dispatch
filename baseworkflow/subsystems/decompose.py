@@ -303,8 +303,13 @@ def _waves(units: List[Dict[str, Any]]) -> List[List[str]]:
     return waves
 
 
-def plan(job: Dict[str, Any], discovered: List[str],
-         *, verify_cmd: str = "bash scripts/smoke.sh") -> Dict[str, Any]:
+def decompose_units(job: Dict[str, Any], discovered: List[str],
+                    *, verify_cmd: str = "bash scripts/smoke.sh") -> Dict[str, Any]:
+    """Step 1 of the architect's deliberate pipeline: the WORK-UNIT DAG only —
+    units (lettered, dependency-resolved, swarm-capped) + acceptance criteria +
+    the complexity signal. Slice/wave arrangement is deliberately NOT computed
+    here; that is :func:`staff_slices`' single job, so each planning step gets
+    its own inputs and its own thought."""
     issue = job.get("issue")
     criteria = extract_criteria(job.get("body") or "")
     gate = verify.gate_ref(verify_cmd)
@@ -472,7 +477,18 @@ def plan(job: Dict[str, Any], discovered: List[str],
         verify_unit["depends_on"] = [u["id"] for u in kept]
         units = kept + [verify_unit]
 
-    staffing = {
+    return {"units": units, "criteria": criteria, "complexity": cx, "capped": capped}
+
+
+def staff_slices(units: List[Dict[str, Any]],
+                 complexity: Dict[str, Any] | None = None,
+                 *, capped: bool = False) -> Dict[str, Any]:
+    """Step 2 of the architect's deliberate pipeline: arrange an already-decomposed
+    unit DAG into SLICES — the parallel/sequential split and the wave order team
+    agents execute in — plus the per-unit specialist assignments. Takes the units
+    as its input (never re-derives them), so unit decomposition and slice
+    generation stay two separate thoughts."""
+    return {
         "agent_count": len(units),
         "swarm_max": _SWARM_MAX,
         "capped": capped,
@@ -484,9 +500,17 @@ def plan(job: Dict[str, Any], discovered: List[str],
         "waves": _waves(units),
         # Why this many agents (#134): the complexity signal that drove the slice
         # count, surfaced for the work order / parallelization rationale.
-        "complexity": cx,
+        "complexity": dict(complexity or {}),
         "assignments": [
             {"unit": u["id"], "specialist": u["specialization"]["label"]} for u in units
         ],
     }
-    return {"units": units, "staffing": staffing, "criteria": criteria}
+
+
+def plan(job: Dict[str, Any], discovered: List[str],
+         *, verify_cmd: str = "bash scripts/smoke.sh") -> Dict[str, Any]:
+    """Back-compat composition of the two deliberate steps (units, then slices) —
+    the one-call surface pre-split callers (tests, overlays) still use."""
+    d = decompose_units(job, discovered, verify_cmd=verify_cmd)
+    staffing = staff_slices(d["units"], d["complexity"], capped=d["capped"])
+    return {"units": d["units"], "staffing": staffing, "criteria": d["criteria"]}

@@ -1,0 +1,16 @@
+# research:plan — turn the Administrator's OPEN questions into this round's
+# research tasks, each routed to a researcher by kind: "repo" tasks go to the
+# FileResearcher (evidence in the target tree), "web" tasks to the WebResearcher
+# (frameworks / prior art — the build-vs-research axis). First step of the
+# research.pipeline controller.
+token: research:plan
+kind: procedure
+bind: research_plan
+permission: []
+budget: research
+interface:
+  in:
+    questions: deliverables.questions
+    intake: deliverables.intake_dossier
+  out:
+    research_tasks: shared.research_tasks

@@ -1,0 +1,19 @@
+# Agent-team manifest — loaded by teams:roster (bindings/teams.py). One file per
+# team: name, description, capabilities (matched against a unit's specialization
+# label), and the agent seats (role + archetype from agents/_ARCHETYPES).
+name: general-engineering
+description: Prototyper + tester pair for general feature slices (issue #171 staffing).
+capabilities:
+  - general software
+  - backend
+  - frontend
+  - web
+  - python
+  - engineer
+  - application scaffolding / platform
+  - testing
+agents:
+  - role: prototyper
+    archetype: engineer
+  - role: tester
+    archetype: engineer
