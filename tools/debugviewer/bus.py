@@ -17,7 +17,9 @@ Stdlib only; imports ``foundation`` + ``baseworkflow`` lazily inside the runner.
 """
 from __future__ import annotations
 
+import glob
 import itertools
+import json
 import os
 import queue
 import sys
@@ -144,6 +146,114 @@ class Bus:
 
     def list(self) -> List[Dict[str, Any]]:
         return [r.summary() for r in reversed(list(self._runs.values()))]
+
+    # -- external live runs: tail sidecars written by out-of-process runs --------
+    @staticmethod
+    def _trace_dir() -> str:
+        try:
+            from foundation import trace
+            return trace.trace_dir()
+        except Exception:  # noqa: BLE001
+            return os.path.join(REPO_ROOT, ".dispatch", "live-runs")
+
+    @staticmethod
+    def _read_sidecar(path: str) -> Dict[str, Any]:
+        """Cheap scan of a sidecar for its list-view summary (workflow, status, count).
+        Reads only whole lines; a partial final line (writer mid-flush) is ignored."""
+        wf, status, started, n = None, "running", None, 0
+        try:
+            with open(path, encoding="utf-8") as fh:
+                for line in fh:
+                    if not line.endswith("\n"):
+                        break  # partial trailing line — not yet complete
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except ValueError:
+                        continue
+                    n += 1
+                    if ev.get("type") == "meta":
+                        wf, started = ev.get("workflow"), ev.get("started")
+                    elif ev.get("type") == "status":
+                        status = ev.get("status") or status
+        except OSError:
+            pass
+        return {"workflow": wf, "status": status, "started": started, "events": n}
+
+    def list_external(self) -> List[Dict[str, Any]]:
+        """Discover live-run sidecars (newest first) written by out-of-process runs."""
+        try:
+            files = sorted(glob.glob(os.path.join(self._trace_dir(), "*.jsonl")),
+                           key=os.path.getmtime, reverse=True)
+        except OSError:
+            files = []
+        out: List[Dict[str, Any]] = []
+        for p in files[:50]:
+            out.append({"id": os.path.splitext(os.path.basename(p))[0],
+                        "path": p, **self._read_sidecar(p)})
+        return out
+
+    def attach_external(self, run_id: str) -> Optional[Run]:
+        """Tail the sidecar named ``<run_id>.jsonl`` into a Run so the browser can
+        stream it exactly like an in-process run. Reuses a still-live attachment."""
+        path = os.path.join(self._trace_dir(), run_id + ".jsonl")
+        if not os.path.isfile(path):
+            return None
+        rid = "ext-" + run_id
+        with self._lock:
+            existing = self._runs.get(rid)
+            if existing is not None and existing.status == "running":
+                return existing
+            run = Run(rid, self._read_sidecar(path).get("workflow") or "external")
+            self._runs[rid] = run
+        threading.Thread(target=self._tail_external, args=(run, path), daemon=True).start()
+        return run
+
+    def _tail_external(self, run: Run, path: str) -> None:
+        """Follow a sidecar, replaying complete JSON lines onto ``run`` as they land.
+        Finishes on the terminal ``status`` line, or after a long idle gap (writer gone)."""
+        POLL, MAX_IDLE = 0.4, 180.0
+        consumed, idle = 0, 0.0
+        try:
+            while not run.stopping:
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        data = fh.read()
+                except OSError:
+                    data = ""
+                lines = data.split("\n")
+                complete = lines[:-1]  # last element is "" (trailing \n) or a partial line
+                fresh = complete[consumed:]
+                if fresh:
+                    idle = 0.0
+                    for line in fresh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            ev = json.loads(line)
+                        except ValueError:
+                            continue
+                        kind = ev.get("type")
+                        if kind == "meta":
+                            run.emit({"type": "run-start", "workflow": ev.get("workflow")})
+                        elif kind == "status":
+                            run.finish(ev.get("status") or "succeeded")
+                            return
+                        else:
+                            run.emit(ev)  # enter/leave/event/error pass straight through
+                    consumed = len(complete)
+                else:
+                    idle += POLL
+                    if idle >= MAX_IDLE:
+                        run.finish("stopped")  # writer gone / stalled — stop tailing
+                        return
+                time.sleep(POLL)
+        except Exception as exc:  # noqa: BLE001 — surface any tail failure to the UI
+            run.emit({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+            run.finish("errored")
 
     def start(self, workflow: str, *, pace: float = 0.3) -> Run:
         """Create a run and drive it on a daemon thread. Raises ValueError if the

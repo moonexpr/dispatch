@@ -36,6 +36,26 @@ Specify the work before feeding it. Two ways in:
   do not feed an underspecified task into the pipeline; it is L3-class automation
   and will not reliably succeed.
 
+### Input shapes — a task need not be in the issue format
+
+The feeder builds the seed controller's raw intake (the front door) from each
+task; inputs do **not** have to be pre-split into the issue format. The seed
+content-classifies:
+
+- **A real GitHub issue** (`"issue": <n>` with a `repo`) → pulled and handled as a
+  GitHub issue.
+- **A bare prompt** (`{"prompt": "…"}`) → the seed seeds `title`/`goal` from the
+  prompt and handles it interactively (optional gaps like acceptance are left open,
+  and degrade cleanly to unset when run headless — no TTY hang).
+- **A structured task** (`title` + `body`) → a non-interactive job request.
+
+The `issue` carried on a oneshot job is a **negative local work-id** used only for
+the engineer's clone/branch naming — it is *not* a GitHub issue. The build phase
+honours the negative marker: `admin:publish` still deploys and `consolidate_pr`
+still opens ONE PR, but the issue-keyed GitHub mutations (`intake_invoice`'s label
+state machine, the `Closes #<n>` trailer) are skipped. This replaces the old
+fabricated-GitHub-issue hack.
+
 For more than one task, interview each, and confirm the **order** — the feeder runs
 them sequentially, each fully through the pipeline before the next.
 
@@ -81,7 +101,20 @@ Run the feeder, which processes the tasks sequentially and streams each phase:
 python3 app/scripts/oneshot_feed.py <tasks.json> --repo owner/repo            # dry-run
 python3 app/scripts/oneshot_feed.py <tasks.json> --engine websitewf -v        # trace
 python3 app/scripts/oneshot_feed.py <tasks.json> --repo owner/repo --live     # real model
+# demo: create+seed the target repo from a template first, then run live with the
+# full phase-by-phase debug trace streamed (audience-visible), tee'd to a log.
+python3 app/scripts/oneshot_feed.py <tasks.json> --repo owner/repo --live -v \
+    --provision owner/repo --template ~/path/to/template |& tee oneshot-demo.log
 ```
+
+`--provision owner/repo --template DIR` ensures the target repo exists and is
+seeded (via `app/scripts/demo/provision-from-template.sh`) **before** the pipeline
+clones it, so `engineer:act_clone` has a cloneable, deployable base. `admin:prepare_env`
+then sees the repo already exists and leaves it untouched (idempotent).
+
+`-v` sets `DISPATCH_DEBUG=1` and streams the engine's phase-by-phase action trace —
+run it this way for a live demo so the audience can watch each controller/action
+fire. Run it as a background task (or `tee` to a log) so the trace is scrollable.
 
 Stream the output. For each task report whether the tick completed (`ok=`) and the
 deliverables produced; on a failure, surface the detail/error the feeder prints.

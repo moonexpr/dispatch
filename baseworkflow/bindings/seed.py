@@ -52,6 +52,19 @@ def _acceptance_from(body: str) -> str:
     return "\n".join(out)
 
 
+def _fields_from_prompt(prompt: str) -> Dict[str, str]:
+    """Seed the minimal work-item fields from a single freeform prompt.
+
+    The remodel (#unified-prompt): an operator can hand in ONE freeform string
+    instead of pre-splitting it into the title/goal "issue format". ``goal`` is
+    the whole prompt; ``title`` is its first non-empty line (trimmed). Structural
+    fields, when also supplied, still win over these derived ones.
+    """
+    text = (prompt or "").strip()
+    first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    return {"title": first[:72].rstrip(), "goal": text}
+
+
 def register(registry: Any) -> None:
     """Register the seed controllers, action bodies and predicates."""
 
@@ -88,12 +101,33 @@ def register(registry: Any) -> None:
     @registry.action("seed_ingest")
     def seed_ingest(inputs: Dict[str, Any]) -> Dict[str, Any]:
         request = dict(inputs.get("request") or {})
+        fields = dict(request.get("fields") or request.get("job") or {})
+        prompt = str(request.get("prompt") or "")
+        # A bare prompt is a first-class input: seed the minimal fields from it
+        # when they weren't supplied structurally (structural values still win).
+        if prompt and not (fields.get("title") and fields.get("goal")):
+            derived = _fields_from_prompt(prompt)
+            fields = {**derived, **{k: v for k, v in fields.items() if v}}
+        source = str(request.get("source", "")).lower()
+        if not source:
+            # Content classification (the remodel): a structured GitHub reference
+            # is an issue; a bare prompt is handled interactively; anything with
+            # complete required fields is a non-interactive job request.
+            if request.get("repo") and request.get("issue"):
+                source = "github"
+            elif prompt and not (request.get("fields") or request.get("job")):
+                source = "interactive"
+            elif fields.get("title") and fields.get("goal"):
+                source = "job"
+            else:
+                source = "interactive"
         return {
             "envelope": {
-                "source": str(request.get("source", "")).lower(),
+                "source": source,
                 "repo": request.get("repo", ""),
                 "issue": request.get("issue"),
-                "fields": dict(request.get("fields") or request.get("job") or {}),
+                "fields": fields,
+                "prompt": prompt,
             }
         }
 

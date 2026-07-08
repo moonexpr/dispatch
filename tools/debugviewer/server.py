@@ -15,11 +15,15 @@ Endpoints
                                     -> {ok, examples}: realistic "shelf.key"->value
                                        snapshot from the offline mock, for typed probe forms
     GET  /api/sessions              -> {runs: [...], runnable: [...]}
-    POST /api/probe                 -> run ONE action in isolation against the mock
-                                       engine; body {workflow, token, inputs, payload}
-                                       -> {ok, result, outputs, raised, trace}
-    POST /api/sessions/run          -> start an observed run; {id, workflow, status}
+    GET  /api/sessions/live         -> {runs: [...]}: out-of-process live runs, from
+                                       sidecars an external run wrote (foundation.trace)
+    POST /api/probe                 -> run ONE action in isolation; body {workflow,
+                                       token, inputs, payload, live}
+                                       -> {ok, result, outputs, changes, raised, trace}
+    POST /api/sessions/run          -> start an observed (in-process mock) run
                                        body/query: workflow=<name>&pace=<seconds>
+    POST /api/sessions/attach       -> tail an external live sidecar into a Run so it
+                                       streams like a run; body {id} -> {id, workflow, status}
     GET  /api/sessions/<id>/stream  -> SSE: live enter/leave/event/status stream
     POST /api/sessions/<id>/stop    -> request the run stop
 
@@ -158,91 +162,179 @@ def _mock_services() -> Any:
         return None
 
 
-def probe_action(workflow: str, token: str, inputs: Dict[str, Any], payload: Any = None) -> Dict[str, Any]:
-    """Run ONE action in isolation against the mock engine: seed the given shelf
-    values, execute the action's compiled body (governors and all), and report its
-    ``Result``, what it wrote to its declared outputs, and any events it raised
-    (e.g. a supersede request). Forced dry-run + mock factory: no network, no real
-    mutation. ``inputs`` maps ``"shelf.key" -> value`` (the refs the action reads)."""
-    os.environ["PIPELINE_DRY_RUN"] = "1"  # a probe never mutates anything real
-    reg = _registry_for(workflow)
-    if reg is None:
-        return {"error": f"{workflow!r} has no token registry wired, so its actions can't be probed."}
-    fn = next((f for f in _workflow_files() if _name_of(f) == workflow), None)
-    if fn is None:
-        return {"error": f"no workflow named {workflow!r}"}
-    doc = load_workflow(os.path.join(WORKFLOWS_DIR, fn))
-    manifest = (getattr(doc, "manifests", {}) or {}).get(token)
-    if manifest is None:
-        return {"error": f"no action {token!r} in {workflow!r}"}
+# Per-workflow production factory (enforcing governors, FileShelf, and the LIVE
+# inference runner that calls ``foundation.models.chat``). Mirrors ``_REGISTRIES``;
+# a workflow with no entry has no live probe (the toggle reports it and stays mock).
+_REAL_FACTORIES: Dict[str, str] = {
+    "baseworkflow": "baseworkflow.bindings.architect:ArchitectFactory",
+}
 
-    # Validate the seeded inputs against the declared contract (the tooling surface
-    # of the staged enforcement). Non-blocking: a probe still runs so you can see
-    # what a malformed value does, but the violations are reported to the UI.
-    schemas = getattr(doc, "schemas", {}) or {}
-    validation: Dict[str, List[str]] = {}
-    for ref, value in (inputs or {}).items():
-        schema = schemas.get(str(ref))
-        if schema is not None:
-            errs = schema.validate(value)
-            if errs:
-                validation[str(ref)] = errs
 
-    from foundation.actions import BudgetMeter, Context, MockActionFactory
-    from foundation.workflow.nodes import ActionRefNode
-    from foundation.workflow.visitor import CompileVisitor
+def _real_factory_for(name: str, shelf_root: str) -> Any:
+    """Instantiate the workflow's production factory rooted at ``shelf_root``, or
+    ``None`` if none is wired. Same sys.path discipline as ``_registry_for`` so the
+    package (composition root) wins over the bare ``baseworkflow/`` dir."""
+    spec = _REAL_FACTORIES.get(name)
+    if not spec:
+        return None
+    import importlib
 
-    factory = MockActionFactory()
-    cv = CompileVisitor(factory, reg)
-    cv.budgets = dict(doc.budgets or {})  # so a budget-Governor cap lookup resolves
+    bw_dir = os.path.join(REPO_ROOT, "baseworkflow")
+    for p in (bw_dir, REPO_ROOT):
+        if p in sys.path:
+            sys.path.remove(p)
+    sys.path.insert(0, bw_dir)
+    sys.path.insert(0, REPO_ROOT)
+    mod_name, _, cls = spec.partition(":")
+    return getattr(importlib.import_module(mod_name), cls)(shelf_root=shelf_root)
+
+
+def probe_action(workflow: str, token: str, inputs: Dict[str, Any],
+                 payload: Any = None, live: bool = False) -> Dict[str, Any]:
+    """Run ONE action in isolation: seed the given shelf values, execute the action's
+    compiled body (governors and all), and report its ``Result``, what it wrote to its
+    declared outputs, and any events it raised (e.g. a supersede request). ``inputs``
+    maps ``"shelf.key" -> value`` (the refs the action reads).
+
+    Two modes. **Mock** (default): ``MockActionFactory`` + ``ctx.dry_run`` — no network,
+    no model, no real mutation; a ``kind: inference`` action runs its deterministic
+    compiled-in oracle. **Live** (``live=True``): the workflow's production factory with
+    ``ctx.dry_run`` OFF, so each ``kind: inference`` action routes to its live worker and
+    calls the real model (``foundation.models.chat``) — this costs tokens and needs API
+    keys / network. Services stay offline (mock) either way so a probed action never
+    blocks on a TTY / gh need, and live shelves use an isolated temp root torn down after
+    the run, so live inference still performs no durable external mutation."""
+    prev_dry = os.environ.get("PIPELINE_DRY_RUN")
+    os.environ["PIPELINE_DRY_RUN"] = "0" if live else "1"
+    shelf_tmp: Optional[str] = None
     try:
-        action = cv.visit_action_ref(ActionRefNode(token=token, manifest=manifest))
-    except Exception as exc:  # noqa: BLE001 — unregistered bind etc.
-        return {"error": f"could not build {token!r}: {type(exc).__name__}: {exc}"}
+        reg = _registry_for(workflow)
+        if reg is None:
+            return {"error": f"{workflow!r} has no token registry wired, so its actions can't be probed."}
+        fn = next((f for f in _workflow_files() if _name_of(f) == workflow), None)
+        if fn is None:
+            return {"error": f"no workflow named {workflow!r}"}
+        doc = load_workflow(os.path.join(WORKFLOWS_DIR, fn))
+        manifest = (getattr(doc, "manifests", {}) or {}).get(token)
+        if manifest is None:
+            return {"error": f"no action {token!r} in {workflow!r}"}
 
-    shelves = factory.shelves()
-    ctx = Context(shelves=shelves, meter=BudgetMeter(10 ** 12, label="probe"),
-                  dry_run=True, services=_mock_services())
-    seeded: List[str] = []
-    for ref, value in (inputs or {}).items():
-        if "." not in str(ref):
-            continue
-        shelf, key = str(ref).split(".", 1)
-        try:
-            getattr(shelves, shelf).put(key, value)
-            seeded.append(ref)
-        except AttributeError:
-            pass
+        # Validate the seeded inputs against the declared contract (the tooling surface
+        # of the staged enforcement). Non-blocking: a probe still runs so you can see
+        # what a malformed value does, but the violations are reported to the UI.
+        schemas = getattr(doc, "schemas", {}) or {}
+        validation: Dict[str, List[str]] = {}
+        for ref, value in (inputs or {}).items():
+            schema = schemas.get(str(ref))
+            if schema is not None:
+                errs = schema.validate(value)
+                if errs:
+                    validation[str(ref)] = errs
 
-    result = action.run(payload, ctx)  # Action.run traps exceptions into an Error Result
-    outputs: Dict[str, Any] = {}
-    for r in manifest.outputs:
+        from foundation.actions import BudgetMeter, Context, MockActionFactory
+        from foundation.workflow.nodes import ActionRefNode
+        from foundation.workflow.visitor import CompileVisitor
+
+        if live:
+            import tempfile
+
+            shelf_tmp = tempfile.mkdtemp(prefix="dispatch-probe-")
+            factory = _real_factory_for(workflow, shelf_tmp)
+            if factory is None:
+                return {"error": f"{workflow!r} has no live factory wired; live inference is unavailable for it."}
+        else:
+            factory = MockActionFactory()
+        cv = CompileVisitor(factory, reg)
+        cv.budgets = dict(doc.budgets or {})  # so a budget-Governor cap lookup resolves
         try:
-            outputs[r.ref] = getattr(shelves, r.shelf).get(r.key)
-        except Exception:  # noqa: BLE001
-            pass
-    raised = []
-    for e in getattr(ctx, "raised", []):
-        p = getattr(e, "payload", None)
-        p = p.to_dict() if hasattr(p, "to_dict") else p  # SupersedeRequest → readable dict
-        name = e.name.strip("_") if str(e.name).startswith("__") else e.name  # "__supersede__" → "supersede"
-        raised.append({"name": name, "payload": _json_safe(p)})
-    return _json_safe({
-        "ok": bool(result.ok),
-        "token": token,
-        "seeded": seeded,
-        "validation": validation,  # {ref: [contract violations]} — empty when inputs conform
-        "result": {
+            action = cv.visit_action_ref(ActionRefNode(token=token, manifest=manifest))
+        except Exception as exc:  # noqa: BLE001 — unregistered bind etc.
+            return {"error": f"could not build {token!r}: {type(exc).__name__}: {exc}"}
+
+        shelves = factory.shelves()
+        ctx = Context(shelves=shelves, meter=BudgetMeter(10 ** 12, label="probe"),
+                      dry_run=not live, services=_mock_services())
+        seeded: List[str] = []
+        for ref, value in (inputs or {}).items():
+            if "." not in str(ref):
+                continue
+            shelf, key = str(ref).split(".", 1)
+            try:
+                getattr(shelves, shelf).put(key, value)
+                seeded.append(ref)
+            except AttributeError:
+                pass
+
+        # Snapshot the two mutable shelves AFTER seeding, so the diff below reflects only
+        # what this action itself writes — the whole point of a probe is to see the change
+        # it makes to ``deliverables`` and ``shared``.
+        def _snap(name: str) -> Dict[str, Any]:
+            sh = getattr(shelves, name, None)
+            try:
+                return dict(sh.snapshot()) if sh is not None else {}
+            except Exception:  # noqa: BLE001
+                return {}
+
+        before = {"deliverables": _snap("deliverables"), "shared": _snap("shared")}
+
+        result = action.run(payload, ctx)  # Action.run traps exceptions into an Error Result
+        outputs: Dict[str, Any] = {}
+        for r in manifest.outputs:
+            try:
+                outputs[r.ref] = getattr(shelves, r.shelf).get(r.key)
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Diff deliverables + shared to surface exactly what the action mutated (new vs
+        # changed keys). This is what the inspector highlights after a probe.
+        changes: List[Dict[str, Any]] = []
+        for name in ("deliverables", "shared"):
+            after = _snap(name)
+            prev = before[name]
+            for k, v in after.items():
+                if k not in prev:
+                    changes.append({"ref": f"{name}.{k}", "status": "new", "value": v})
+                else:
+                    try:
+                        differs = prev[k] != v
+                    except Exception:  # noqa: BLE001 — unorderable/odd types → treat as changed
+                        differs = True
+                    if differs:
+                        changes.append({"ref": f"{name}.{k}", "status": "changed", "value": v})
+
+        raised = []
+        for e in getattr(ctx, "raised", []):
+            p = getattr(e, "payload", None)
+            p = p.to_dict() if hasattr(p, "to_dict") else p  # SupersedeRequest → readable dict
+            name = e.name.strip("_") if str(e.name).startswith("__") else e.name  # "__supersede__" → "supersede"
+            raised.append({"name": name, "payload": _json_safe(p)})
+        return _json_safe({
             "ok": bool(result.ok),
-            "value": getattr(result, "value", None),
-            "meta": getattr(result, "meta", {}) or {},
-            "detail": getattr(result, "detail", "") or None,
-            "error": None if result.ok else str(getattr(result, "error", "")),
-        },
-        "outputs": outputs,
-        "raised": raised,
-        "trace": ctx.trace,
-    })
+            "token": token,
+            "live": bool(live),
+            "seeded": seeded,
+            "validation": validation,  # {ref: [contract violations]} — empty when inputs conform
+            "result": {
+                "ok": bool(result.ok),
+                "value": getattr(result, "value", None),
+                "meta": getattr(result, "meta", {}) or {},
+                "detail": getattr(result, "detail", "") or None,
+                "error": None if result.ok else str(getattr(result, "error", "")),
+            },
+            "outputs": outputs,
+            "changes": changes,  # [{ref, status: new|changed, value}] over deliverables + shared
+            "raised": raised,
+            "trace": ctx.trace,
+        })
+    finally:
+        if prev_dry is None:
+            os.environ.pop("PIPELINE_DRY_RUN", None)
+        else:
+            os.environ["PIPELINE_DRY_RUN"] = prev_dry
+        if shelf_tmp:
+            import shutil
+
+            shutil.rmtree(shelf_tmp, ignore_errors=True)
 
 
 # -- example shelf snapshots (schema-driven probe forms) --------------------
@@ -316,11 +408,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- response helpers ---------------------------------------------------
     def _send(self, code: int, body: bytes, ctype: str, extra: Optional[Dict[str, str]] = None) -> None:
+        extra = extra or {}
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        for k, v in (extra or {}).items():
+        if "Cache-Control" not in extra:  # caller may override (vendored assets cache long)
+            self.send_header("Cache-Control", "no-store")
+        for k, v in extra.items():
             self.send_header(k, v)
         self.end_headers()
         if self.command != "HEAD":
@@ -338,6 +432,26 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": f"missing static asset {rel!r}"}, 404)
             return
         self._send(200, body, ctype)
+
+    def _static_gz(self, rel: str, ctype: str) -> None:
+        """Serve a vendored asset, preferring its pre-gzipped sibling when the client
+        accepts gzip (elk.bundled.js is ~1.5MB raw, ~0.45MB gzipped). Vendored assets
+        are content-stable, so they cache long instead of the app-wide no-store."""
+        accepts_gz = "gzip" in (self.headers.get("Accept-Encoding") or "")
+        base = os.path.join(STATIC_DIR, rel)
+        extra = {"Cache-Control": "public, max-age=31536000, immutable"}
+        try:
+            if accepts_gz and os.path.exists(base + ".gz"):
+                with open(base + ".gz", "rb") as fh:
+                    body = fh.read()
+                extra["Content-Encoding"] = "gzip"
+            else:
+                with open(base, "rb") as fh:
+                    body = fh.read()
+        except FileNotFoundError:
+            self._json({"error": f"missing vendored asset {rel!r}"}, 404)
+            return
+        self._send(200, body, ctype, extra)
 
     def _query(self) -> Dict[str, str]:
         q = parse_qs(urlparse(self.path).query)
@@ -361,6 +475,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route in ("/", "/index.html"):
                 self._static("viewer.html", "text/html; charset=utf-8")
+            elif route == "/vendor/elk.bundled.js":
+                self._static_gz("vendor/elk.bundled.js", "application/javascript; charset=utf-8")
+            elif route == "/api/sessions/live":
+                self._json({"runs": BUS.list_external()})
             elif route == "/api/workflows":
                 self._json(list_workflows())
             elif route.startswith("/api/workflows/") and route.endswith("/examples"):
@@ -397,6 +515,7 @@ class Handler(BaseHTTPRequestHandler):
                     str(body.get("token") or ""),
                     body.get("inputs") or {},
                     body.get("payload"),
+                    live=bool(body.get("live")),
                 )
                 self._json(res, 200 if not res.get("error") else 400)
             elif route == "/api/sessions/run":
@@ -412,6 +531,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": str(exc)}, 400)
                     return
                 self._json(run.summary(), 201)
+            elif route == "/api/sessions/attach":
+                body = self._json_body()
+                rid = str(body.get("id") or "")
+                run = BUS.attach_external(rid) if rid else None
+                if run is None:
+                    self._json({"error": f"no live sidecar {rid!r} in {BUS._trace_dir()!r}"}, 404)
+                else:
+                    self._json(run.summary(), 201)
             elif route.startswith("/api/sessions/") and route.endswith("/stop"):
                 rid = route[len("/api/sessions/"):-len("/stop")]
                 run = BUS.get(rid)

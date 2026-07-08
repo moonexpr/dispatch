@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dispatch · workflow debug viewer</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cirrus-ui@0.8.0/dist/cirrus.min.css">
+<script src="vendor/elk.bundled.js"></script>
 <style>
   :root {
     --bg: #0e1116; --panel: #161b22; --panel2: #1c232c; --line: #2b333d;
@@ -15,18 +16,33 @@
     --input-bg: #0d1117;   /* form fields, code + event panes */
     --dot: #1b2129;        /* canvas dot-grid */
     --code-ink: #a5d6ff;   /* JSON output text */
-    --node-ink: #e6edf3;   /* graph node label — stays light on the dark node fills */
+    --node-ink: #e6edf3;   /* graph node label — flips with the theme (light block overrides) */
     --node-sub: #8b949e;   /* graph node sub-label */
+    /* graph node palette — one var per state kind / action namespace; the
+       [data-theme="light"] block below carries the light variants. */
+    --node-action: #30363d; --node-loop: #3a2f0b; --node-par: #2a2140;
+    --node-start: #123020; --node-end: #3a1517; --node-ctrl: #0d2a30; --node-supersede: #241a33;
+    --ns-github: #1f6feb; --ns-architect: #8957e5; --ns-budget: #238636;
+    --ns-admin: #9e6a03; --ns-engineer: #0969da; --ns-loop: #bb8009;
+    --stroke-action: #3d444d; --stroke-loop: #d29922; --stroke-par: #d2a8ff;
+    --stroke-start: #3fb950; --stroke-end: #f85149; --stroke-ctrl: #39c5cf;
     color-scheme: dark;    /* theme native controls (number spinners, checkbox, select, scrollbars) */
   }
-  /* light theme: chrome goes light; the graph keeps its dark node fills, so node
-     text/sub (--node-ink/--node-sub) stay light and readable in both modes. */
+  /* light theme: chrome AND graph go light — node fills switch to tinted variants
+     and node ink flips dark, so labels stay readable in both modes. */
   :root[data-theme="light"] {
     --bg: #f6f8fa; --panel: #ffffff; --panel2: #eef1f4; --line: #d0d7de;
     --ink: #1f2328; --muted: #656d76; --accent: #0969da; --accent2: #8250df;
     --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
     --edge: #8c959f; --edge-loop: #9a6700;
     --input-bg: #ffffff; --dot: #e3e8ee; --code-ink: #0550ae;
+    --node-ink: #1f2328; --node-sub: #57606a;
+    --node-action: #eaeef2; --node-loop: #fff8c5; --node-par: #fbefff;
+    --node-start: #dafbe1; --node-end: #ffebe9; --node-ctrl: #cff4f8; --node-supersede: #f3eaff;
+    --ns-github: #80ccff; --ns-architect: #d8b9ff; --ns-budget: #aceebb;
+    --ns-admin: #fae17d; --ns-engineer: #b6e3ff; --ns-loop: #ffd8b5;
+    --stroke-action: #afb8c1; --stroke-loop: #9a6700; --stroke-par: #8250df;
+    --stroke-start: #1a7f37; --stroke-end: #cf222e; --stroke-ctrl: #1b7c83;
     color-scheme: light;
   }
   * { box-sizing: border-box; }
@@ -72,12 +88,26 @@
   svg { display: block; max-width: none; height: auto; }
   .phaseband { fill-opacity: .06; }
   .phaselabel { fill: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; }
-  .node rect { stroke-width: 1.5; rx: 8; cursor: pointer; }
+  .node rect { stroke-width: 1.5; rx: 8; cursor: pointer; fill: var(--node-action); stroke: var(--stroke-action); }
+  /* fills/strokes resolve from the theme palette vars via kind + namespace classes,
+     so a theme toggle rethemes the graph with no redraw */
+  .node.loop rect { fill: var(--node-loop); stroke: var(--stroke-loop); }
+  .node.fork rect, .node.join rect { fill: var(--node-par); stroke: var(--stroke-par); }
+  .node.start rect { fill: var(--node-start); stroke: var(--stroke-start); }
+  .node.end rect { fill: var(--node-end); stroke: var(--stroke-end); }
+  .node.controller rect { fill: var(--node-ctrl); stroke: var(--stroke-ctrl); stroke-width: 2; }
+  .node.supersede rect { fill: var(--node-supersede); stroke: var(--accent2); }
+  .node.ns-github rect { fill: var(--ns-github); }
+  .node.ns-architect rect { fill: var(--ns-architect); }
+  .node.ns-budget rect { fill: var(--ns-budget); }
+  .node.ns-admin rect { fill: var(--ns-admin); }
+  .node.ns-engineer rect { fill: var(--ns-engineer); }
+  .node.ns-loop rect { fill: var(--ns-loop); }
   .node text { fill: var(--node-ink); font-size: 11.5px; pointer-events: none; }
   .node .sub { fill: var(--node-sub); font-size: 9.5px; }
   .node.sel rect { stroke: var(--accent); stroke-width: 2.5; }
-  .node.active rect { stroke: #58a6ff; stroke-width: 3; filter: drop-shadow(0 0 6px #58a6ff); animation: pulse 1s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { filter: drop-shadow(0 0 3px #58a6ff);} 50% { filter: drop-shadow(0 0 9px #58a6ff);} }
+  .node.active rect { stroke: var(--accent); stroke-width: 3; filter: drop-shadow(0 0 6px var(--accent)); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { filter: drop-shadow(0 0 3px var(--accent));} 50% { filter: drop-shadow(0 0 9px var(--accent));} }
   .node.done-ok rect { stroke: var(--ok); }
   .node.done-err rect { stroke: var(--err); stroke-width: 2.5; }
   .node.active .sub, .node.done-ok .sub { fill: var(--node-ink); }
@@ -86,7 +116,6 @@
   .edge.fork, .edge.join { stroke: var(--accent2); }
   .edge.supersede { stroke: var(--accent2); stroke-dasharray: 6 4; }
   .edgelabel { fill: var(--edge-loop); font-size: 9.5px; }
-  .node.controller rect { stroke-width: 2; }
   .node.supersede text { fill: var(--accent2); }
 
   aside.insp { grid-area: insp; position: relative; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; }
@@ -103,6 +132,7 @@
   details.attr-fold { border-bottom: 1px solid var(--line); margin-bottom: 6px; }
   details.attr-fold > summary { list-style: none; cursor: pointer; color: var(--muted); font-size: 11px;
     text-transform: uppercase; letter-spacing: .8px; padding: 2px 0 6px; user-select: none; display: flex; align-items: center; gap: 6px; }
+	probe .pf + details.pf-adv summary { text-align: right; }
   details.attr-fold > summary::-webkit-details-marker { display: none; }
   details.attr-fold > summary::before { content: "▸"; font-size: 9px; transition: transform .12s; }
   details.attr-fold[open] > summary::before { transform: rotate(90deg); }
@@ -117,7 +147,8 @@
 
   /* probe panel */
   .probe { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
-  .probe .cap { padding: 0 0 6px; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+  .probe .cap { padding: 0 0 2px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+  .probe .hint { color: var(--muted); font-size: 11px; line-height: 1.45; margin: 0 0 8px; }
   .probe .pf { margin: 6px 0; }
   .probe .pf label { display: block; color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
   .probe textarea { width: 100%; resize: vertical; min-height: 26px; background: var(--input-bg); color: var(--ink);
@@ -134,8 +165,13 @@
   .pf.pf-inline { display: flex; align-items: center; gap: 8px; }
   .pf.pf-inline label { margin-bottom: 0; }
   .tk { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .4px; }
+  /* font/padding are !important because Cirrus styles inputs with a five-:not()
+     chain (input:not([type=checkbox]):not([type=radio])…, specificity 0,5,1) that
+     otherwise beats .probe input.pfield (0,2,1) — giving inputs a big proportional
+     font + fat padding while textareas (no such Cirrus rule) keep ours. */
   .probe input.pfield, .probe textarea.pfield, .probe select.pfield { width: 100%; background: var(--input-bg); color: var(--ink);
-    border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font: 11px/1.4 ui-monospace, Menlo, monospace; }
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 7px !important; font: 11px/1.4 ui-monospace, Menlo, monospace !important; letter-spacing: normal !important; }
   .probe textarea.pfield { resize: vertical; min-height: 24px; }
   .probe input.pf-bool { width: auto; }
   .probe input.pfield:focus, .probe textarea.pfield:focus, .probe select.pfield:focus { outline: none; border-color: var(--accent); }
@@ -147,7 +183,17 @@
     border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: 11px/1.4 ui-monospace, Menlo, monospace; }
   .probe .pf-rawjson:focus { outline: none; border-color: var(--accent); }
   .probe details.pf-adv summary { color: var(--muted); font-size: 11px; cursor: pointer; margin: 4px 0; }
-  button.probe-run { border-color: var(--accent); color: var(--accent); margin-top: 8px; width: 100%; }
+  .probe-actions { display: flex; gap: 8px; align-items: stretch; margin-top: 8px; }
+  /* both buttons share one height + centered content so they line up exactly */
+  .probe-actions button { height: 40px; padding: 0 14px; display: inline-flex; align-items: center;
+    justify-content: center; line-height: 1; text-transform: none; }
+  button.probe-run { border-color: var(--accent); color: var(--accent); flex: 1; font-size: 14px !important; font-weight: 600; }
+  /* single live toggle — off is muted, on turns solid red (real model, tokens, network) */
+  button.probe-live { flex: 0 0 auto; color: var(--muted); font-weight: bold }
+  button.probe-live.on { color: var(--err) !important; border-color: var(--err);
+    background: color-mix(in srgb, var(--err) 14%, var(--input-bg));
+    box-shadow: 0 0 7px var(--err); animation: liveglow 1.6s ease-in-out infinite; }
+  @keyframes liveglow { 0%,100% { box-shadow: 0 0 4px var(--err); } 50% { box-shadow: 0 0 12px var(--err); } }
   .probe-out { margin-top: 10px; }
   .probe-out .pres { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
   .probe-out .pres.ok { color: var(--ok); } .probe-out .pres.err { color: var(--err); }
@@ -156,17 +202,45 @@
     padding: 7px 8px; font: 10.5px/1.45 ui-monospace, Menlo, monospace; color: var(--code-ink); overflow-x: auto; max-height: 240px; white-space: pre; }
   .probe-out .perr { color: var(--err); font-size: 11.5px; word-break: break-word; }
   .probe-out .muted { color: var(--muted); font-size: 11px; }
+  /* shelf-change diff blocks: highlighted per shelf (deliverables = green, shared = purple) */
+  .probe-out .shelf-change { border-left: 3px solid var(--line); border-radius: 0 6px 6px 0; padding: 6px 8px; margin: 6px 0; background: var(--input-bg); }
+  .probe-out .shelf-change.deliverables { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--input-bg)); }
+  .probe-out .shelf-change.shared { border-left-color: var(--accent2); background: color-mix(in srgb, var(--accent2) 9%, var(--input-bg)); }
+  .probe-out .sc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .probe-out .sc-ref { font-weight: 600; font-size: 11px; word-break: break-all; }
+  .probe-out .sc-tag { margin-left: auto; font-size: 9px; text-transform: uppercase; letter-spacing: .4px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; color: var(--muted); }
+  .probe-out .sc-tag.new { color: var(--ok); border-color: var(--ok); }
+  .probe-out .sc-tag.changed { color: var(--warn); border-color: var(--warn); }
+  .probe-out .shelf-change pre.pj { margin: 0; }
 
   /* compact panel pinned to the foot of the inspector column (the #insp body above
      is flex:1 and pushes it down). flex:0 0 auto = size to content, not 46% of panel. */
   .sessions { border-top: 1px solid var(--line); padding: 12px 14px; background: var(--panel2); display: flex; flex-direction: column; flex: 0 0 auto; }
   .sessions .cap { padding: 0 0 6px; }
+  /* collapsible: summary keeps the .cap look, disclosure arrow floats right */
+  .sessions > summary { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: center; }
+  .sessions > summary::-webkit-details-marker { display: none; }
+  .sessions > summary::after { content: "▾"; margin-left: auto; font-size: 10px; transition: transform .12s; }
+  .sessions:not([open]) > summary::after { transform: rotate(-90deg); }
+  .sessions:not([open]) > summary.cap { padding-bottom: 0; }
+  .sessions > summary:hover { color: var(--accent); }
   /* flex:0 0 auto + padding:0 override Cirrus's global `.row{flex:1;padding:.5rem 0}`,
      which otherwise makes this row grow and open big vertical gaps. */
   .sessions .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex: 0 0 auto; padding: 0; }
   .sessions .row .st { margin-left: auto; font-size: 11px; }
   .st.running { color: var(--accent); } .st.succeeded { color: var(--ok); }
-  .st.failed, .st.errored { color: var(--err); } .st.idle { color: var(--muted); }
+  .st.failed, .st.errored { color: var(--err); } .st.idle, .st.stopped { color: var(--muted); }
+  /* live runs: out-of-process sidecars the viewer tails (foundation.trace) */
+  .sessions .live-cap { padding: 12px 0 5px; display: flex; align-items: center; gap: 6px; }
+  .sessions .mini { padding: 1px 6px; font-size: 10px; line-height: 1.3; }
+  .liveruns { display: flex; flex-direction: column; gap: 6px; }
+  .liveruns .small { font-size: 10.5px; }
+  .liverun { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; cursor: pointer; background: var(--input-bg); }
+  .liverun:hover { border-color: var(--accent); }
+  .lr-main { display: flex; align-items: center; gap: 6px; }
+  .lr-id { font-weight: 600; font-size: 11px; word-break: break-all; }
+  .lr-main .st { margin-left: auto; font-size: 10px; }
+  .lr-sub { color: var(--muted); font-size: 10px; margin-top: 2px; }
   button.run { border-color: var(--ok); color: var(--ok); }
   button:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
   .elog { height: 168px; overflow-y: auto; font-size: 10.5px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--input-bg); }
@@ -203,27 +277,25 @@
   <div class="insp-resize" id="inspResize" title="Drag to resize · double-click to reset"></div>
   <div class="cap">inspector</div>
   <div class="body" id="insp"><div class="placeholder">Click a state to inspect its action, budget, permissions and I/O.</div></div>
-  <div class="sessions">
-    <div class="cap">mocked session</div>
+  <details class="sessions" id="sessFold">
+    <summary class="cap">mocked session</summary>
     <div class="row">
       <button class="run" id="runbtn" title="Run this workflow under the mock engine and watch it live">▶ run &amp; watch</button>
       <span class="st idle" id="runstatus">idle</span>
     </div>
     <div class="elog" id="elog"><div class="ev lv">No run yet. “run &amp; watch” drives the workflow under the mock engine (no network) and lights up each state as it executes.</div></div>
-  </div>
+    <div class="cap live-cap">live runs <button type="button" class="mini" id="liverefresh" title="Rescan for external live-run sidecars">↻</button></div>
+    <div class="liveruns" id="liveruns"></div>
+  </details>
 </aside>
 
 <script>
-const NS_COLORS = {
-  github: "#1f6feb", architect: "#8957e5", budget: "#238636",
-  admin: "#9e6a03", engineer: "#0969da", loop: "#bb8009",
-};
-const KIND_STROKE = { action:"#3d444d", loop:"#d29922", fork:"#d2a8ff", join:"#d2a8ff", start:"#3fb950", end:"#f85149", controller:"#39c5cf" };
 const el = id => document.getElementById(id);
 const svgNS = "http://www.w3.org/2000/svg";
 let SEL_WF = null, SEL_NODE = null, GRAPH = null, autoTimer = null;
 let RUNNABLE = [], NODE_BY_STATE = {}, ES = null, CUR_RUN = null;
-let ATTR_OPEN = true;   // inspector "attributes" fold state, preserved across node clicks
+let ATTR_OPEN = false;  // inspector "attributes" fold state — collapsed by default, preserved across node clicks
+let PROBE_LIVE = false;  // probe mock↔live mode — preserved across node clicks; live calls the real model
 // The declarative shelf-key contract for the selected workflow (graph.schemas):
 // "shelf.key" -> {type, description, fields:[{name,type,required,enum,...}]}.
 function schemaFor(ref){ return (GRAPH && GRAPH.schemas && GRAPH.schemas[ref]) || null; }
@@ -234,31 +306,58 @@ function mk(tag, attrs, kids) {
   for (const c of (kids||[])) n.appendChild(c);
   return n;
 }
-function fillFor(node) {
-  if (node.kind === "action") return (NS_COLORS[node.namespace] || "#30363d");
-  if (node.kind === "loop") return "#3a2f0b";
-  if (node.kind === "fork" || node.kind === "join") return "#2a2140";
-  if (node.kind === "start") return "#123020";
-  if (node.kind === "end") return "#3a1517";
-  if (node.kind === "controller") return node.supersede_target ? "#241a33" : "#0d2a30";
-  return "#30363d";
+// Node fills/strokes are CSS-driven: the kind class (.loop, .controller, …) and,
+// for actions, an ns-<namespace> class resolve to the theme palette vars in :root,
+// giving every color a light-theme variant with no redraw on toggle.
+
+const NODE_H = 40;
+const nodeW = n => Math.min(190, 66 + n.label.length * 6.4);
+
+// -- ELK layered layout (elkjs). Async: elk.layout returns a Promise. Loop-back edges
+// are excluded from the layout pass (they'd fight the DAG ranking) and drawn as
+// manual bulges afterward. Returns node centers + ELK's routed edge sections. --
+async function elkLayout(graph) {
+  const elk = new ELK();
+  const fwd = graph.edges.filter(e => e.kind !== "loop-back");
+  const byId = {}; graph.nodes.forEach(n => byId[n.id] = n);
+  const children = graph.nodes.map(n => ({ id: n.id, width: nodeW(n), height: NODE_H }));
+  const edges = fwd.map((e, i) => ({ id: "e" + i, sources: [e.from], targets: [e.to] }));
+  const root = {
+    id: "root",
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "DOWN",
+      "elk.edgeRouting": "ORTHOGONAL",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "52",
+      "elk.spacing.nodeNode": "30",
+      "elk.spacing.edgeNode": "18",
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.padding": "[top=38,left=22,bottom=22,right=22]",
+    },
+    children, edges,
+  };
+  const res = await elk.layout(root);
+  const pos = {};
+  (res.children || []).forEach(c => { pos[c.id] = { x: c.x + c.width / 2, y: c.y + c.height / 2, w: c.width, h: c.height }; });
+  const routes = {};
+  (res.edges || []).forEach(e => { routes[e.id] = (e.sections && e.sections[0]) || null; });
+  return { pos, width: (res.width || 680) + 8, height: (res.height || 400) + 8, byId, fwd, routes };
 }
 
-// -- layered layout: longest-path rank over forward edges (loop-back excluded) --
-function layout(graph) {
+// -- fallback: the original longest-path rank, used only if elkjs failed to load or
+// threw. Same return shape as elkLayout (routes empty → draw falls back to beziers). --
+function fallbackLayout(graph) {
   const nodes = graph.nodes, byId = {}; nodes.forEach(n => byId[n.id] = n);
   const fwd = graph.edges.filter(e => e.kind !== "loop-back");
   const succ = {}, indeg = {}; nodes.forEach(n => { succ[n.id]=[]; indeg[n.id]=0; });
   fwd.forEach(e => { if (byId[e.from] && byId[e.to]) { succ[e.from].push(e.to); indeg[e.to]++; } });
-  // Kahn topological order, then longest-path rank.
   const rank = {}; nodes.forEach(n => rank[n.id]=0);
   const q = nodes.filter(n => indeg[n.id]===0).map(n=>n.id);
-  const din = {...indeg}; const order = [];
+  const din = {...indeg};
   while (q.length) {
-    const u = q.shift(); order.push(u);
+    const u = q.shift();
     for (const v of succ[u]) { rank[v]=Math.max(rank[v], rank[u]+1); if (--din[v]===0) q.push(v); }
   }
-  // Any nodes left out of topo order (shouldn't happen) keep rank 0.
   const rows = {}; nodes.forEach(n => { (rows[rank[n.id]] ||= []).push(n); });
   const COLW = 210, ROWH = 92, PADX = 40, PADY = 54;
   const maxRow = Math.max(1, ...Object.values(rows).map(r => r.length));
@@ -266,20 +365,25 @@ function layout(graph) {
   const pos = {};
   Object.keys(rows).map(Number).sort((a,b)=>a-b).forEach(r => {
     const row = rows[r], k = row.length;
-    row.forEach((n,i) => {
-      const x = width * (i+1)/(k+1);
-      pos[n.id] = { x, y: PADY + r*ROWH, w: Math.min(190, 66 + n.label.length*6.4) };
-    });
+    row.forEach((n,i) => { pos[n.id] = { x: width*(i+1)/(k+1), y: PADY + r*ROWH, w: nodeW(n), h: NODE_H }; });
   });
   const height = PADY*2 + (Math.max(0,...Object.values(rank)))*ROWH + 30;
-  return { pos, width, height, byId };
+  return { pos, width, height, byId, fwd, routes: {} };
 }
 
-function draw(graph) {
+async function computeLayout(graph) {
+  if (typeof ELK !== "undefined") {
+    try { return await elkLayout(graph); }
+    catch (e) { console.warn("elkjs layout failed; falling back to longest-path", e); }
+  }
+  return fallbackLayout(graph);
+}
+
+async function draw(graph) {
   GRAPH = graph;
   NODE_BY_STATE = {};
   const svg = el("svg"); svg.innerHTML = "";
-  const { pos, width, height, byId } = layout(graph);
+  const { pos, width, height, fwd, routes } = await computeLayout(graph);
   svg.setAttribute("width", width); svg.setAttribute("height", height);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
@@ -292,50 +396,56 @@ function draw(graph) {
   }
   svg.appendChild(defs);
 
-  // phase bands
+  // phase bands (derived from laid-out node y-extents, layout-engine agnostic)
   const PHASE_COLOR = ["#58a6ff","#d2a8ff","#3fb950","#d29922","#f85149","#79c0ff"];
   graph.phases.forEach((ph,i) => {
     const ns = graph.nodes.filter(n => n.phase === ph).map(n => pos[n.id]).filter(Boolean);
     if (!ns.length) return;
-    const ymin = Math.min(...ns.map(p=>p.y)) - 26, ymax = Math.max(...ns.map(p=>p.y)) + 30;
+    const ymin = Math.min(...ns.map(p=>p.y - p.h/2)) - 16, ymax = Math.max(...ns.map(p=>p.y + p.h/2)) + 14;
     const c = PHASE_COLOR[i % PHASE_COLOR.length];
     svg.appendChild(mk("rect",{class:"phaseband", x:6, y:ymin, width:width-12, height:ymax-ymin, rx:10, fill:c}));
     svg.appendChild(mk("text",{class:"phaselabel", x:16, y:ymin+15, fill:c}, [txt(ph)]));
   });
 
-  // edges
-  graph.edges.forEach(e => {
-    const a = pos[e.from], b = pos[e.to]; if (!a||!b) return;
-    const marker = e.kind==="loop-back" ? "url(#arrowl)"
-      : (e.kind==="fork"||e.kind==="join"||e.kind==="supersede") ? "url(#arrowp)" : "url(#arrow)";
-    let d;
-    if (e.kind === "loop-back") {
-      // bulge out to the right, back up to the head
-      const mx = Math.max(a.x,b.x) + 90;
-      d = `M ${a.x+ (a.w/2) } ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x + (b.w/2)} ${b.y}`;
+  // forward edges: ELK-routed orthogonal polylines (fallback: bezier center-to-center)
+  const midOf = sec => { const pts = [sec.startPoint, ...(sec.bendPoints||[]), sec.endPoint]; return pts[Math.floor(pts.length/2)]; };
+  fwd.forEach((e, i) => {
+    const sec = routes["e" + i];
+    const marker = (e.kind==="fork"||e.kind==="join"||e.kind==="supersede") ? "url(#arrowp)" : "url(#arrow)";
+    let d, lx, ly;
+    if (sec) {
+      const pts = [sec.startPoint, ...(sec.bendPoints||[]), sec.endPoint];
+      d = "M " + pts.map(p => `${p.x} ${p.y}`).join(" L ");
+      const m = midOf(sec); lx = m.x + 6; ly = m.y - 3;
     } else {
-      const ay = a.y + 22, by = b.y - 22;
-      const my = (ay+by)/2;
+      const a = pos[e.from], b = pos[e.to]; if (!a||!b) return;
+      const ay = a.y + 22, by = b.y - 22, my = (ay+by)/2;
       d = `M ${a.x} ${ay} C ${a.x} ${my}, ${b.x} ${my}, ${b.x} ${by}`;
+      lx = (a.x+b.x)/2; ly = my;
     }
     svg.appendChild(mk("path",{class:`edge ${e.kind}`, d, "marker-end":marker}));
-    if (e.label) {
-      const lx = (e.kind==="loop-back") ? Math.max(a.x,b.x)+96 : (a.x+b.x)/2;
-      const ly = (a.y+b.y)/2;
-      svg.appendChild(mk("text",{class:"edgelabel", x:lx, y:ly}, [txt(e.label)]));
-    }
+    if (e.label) svg.appendChild(mk("text",{class:"edgelabel", x:lx, y:ly}, [txt(e.label)]));
+  });
+
+  // loop-back edges: manual bulge to the right, back up to the head (never ELK-routed)
+  graph.edges.filter(e => e.kind === "loop-back").forEach(e => {
+    const a = pos[e.from], b = pos[e.to]; if (!a||!b) return;
+    const mx = Math.max(a.x,b.x) + 90;
+    const d = `M ${a.x + a.w/2} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x + b.w/2} ${b.y}`;
+    svg.appendChild(mk("path",{class:"edge loop-back", d, "marker-end":"url(#arrowl)"}));
+    if (e.label) svg.appendChild(mk("text",{class:"edgelabel", x:mx+6, y:(a.y+b.y)/2}, [txt(e.label)]));
   });
 
   // nodes
   graph.nodes.forEach(n => {
     const p = pos[n.id]; if (!p) return;
-    const w = p.w, h = 40, x = p.x - w/2, y = p.y - h/2;
-    const cls = "node" + (SEL_NODE===n.id?" sel":"")
-      + (n.kind==="controller"?" controller":"") + (n.supersede_target?" supersede":"");
+    const w = p.w, h = p.h, x = p.x - w/2, y = p.y - h/2;
+    const cls = "node " + n.kind + (SEL_NODE===n.id?" sel":"")
+      + (n.kind==="action" && n.namespace ? " ns-"+n.namespace : "")
+      + (n.supersede_target?" supersede":"");
     const g = mk("g", {class:cls, "data-id":n.id});
     if (n.state_id) { g.setAttribute("data-state", n.state_id); NODE_BY_STATE[n.state_id] = g; }
-    const rectAttrs = {x, y, width:w, height:h, rx: n.kind==="controller"?10:8, fill:fillFor(n),
-      stroke: n.supersede_target ? "#d2a8ff" : (KIND_STROKE[n.kind]||"#3d444d")};
+    const rectAttrs = {x, y, width:w, height:h, rx: n.kind==="controller"?10:8};
     if (n.supersede_target) rectAttrs["stroke-dasharray"] = "6 4";
     g.appendChild(mk("rect", rectAttrs));
     const raw = (n.kind==="controller"? "⧉ " : "") + n.label;
@@ -347,25 +457,51 @@ function draw(graph) {
     else if (n.kind==="fork") sub = "parallel";
     else if (n.kind==="controller") sub = n.supersede_target ? "supersede target" : "controller";
     if (sub) g.appendChild(mk("text",{class:"sub", x:p.x, y:p.y+11, "text-anchor":"middle"}, [txt(sub)]));
-    g.addEventListener("click", () => { SEL_NODE = n.id; inspect(n); draw(graph); });
+    // selection is a class toggle, not a relayout — clicking never reflows the graph
+    g.addEventListener("click", () => { selectNode(n); });
     svg.appendChild(g);
   });
 }
 function txt(s){ return document.createTextNode(s); }
 
+// Update selection in place: swap the .sel class and refresh the inspector, without
+// re-running the (async) layout — clicking a node must not reflow the whole graph.
+function selectNode(n) {
+  SEL_NODE = n.id;
+  document.querySelectorAll(".node.sel").forEach(g => g.classList.remove("sel"));
+  const g = document.querySelector(`.node[data-id="${cssEsc(n.id)}"]`);
+  if (g) g.classList.add("sel");
+  inspect(n);
+}
+
+// One-line I/O wiring for an action node's title: strip the shelf prefix from each
+// ref, call out shared-shelf refs separately — e.g. for github:generate_work_units:
+// "procedure: [job] → [purpose, work_unit] (shared: none)".
+function wiringOf(n){
+  const strip = r => r.replace(/^[^.]+\./, "");
+  const isShared = r => r.startsWith("shared.");
+  const ins = n.inputs || [], outs = n.outputs || [];
+  const shared = [...new Set(ins.concat(outs).filter(isShared).map(strip))];
+  const fmt = a => a.filter(r => !isShared(r)).map(strip).join(", ");
+  return `${n.action_kind}: [${fmt(ins)}] → [${fmt(outs)}] (shared: ${shared.join(", ") || "none"})`;
+}
+
 function inspect(n) {
   const rows = [];
   const kv = (k,v) => `<div class="kv"><div class="k">${k}</div><div class="v">${v}</div></div>`;
   const pills = a => a.map(x=>`<span class="pill">${x}</span>`).join("");
+  const sub = n.kind === "action" ? wiringOf(n) : n.kind + (n.phase?" · phase "+n.phase:"");
   const title = `<div class="kv insp-title"><div class="v" style="font-size:14px;font-weight:600">${n.label}</div>
-    <div class="k">${n.kind}${n.phase?" · phase "+n.phase:""}</div></div>`;
+    <div class="k">${escapeHtml(sub)}</div></div>`;
   if (n.kind === "action") {
     rows.push(kv("action kind", n.action_kind));
     if (n.namespace) rows.push(kv("namespace", n.namespace));
     if (n.budget) rows.push(kv("budget bucket", n.budget));
     if (n.permission) rows.push(kv("permission allow", pills(n.permission) || "<i>deny-all</i>"));
     if (n.inputs) rows.push(kv("reads", `<ul class="io">${n.inputs.map(i=>`<li>${i}</li>`).join("")}</ul>`));
-    if (n.outputs) rows.push(kv("writes", `<ul class="io">${n.outputs.map(i=>`<li>${i}</li>`).join("")}</ul>`));
+    // "writes" (deliverables/shared) are deliberately NOT shown here — a probe reveals
+    // them as an actual before/after diff (see renderProbe's "shelf changes"), so the
+    // inspector doesn't pre-announce declared outputs before the node has run.
   } else if (n.kind === "loop") {
     rows.push(kv("max iterations", n.max_iterations));
     if (n.exit_when) rows.push(kv("until (exit when)", `<code>${n.exit_when}</code>`));
@@ -460,11 +596,15 @@ function probeForm(n){
       ${body}${rawJson}<div class="pf-errs" data-ref="${escAttr(ref)}"></div></div>`;
   }).join("");
   return `<div class="probe">
-    <div class="cap">probe · contract-driven · send data → see output</div>
+    <div class="cap">probe</div>
+    <div class="hint">Send test inputs through this state's declared contract and see what it returns and writes. Runs under the mock engine — dry-run, no side effects.</div>
     ${groups}
     <details class="pf-adv"><summary>payload (optional)</summary>
       <textarea id="probe-payload" rows="1" placeholder="JSON payload arg (most actions ignore it)"></textarea></details>
-    <button class="probe-run" id="probe-run">▶ run this state (mock, dry-run)</button>
+    <div class="probe-actions">
+      <button type="button" class="probe-live" id="probe-live" title="Live: run against the real model (costs tokens, needs API keys)">• Live</button>
+      <button class="probe-run" id="probe-run">▶ Probe Node</button>
+    </div>
     <div class="probe-out" id="probe-out"></div>
   </div>`;
 }
@@ -554,17 +694,22 @@ function cssEsc(s){ return String(s).replace(/["\\]/g, "\\$&"); }
 
 function wireProbe(n){
   const btn = el("probe-run"); if (!btn) return;
+  // single live toggle — persisted in PROBE_LIVE across node clicks; on = glows red
+  const liveBtn = el("probe-live");
+  function applyMode(){ if (liveBtn) liveBtn.classList.toggle("on", PROBE_LIVE); }
+  if (liveBtn) liveBtn.addEventListener("click", () => { PROBE_LIVE = !PROBE_LIVE; applyMode(); });
+  applyMode();
   btn.addEventListener("click", async () => {
     const inputs = collectInputs();
     const clientErrs = validateInputs(inputs);
     showFieldErrors(clientErrs);      // instant, contract-checked feedback before the round trip
     const pv = parseVal((el("probe-payload")||{}).value);
     btn.disabled = true;
-    el("probe-out").innerHTML = `<div class="muted">running ${n.label}…</div>`;
+    el("probe-out").innerHTML = `<div class="muted">running ${n.label}${PROBE_LIVE ? " (live model)" : ""}…</div>`;
     try {
       const res = await (await fetch("/api/probe", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ workflow: SEL_WF, token: n.label, inputs, payload: pv })
+        body: JSON.stringify({ workflow: SEL_WF, token: n.label, inputs, payload: pv, live: PROBE_LIVE })
       })).json();
       if (res.validation && Object.keys(res.validation).length) showFieldErrors(res.validation);  // authoritative
       el("probe-out").innerHTML = renderProbe(res);
@@ -587,8 +732,22 @@ function renderProbe(r){
   }
   h += `<div class="pres ${r.ok ? "ok" : "err"}">${r.ok ? "✓ ok" : "✕ error"}</div>`;
   if (r.result && r.result.error) h += `<div class="plabel">error</div><div class="perr">${escapeHtml(r.result.error)}</div>`;
+  // shelf changes: the before/after diff of deliverables + shared — the reason to probe.
+  // Highlighted per shelf (deliverables vs shared) and tagged new/changed.
+  if (r.changes && r.changes.length) {
+    h += `<div class="plabel">shelf changes · deliverables + shared</div>`;
+    h += r.changes.map(c => {
+      const shelf = String(c.ref).split(".")[0];   // "deliverables" | "shared"
+      return `<div class="shelf-change ${shelf}"><div class="sc-head">`
+        + `<span class="sc-ref">${escapeHtml(c.ref)}</span>`
+        + `<span class="sc-tag ${c.status}">${c.status}</span></div>`
+        + `<pre class="pj">${escapeHtml(JSON.stringify(c.value, null, 2))}</pre></div>`;
+    }).join("");
+  } else if (r.ok) {
+    h += `<div class="plabel">shelf changes · deliverables + shared</div>`
+      + `<div class="muted">no changes to deliverables or shared</div>`;
+  }
   if (r.result && r.result.value != null) h += `<div class="plabel">result.value</div>` + j(r.result.value);
-  if (has(r.outputs)) h += `<div class="plabel">writes → shelves</div>` + j(r.outputs);
   if (r.raised && r.raised.length) h += `<div class="plabel">raised events</div>` + j(r.raised);
   if (has(r.result && r.result.meta)) h += `<div class="plabel">meta</div>` + j(r.result.meta);
   if (r.seeded && r.seeded.length) h += `<div class="plabel">seeded</div><div class="muted">${r.seeded.map(escapeHtml).join(", ")}</div>`;
@@ -621,7 +780,7 @@ async function selectWorkflow(name) {
   el("insp").innerHTML = `<div class="placeholder">Click a state to inspect it.</div>`;
   const g = await (await fetch("/api/workflows/" + encodeURIComponent(name))).json();
   if (g.error) { el("svg").innerHTML=""; el("insp").innerHTML = `<div class="placeholder">${g.error}</div>`; return; }
-  draw(g);   // g.schemas rides along on the graph — the probe forms read it via schemaFor()
+  await draw(g);   // g.schemas rides along on the graph — the probe forms read it via schemaFor()
   updateRunButton();
 }
 
@@ -631,11 +790,11 @@ async function refresh() {
 }
 
 function renderLegend() {
-  const items = [["action","#30363d"],["controller","#0d2a30"],["loop","#3a2f0b"],["parallel","#2a2140"],["start","#123020"],["end","#3a1517"]];
+  const items = [["action","--node-action"],["controller","--node-ctrl"],["loop","--node-loop"],["parallel","--node-par"],["start","--node-start"],["end","--node-end"]];
   el("legend").innerHTML = "<span>states:</span>" +
-    items.map(([k,c])=>`<span><span class="sw" style="background:${c}"></span>${k}</span>`).join("") +
-    `<span><span class="sw" style="background:#d29922"></span>loop-back</span>` +
-    `<span><span class="sw" style="background:#241a33;border-color:#d2a8ff;border-style:dashed"></span>supersede target</span>`;
+    items.map(([k,c])=>`<span><span class="sw" style="background:var(${c})"></span>${k}</span>`).join("") +
+    `<span><span class="sw" style="background:var(--edge-loop)"></span>loop-back</span>` +
+    `<span><span class="sw" style="background:var(--node-supersede);border-color:var(--accent2);border-style:dashed"></span>supersede target</span>`;
 }
 
 async function loadSessions() {
@@ -666,22 +825,62 @@ function shortState(s){ const p = s.split("/"); return p[p.length-1]; }
 
 function stopStream() { if (ES) { ES.close(); ES = null; } }
 
+// Open the SSE stream for a run (mock or attached-live) and wire node highlighting.
+function openStream(run) {
+  stopStream(); clearRunVisuals(); el("elog").innerHTML = "";
+  CUR_RUN = run; updateRunButton();
+  setStatus(`${run.id} · ${run.status || "running"}`, "running");
+  ES = new EventSource(`/api/sessions/${encodeURIComponent(run.id)}/stream`);
+  ES.onmessage = ev => handleRunEvent(JSON.parse(ev.data));
+  ES.onerror = () => { /* stream closed; status event already handled the outcome */ };
+}
+
 async function runAndWatch() {
   if (!SEL_WF || !RUNNABLE.includes(SEL_WF)) return;
-  stopStream(); clearRunVisuals();
-  el("elog").innerHTML = "";
   setStatus("starting…", "running");
   let run;
   try {
     run = await (await fetch(`/api/sessions/run?workflow=${encodeURIComponent(SEL_WF)}`, {method:"POST"})).json();
   } catch(e) { setStatus("failed to start", "errored"); return; }
   if (run.error) { setStatus(run.error, "errored"); logEvent(`<span class="lv err">${run.error}</span>`); return; }
-  CUR_RUN = run; updateRunButton();
-  setStatus(`${run.id} · running`, "running");
-  ES = new EventSource(`/api/sessions/${encodeURIComponent(run.id)}/stream`);
-  ES.onmessage = ev => handleRunEvent(JSON.parse(ev.data));
-  ES.onerror = () => { /* stream closed; status event already handled the outcome */ };
+  openStream(run);
 }
+
+// -- external live runs: attach to a sidecar an out-of-process run is writing --
+async function attachLive(id, workflow) {
+  // Match the drawn graph to the run's workflow, else the state ids won't map to nodes.
+  if (workflow && workflow !== SEL_WF) await selectWorkflow(workflow);
+  let run;
+  try {
+    run = await (await fetch("/api/sessions/attach", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id })
+    })).json();
+  } catch(e) { setStatus("attach failed", "errored"); return; }
+  if (run.error) { setStatus(run.error, "errored"); logEvent(`<span class="lv err">${run.error}</span>`); return; }
+  openStream(run);
+  logEvent(`<span class="lv">attached to live run <b>${escapeHtml(id)}</b></span>`);
+}
+
+async function loadLiveRuns() {
+  let runs = [];
+  try { runs = ((await (await fetch("/api/sessions/live")).json()).runs) || []; } catch(e) { return; }
+  const box = el("liveruns"); if (!box) return;
+  if (!runs.length) {
+    box.innerHTML = `<div class="muted small">No live runs detected. Start an external session (e.g. <code>oneshot … --live</code>) — it writes a sidecar the viewer tails here.</div>`;
+    return;
+  }
+  box.innerHTML = runs.map(r => {
+    const st = r.status || "running";
+    return `<div class="liverun" data-id="${escAttr(r.id)}" data-wf="${escAttr(r.workflow||'')}">`
+      + `<div class="lr-main"><span class="lr-id">${escapeHtml(r.id)}</span><span class="st ${st}">${st}</span></div>`
+      + `<div class="lr-sub">${escapeHtml(r.workflow||'?')} · ${r.events||0} events</div></div>`;
+  }).join("");
+  box.querySelectorAll(".liverun").forEach(d =>
+    d.addEventListener("click", () => attachLive(d.dataset.id, d.dataset.wf)));
+}
+let liveTimer = null;
+function startLivePolling(){ loadLiveRuns(); if (!liveTimer) liveTimer = setInterval(loadLiveRuns, 3500); }
+function stopLivePolling(){ if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
 
 function handleRunEvent(e) {
   const t = (e.t!=null) ? `<span class="t">${e.t.toFixed(2)}s</span> ` : "";
@@ -733,6 +932,21 @@ function setInspWidth(px) {
   h.addEventListener("dblclick", () => setInspWidth(INSP_DEFAULT));
   const saved = parseInt(localStorage.getItem("dbg-insp-w") || "", 10);
   if (saved) setInspWidth(saved);
+})();
+
+// -- mocked-session fold (collapsed by default; persisted) --
+// While open, poll for external live runs; stop polling when collapsed (cheap when idle).
+(function wireSessFold(){
+  const d = el("sessFold"); if (!d) return;
+  try { if (localStorage.getItem("dbg-sess-fold") === "open") d.open = true; } catch(e) {}
+  const sync = () => { if (d.open) startLivePolling(); else stopLivePolling(); };
+  d.addEventListener("toggle", () => {
+    try { localStorage.setItem("dbg-sess-fold", d.open ? "open" : "closed"); } catch(e) {}
+    sync();
+  });
+  const rb = el("liverefresh");
+  if (rb) rb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); loadLiveRuns(); });
+  sync();
 })();
 
 // -- light / dark theme toggle (persisted) --

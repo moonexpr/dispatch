@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional
@@ -222,7 +223,19 @@ class Action(ABC):
         except ActionError as exc:
             result = Error(exc, detail=exc.detail or f"{self.kind}:{self.name}")
         except Exception as exc:  # noqa: BLE001 — leaf boundary: failure becomes data
-            result = Error(exc, detail=f"{self.kind}:{self.name} raised {type(exc).__name__}")
+            # Preserve the origin: collapsing a leaf failure to a bare
+            # "raised JSONDecodeError" hides WHERE it came from. Fold the exception
+            # message into the detail, and — under debug (-v / DISPATCH_DEBUG) —
+            # dump the full traceback to the trace stream so the log shows the stack.
+            msg = str(exc).strip()
+            detail = f"{self.kind}:{self.name} raised {type(exc).__name__}"
+            if msg:
+                detail += f": {msg}"
+            if dbg:
+                print(f"  ‼ {'  ' * int(getattr(ctx, 'depth', 0))}{self.kind}:{self.name} "
+                      f"traceback:\n{traceback.format_exc().rstrip()}",
+                      file=sys.stderr, flush=True)
+            result = Error(exc, detail=detail)
         ctx.record(self, result)
         if dbg:
             dt = time.monotonic() - t0
