@@ -764,6 +764,20 @@ def _default_branch(job: Dict[str, Any]) -> str:
     return str(job.get("default_branch") or os.environ.get("PIPELINE_DEFAULT_BRANCH") or "main")
 
 
+def _no_github_issue(issue: Any) -> bool:
+    """True when this run has no backing GitHub issue to mutate. A oneshot job
+    carries a NEGATIVE local work-id (clone/branch naming only); an empty issue
+    means the same. The build phase pushes + opens a PR and deploys as usual, but
+    performs no issue-keyed GitHub mutation (label state machine, ``Closes #``)."""
+    s = "" if issue is None else str(issue).strip()
+    if not s:
+        return True
+    try:
+        return int(s) < 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _engineer_branch(engineering_result: Dict[str, Any], job: Dict[str, Any], issue: str) -> str:
     """The branch the engineering Program pushed its commits to. Prefer a branch the
     program surfaced (value/meta), then a job hint, then the canonical
@@ -865,23 +879,30 @@ def consolidate_pr(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     criteria = work_plan.get("acceptance_criteria") or []
     acc_block = "\n".join(f"- [ ] {c}" for c in criteria) or "- [ ] see issue acceptance criteria"
     summary = (engineering_result.get("meta") or {}).get("summary") or ""
-    pr_title = f"Implement #{issue}: {title}"
+    # No backing GitHub issue (oneshot / prompt intake): still push the branch and
+    # open ONE PR, but drop the ``#<issue>`` reference and the ``Closes #<n>``
+    # auto-close trailer — there is no issue to number or close.
+    ghi = not _no_github_issue(issue)
+    ref = f"#{issue}" if ghi else "the request"
+    close = f"\n\nCloses #{issue}" if ghi else ""
+    pr_title = f"Implement #{issue}: {title}" if ghi else f"Implement: {title}"
     pr_body = (
-        f"Consolidated implementation of #{issue} by the dispatch BaseWorkflow build "
+        f"Consolidated implementation of {ref} by the dispatch BaseWorkflow build "
         f"phase. The engineering agents committed to `{branch}`; admin squashed those "
         f"commits into one and opened this single PR.\n\n## Acceptance\n{acc_block}\n\n"
-        f"{summary}\n\nCloses #{issue}"
+        f"{summary}{close}"
     )
     # The consolidated commit message admin authors on the squashed branch (distinct
     # from the PR body): a proper title + trimmed rationale + the auto-close trailer.
     commit_summary = summary.strip()
     if len(commit_summary) > 600:
         commit_summary = commit_summary[:600].rstrip() + "…"
+    commit_title = f"Implement #{issue}: {title}" if ghi else f"Implement: {title}"
     commit_message = (
-        f"Implement #{issue}: {title}\n\n"
+        f"{commit_title}\n\n"
         + (commit_summary + "\n\n" if commit_summary else "")
         + f"Consolidated by the dispatch Admin build phase from the engineering work "
-        f"on {branch}.\n\nCloses #{issue}"
+        f"on {branch}.{close}"
     )
     # --repo is appended by gh_mutate / gh_repo_args from PIPELINE_REPO (parity with
     # intake_invoice), so it is NOT in the arg vector here.
@@ -986,6 +1007,22 @@ def intake_invoice(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     summary = (engineering_result.get("meta") or {}).get("summary") or "(no summary)"
 
     dry = bool(getattr(ctx, "dry_run", True))
+
+    # No backing GitHub issue (oneshot / prompt intake): the label state machine
+    # has nothing to advance and no issue/PR to mutate. The branch is pushed, the
+    # PR is open (consolidate_pr) and the app is deployed (publish) — we simply
+    # skip the issue-keyed GitHub bookkeeping rather than mutate a non-existent
+    # issue. This is the honest replacement for a fabricated GitHub issue.
+    if _no_github_issue(issue):
+        common.log(f"intake-invoice: issue=#{issue or 'none'} status={status} "
+                   f"pr={pr_number or 'none'} — no GitHub issue backing this run; "
+                   f"skipping the label state machine")
+        return {"intake": {
+            "issue": issue, "pr_number": pr_number, "status": status,
+            "summary": summary, "route_used": route_used, "dry_run": dry,
+            "mutations": [], "skipped_no_issue": True,
+        }}
+
     actions: list = []  # the gh mutations performed (or, under dry-run, intended)
 
     def _mutate(*args: str) -> None:
