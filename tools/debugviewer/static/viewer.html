@@ -202,6 +202,16 @@
     padding: 7px 8px; font: 10.5px/1.45 ui-monospace, Menlo, monospace; color: var(--code-ink); overflow-x: auto; max-height: 240px; white-space: pre; }
   .probe-out .perr { color: var(--err); font-size: 11.5px; word-break: break-word; }
   .probe-out .muted { color: var(--muted); font-size: 11px; }
+  /* shelf-change diff blocks: highlighted per shelf (deliverables = green, shared = purple) */
+  .probe-out .shelf-change { border-left: 3px solid var(--line); border-radius: 0 6px 6px 0; padding: 6px 8px; margin: 6px 0; background: var(--input-bg); }
+  .probe-out .shelf-change.deliverables { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--input-bg)); }
+  .probe-out .shelf-change.shared { border-left-color: var(--accent2); background: color-mix(in srgb, var(--accent2) 9%, var(--input-bg)); }
+  .probe-out .sc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .probe-out .sc-ref { font-weight: 600; font-size: 11px; word-break: break-all; }
+  .probe-out .sc-tag { margin-left: auto; font-size: 9px; text-transform: uppercase; letter-spacing: .4px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; color: var(--muted); }
+  .probe-out .sc-tag.new { color: var(--ok); border-color: var(--ok); }
+  .probe-out .sc-tag.changed { color: var(--warn); border-color: var(--warn); }
+  .probe-out .shelf-change pre.pj { margin: 0; }
 
   /* compact panel pinned to the foot of the inspector column (the #insp body above
      is flex:1 and pushes it down). flex:0 0 auto = size to content, not 46% of panel. */
@@ -219,7 +229,18 @@
   .sessions .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex: 0 0 auto; padding: 0; }
   .sessions .row .st { margin-left: auto; font-size: 11px; }
   .st.running { color: var(--accent); } .st.succeeded { color: var(--ok); }
-  .st.failed, .st.errored { color: var(--err); } .st.idle { color: var(--muted); }
+  .st.failed, .st.errored { color: var(--err); } .st.idle, .st.stopped { color: var(--muted); }
+  /* live runs: out-of-process sidecars the viewer tails (foundation.trace) */
+  .sessions .live-cap { padding: 12px 0 5px; display: flex; align-items: center; gap: 6px; }
+  .sessions .mini { padding: 1px 6px; font-size: 10px; line-height: 1.3; }
+  .liveruns { display: flex; flex-direction: column; gap: 6px; }
+  .liveruns .small { font-size: 10.5px; }
+  .liverun { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; cursor: pointer; background: var(--input-bg); }
+  .liverun:hover { border-color: var(--accent); }
+  .lr-main { display: flex; align-items: center; gap: 6px; }
+  .lr-id { font-weight: 600; font-size: 11px; word-break: break-all; }
+  .lr-main .st { margin-left: auto; font-size: 10px; }
+  .lr-sub { color: var(--muted); font-size: 10px; margin-top: 2px; }
   button.run { border-color: var(--ok); color: var(--ok); }
   button:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
   .elog { height: 168px; overflow-y: auto; font-size: 10.5px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--input-bg); }
@@ -263,6 +284,8 @@
       <span class="st idle" id="runstatus">idle</span>
     </div>
     <div class="elog" id="elog"><div class="ev lv">No run yet. “run &amp; watch” drives the workflow under the mock engine (no network) and lights up each state as it executes.</div></div>
+    <div class="cap live-cap">live runs <button type="button" class="mini" id="liverefresh" title="Rescan for external live-run sidecars">↻</button></div>
+    <div class="liveruns" id="liveruns"></div>
   </details>
 </aside>
 
@@ -476,7 +499,9 @@ function inspect(n) {
     if (n.budget) rows.push(kv("budget bucket", n.budget));
     if (n.permission) rows.push(kv("permission allow", pills(n.permission) || "<i>deny-all</i>"));
     if (n.inputs) rows.push(kv("reads", `<ul class="io">${n.inputs.map(i=>`<li>${i}</li>`).join("")}</ul>`));
-    if (n.outputs) rows.push(kv("writes", `<ul class="io">${n.outputs.map(i=>`<li>${i}</li>`).join("")}</ul>`));
+    // "writes" (deliverables/shared) are deliberately NOT shown here — a probe reveals
+    // them as an actual before/after diff (see renderProbe's "shelf changes"), so the
+    // inspector doesn't pre-announce declared outputs before the node has run.
   } else if (n.kind === "loop") {
     rows.push(kv("max iterations", n.max_iterations));
     if (n.exit_when) rows.push(kv("until (exit when)", `<code>${n.exit_when}</code>`));
@@ -707,8 +732,22 @@ function renderProbe(r){
   }
   h += `<div class="pres ${r.ok ? "ok" : "err"}">${r.ok ? "✓ ok" : "✕ error"}</div>`;
   if (r.result && r.result.error) h += `<div class="plabel">error</div><div class="perr">${escapeHtml(r.result.error)}</div>`;
+  // shelf changes: the before/after diff of deliverables + shared — the reason to probe.
+  // Highlighted per shelf (deliverables vs shared) and tagged new/changed.
+  if (r.changes && r.changes.length) {
+    h += `<div class="plabel">shelf changes · deliverables + shared</div>`;
+    h += r.changes.map(c => {
+      const shelf = String(c.ref).split(".")[0];   // "deliverables" | "shared"
+      return `<div class="shelf-change ${shelf}"><div class="sc-head">`
+        + `<span class="sc-ref">${escapeHtml(c.ref)}</span>`
+        + `<span class="sc-tag ${c.status}">${c.status}</span></div>`
+        + `<pre class="pj">${escapeHtml(JSON.stringify(c.value, null, 2))}</pre></div>`;
+    }).join("");
+  } else if (r.ok) {
+    h += `<div class="plabel">shelf changes · deliverables + shared</div>`
+      + `<div class="muted">no changes to deliverables or shared</div>`;
+  }
   if (r.result && r.result.value != null) h += `<div class="plabel">result.value</div>` + j(r.result.value);
-  if (has(r.outputs)) h += `<div class="plabel">writes → shelves</div>` + j(r.outputs);
   if (r.raised && r.raised.length) h += `<div class="plabel">raised events</div>` + j(r.raised);
   if (has(r.result && r.result.meta)) h += `<div class="plabel">meta</div>` + j(r.result.meta);
   if (r.seeded && r.seeded.length) h += `<div class="plabel">seeded</div><div class="muted">${r.seeded.map(escapeHtml).join(", ")}</div>`;
@@ -786,22 +825,62 @@ function shortState(s){ const p = s.split("/"); return p[p.length-1]; }
 
 function stopStream() { if (ES) { ES.close(); ES = null; } }
 
+// Open the SSE stream for a run (mock or attached-live) and wire node highlighting.
+function openStream(run) {
+  stopStream(); clearRunVisuals(); el("elog").innerHTML = "";
+  CUR_RUN = run; updateRunButton();
+  setStatus(`${run.id} · ${run.status || "running"}`, "running");
+  ES = new EventSource(`/api/sessions/${encodeURIComponent(run.id)}/stream`);
+  ES.onmessage = ev => handleRunEvent(JSON.parse(ev.data));
+  ES.onerror = () => { /* stream closed; status event already handled the outcome */ };
+}
+
 async function runAndWatch() {
   if (!SEL_WF || !RUNNABLE.includes(SEL_WF)) return;
-  stopStream(); clearRunVisuals();
-  el("elog").innerHTML = "";
   setStatus("starting…", "running");
   let run;
   try {
     run = await (await fetch(`/api/sessions/run?workflow=${encodeURIComponent(SEL_WF)}`, {method:"POST"})).json();
   } catch(e) { setStatus("failed to start", "errored"); return; }
   if (run.error) { setStatus(run.error, "errored"); logEvent(`<span class="lv err">${run.error}</span>`); return; }
-  CUR_RUN = run; updateRunButton();
-  setStatus(`${run.id} · running`, "running");
-  ES = new EventSource(`/api/sessions/${encodeURIComponent(run.id)}/stream`);
-  ES.onmessage = ev => handleRunEvent(JSON.parse(ev.data));
-  ES.onerror = () => { /* stream closed; status event already handled the outcome */ };
+  openStream(run);
 }
+
+// -- external live runs: attach to a sidecar an out-of-process run is writing --
+async function attachLive(id, workflow) {
+  // Match the drawn graph to the run's workflow, else the state ids won't map to nodes.
+  if (workflow && workflow !== SEL_WF) await selectWorkflow(workflow);
+  let run;
+  try {
+    run = await (await fetch("/api/sessions/attach", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id })
+    })).json();
+  } catch(e) { setStatus("attach failed", "errored"); return; }
+  if (run.error) { setStatus(run.error, "errored"); logEvent(`<span class="lv err">${run.error}</span>`); return; }
+  openStream(run);
+  logEvent(`<span class="lv">attached to live run <b>${escapeHtml(id)}</b></span>`);
+}
+
+async function loadLiveRuns() {
+  let runs = [];
+  try { runs = ((await (await fetch("/api/sessions/live")).json()).runs) || []; } catch(e) { return; }
+  const box = el("liveruns"); if (!box) return;
+  if (!runs.length) {
+    box.innerHTML = `<div class="muted small">No live runs detected. Start an external session (e.g. <code>oneshot … --live</code>) — it writes a sidecar the viewer tails here.</div>`;
+    return;
+  }
+  box.innerHTML = runs.map(r => {
+    const st = r.status || "running";
+    return `<div class="liverun" data-id="${escAttr(r.id)}" data-wf="${escAttr(r.workflow||'')}">`
+      + `<div class="lr-main"><span class="lr-id">${escapeHtml(r.id)}</span><span class="st ${st}">${st}</span></div>`
+      + `<div class="lr-sub">${escapeHtml(r.workflow||'?')} · ${r.events||0} events</div></div>`;
+  }).join("");
+  box.querySelectorAll(".liverun").forEach(d =>
+    d.addEventListener("click", () => attachLive(d.dataset.id, d.dataset.wf)));
+}
+let liveTimer = null;
+function startLivePolling(){ loadLiveRuns(); if (!liveTimer) liveTimer = setInterval(loadLiveRuns, 3500); }
+function stopLivePolling(){ if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
 
 function handleRunEvent(e) {
   const t = (e.t!=null) ? `<span class="t">${e.t.toFixed(2)}s</span> ` : "";
@@ -856,10 +935,18 @@ function setInspWidth(px) {
 })();
 
 // -- mocked-session fold (collapsed by default; persisted) --
+// While open, poll for external live runs; stop polling when collapsed (cheap when idle).
 (function wireSessFold(){
   const d = el("sessFold"); if (!d) return;
   try { if (localStorage.getItem("dbg-sess-fold") === "open") d.open = true; } catch(e) {}
-  d.addEventListener("toggle", () => { try { localStorage.setItem("dbg-sess-fold", d.open ? "open" : "closed"); } catch(e) {} });
+  const sync = () => { if (d.open) startLivePolling(); else stopLivePolling(); };
+  d.addEventListener("toggle", () => {
+    try { localStorage.setItem("dbg-sess-fold", d.open ? "open" : "closed"); } catch(e) {}
+    sync();
+  });
+  const rb = el("liverefresh");
+  if (rb) rb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); loadLiveRuns(); });
+  sync();
 })();
 
 // -- light / dark theme toggle (persisted) --

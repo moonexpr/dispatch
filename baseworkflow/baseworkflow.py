@@ -246,8 +246,23 @@ def run_live(
     svc = services if services is not None else bw_services.build_services()
     wf = BaseWorkflow(factory, job=job, triage=triage, request=request, services=svc)
     ctx = wf.context(dry_run=dry_run)
+
+    # Opt-in live-trace sidecar so an out-of-process watcher (the debug viewer) can
+    # follow this run. Off unless $DISPATCH_LIVE_TRACE[_DIR] is set; never overrides a
+    # caller-supplied observer; passive (an observer cannot change the run's outcome).
+    observer = getattr(ctx, "observer", None)
+    if observer is None:
+        try:
+            from foundation import trace
+            if trace.tracing_enabled():
+                observer = trace.new_observer("baseworkflow")
+                ctx.observer = observer
+        except Exception:  # noqa: BLE001 — tracing is best-effort telemetry
+            observer = None
     try:
         result = wf.run(ctx=ctx)
+        if observer is not None:
+            observer.finish("succeeded" if result.ok else "failed")
         return {
             "result": result,
             "ctx": ctx,
@@ -255,5 +270,9 @@ def run_live(
             "deliverables": wf.shelves.deliverables.snapshot(),
             "interpreter": wf.last_interpreter,
         }
+    except BaseException:
+        if observer is not None:
+            observer.finish("errored")
+        raise
     finally:
         shutil.rmtree(shelf_root, ignore_errors=True)

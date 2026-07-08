@@ -15,11 +15,15 @@ Endpoints
                                     -> {ok, examples}: realistic "shelf.key"->value
                                        snapshot from the offline mock, for typed probe forms
     GET  /api/sessions              -> {runs: [...], runnable: [...]}
-    POST /api/probe                 -> run ONE action in isolation against the mock
-                                       engine; body {workflow, token, inputs, payload}
-                                       -> {ok, result, outputs, raised, trace}
-    POST /api/sessions/run          -> start an observed run; {id, workflow, status}
+    GET  /api/sessions/live         -> {runs: [...]}: out-of-process live runs, from
+                                       sidecars an external run wrote (foundation.trace)
+    POST /api/probe                 -> run ONE action in isolation; body {workflow,
+                                       token, inputs, payload, live}
+                                       -> {ok, result, outputs, changes, raised, trace}
+    POST /api/sessions/run          -> start an observed (in-process mock) run
                                        body/query: workflow=<name>&pace=<seconds>
+    POST /api/sessions/attach       -> tail an external live sidecar into a Run so it
+                                       streams like a run; body {id} -> {id, workflow, status}
     GET  /api/sessions/<id>/stream  -> SSE: live enter/leave/event/status stream
     POST /api/sessions/<id>/stop    -> request the run stop
 
@@ -261,6 +265,18 @@ def probe_action(workflow: str, token: str, inputs: Dict[str, Any],
             except AttributeError:
                 pass
 
+        # Snapshot the two mutable shelves AFTER seeding, so the diff below reflects only
+        # what this action itself writes — the whole point of a probe is to see the change
+        # it makes to ``deliverables`` and ``shared``.
+        def _snap(name: str) -> Dict[str, Any]:
+            sh = getattr(shelves, name, None)
+            try:
+                return dict(sh.snapshot()) if sh is not None else {}
+            except Exception:  # noqa: BLE001
+                return {}
+
+        before = {"deliverables": _snap("deliverables"), "shared": _snap("shared")}
+
         result = action.run(payload, ctx)  # Action.run traps exceptions into an Error Result
         outputs: Dict[str, Any] = {}
         for r in manifest.outputs:
@@ -268,6 +284,24 @@ def probe_action(workflow: str, token: str, inputs: Dict[str, Any],
                 outputs[r.ref] = getattr(shelves, r.shelf).get(r.key)
             except Exception:  # noqa: BLE001
                 pass
+
+        # Diff deliverables + shared to surface exactly what the action mutated (new vs
+        # changed keys). This is what the inspector highlights after a probe.
+        changes: List[Dict[str, Any]] = []
+        for name in ("deliverables", "shared"):
+            after = _snap(name)
+            prev = before[name]
+            for k, v in after.items():
+                if k not in prev:
+                    changes.append({"ref": f"{name}.{k}", "status": "new", "value": v})
+                else:
+                    try:
+                        differs = prev[k] != v
+                    except Exception:  # noqa: BLE001 — unorderable/odd types → treat as changed
+                        differs = True
+                    if differs:
+                        changes.append({"ref": f"{name}.{k}", "status": "changed", "value": v})
+
         raised = []
         for e in getattr(ctx, "raised", []):
             p = getattr(e, "payload", None)
@@ -288,6 +322,7 @@ def probe_action(workflow: str, token: str, inputs: Dict[str, Any],
                 "error": None if result.ok else str(getattr(result, "error", "")),
             },
             "outputs": outputs,
+            "changes": changes,  # [{ref, status: new|changed, value}] over deliverables + shared
             "raised": raised,
             "trace": ctx.trace,
         })
@@ -442,6 +477,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("viewer.html", "text/html; charset=utf-8")
             elif route == "/vendor/elk.bundled.js":
                 self._static_gz("vendor/elk.bundled.js", "application/javascript; charset=utf-8")
+            elif route == "/api/sessions/live":
+                self._json({"runs": BUS.list_external()})
             elif route == "/api/workflows":
                 self._json(list_workflows())
             elif route.startswith("/api/workflows/") and route.endswith("/examples"):
@@ -494,6 +531,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": str(exc)}, 400)
                     return
                 self._json(run.summary(), 201)
+            elif route == "/api/sessions/attach":
+                body = self._json_body()
+                rid = str(body.get("id") or "")
+                run = BUS.attach_external(rid) if rid else None
+                if run is None:
+                    self._json({"error": f"no live sidecar {rid!r} in {BUS._trace_dir()!r}"}, 404)
+                else:
+                    self._json(run.summary(), 201)
             elif route.startswith("/api/sessions/") and route.endswith("/stop"):
                 rid = route[len("/api/sessions/"):-len("/stop")]
                 run = BUS.get(rid)
