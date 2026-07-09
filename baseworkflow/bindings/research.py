@@ -331,4 +331,10 @@ def register(reg: Any) -> None:
     reg.register_predicate("questions_satisfied", questions_satisfied)
     reg.register_predicate("research_exhausted", research_exhausted)
     from .architect import LIVE_INFERENCE_WORKERS
-    LIVE_INFERENCE_WORKERS["research_investigate"] = _investigate_worker
+    # Keyed by the action token's LAST SEGMENT ("research:investigate" -> "investigate"),
+    # matching ArchitectFactory._inference_runner's `token.split(":")[-1]` dispatch — NOT
+    # the manifest bind name "research_investigate". They differ only for this token, so
+    # the old key never matched: the live worker was silently bypassed and the raw model
+    # text (prose) hit the JSON adapter, failing the tick. (Every other worker's bind
+    # name equals its token's last segment, so they matched by coincidence.)
+    LIVE_INFERENCE_WORKERS["investigate"] = _investigate_worker
