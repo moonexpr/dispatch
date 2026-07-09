@@ -191,8 +191,14 @@ class Bus:
             files = []
         out: List[Dict[str, Any]] = []
         for p in files[:50]:
+            try:
+                mtime = os.path.getmtime(p)
+            except OSError:
+                mtime = 0.0
+            # mtime lets the UI tell a genuinely-active run from a sidecar whose writer
+            # died without a terminal status line (which otherwise reads "running" forever).
             out.append({"id": os.path.splitext(os.path.basename(p))[0],
-                        "path": p, **self._read_sidecar(p)})
+                        "path": p, "mtime": mtime, **self._read_sidecar(p)})
         return out
 
     def attach_external(self, run_id: str) -> Optional[Run]:

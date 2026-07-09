@@ -27,11 +27,18 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from typing import Any, Dict, Optional
 
 _ENV_DIR = "DISPATCH_LIVE_TRACE_DIR"
 _ENV_ON = "DISPATCH_LIVE_TRACE"
+
+# How often the FileObserver bumps its sidecar's mtime while the run is alive, so a
+# watcher can tell a live-but-quiet run (mid-inference — no state transitions for
+# minutes) from a dead one whose writer vanished. Must be well under the watcher's
+# staleness cutoff.
+_HEARTBEAT_SECS = 15.0
 
 
 def trace_dir() -> str:
@@ -64,6 +71,20 @@ class FileObserver:
         except Exception:  # noqa: BLE001
             pass
         self._write({"type": "meta", "workflow": workflow, "started": self._started}, mode="w")
+        # Liveness heartbeat: bump the sidecar's mtime every _HEARTBEAT_SECS so a
+        # watcher can distinguish a live-but-quiet run from a dead writer. Daemon
+        # thread — it dies with the process (a hard kill correctly stops the beat),
+        # and finish() stops it cleanly on a normal end.
+        self._stop = threading.Event()
+        self._beat = threading.Thread(target=self._heartbeat, name="trace-heartbeat", daemon=True)
+        self._beat.start()
+
+    def _heartbeat(self) -> None:
+        while not self._stop.wait(_HEARTBEAT_SECS):
+            try:
+                os.utime(self.path, None)  # touch mtime only; adds no line for the tailer to parse
+            except OSError:
+                return
 
     def _write(self, event: Dict[str, Any], *, mode: str = "a") -> None:
         try:
@@ -84,8 +105,12 @@ class FileObserver:
         self._write({"type": "event", **event})
 
     def finish(self, status: str) -> None:
-        """Write the terminal status line. Idempotent enough for best-effort use."""
+        """Write the terminal status line and stop the heartbeat. Idempotent enough
+        for best-effort use."""
         self._write({"type": "status", "status": status})
+        stop = getattr(self, "_stop", None)
+        if stop is not None:
+            stop.set()
 
 
 def new_observer(workflow: str, *, run_id: Optional[str] = None) -> "FileObserver":

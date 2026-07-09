@@ -13,6 +13,7 @@
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
     --edge: #566; --edge-loop: #d29922;
     --insp-w: 300px;   /* inspector width — the drag handle rewrites this */
+    --side-w: 232px;   /* left sidebar width — its drag handle rewrites this */
     --input-bg: #0d1117;   /* form fields, code + event panes */
     --dot: #1b2129;        /* canvas dot-grid */
     --code-ink: #a5d6ff;   /* JSON output text */
@@ -50,7 +51,7 @@
   body {
     background: var(--bg); color: var(--ink);
     font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    display: grid; grid-template-columns: 232px 1fr var(--insp-w); grid-template-rows: 46px 1fr;
+    display: grid; grid-template-columns: var(--side-w) 1fr var(--insp-w); grid-template-rows: 46px 1fr;
     grid-template-areas: "head head head" "side canvas insp";
     height: 100vh; overflow: hidden; padding: 0;
   }
@@ -73,7 +74,11 @@
   button:hover, select:hover { border-color: var(--accent); }
   button.on { border-color: var(--accent); color: var(--accent); }
 
-  aside.side { grid-area: side; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+  aside.side { grid-area: side; position: relative; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+  /* left-sidebar drag handle: sits on the sidebar's right edge; mirrors .insp-resize */
+  .side-resize { position: absolute; right: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 6; }
+  .side-resize::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: transparent; transition: background .15s; }
+  .side-resize:hover::after, body.resizing .side-resize::after { background: var(--accent); }
   .side .cap { padding: 10px 14px 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
   .wf { padding: 9px 14px; border-left: 3px solid transparent; cursor: pointer; }
   .wf:hover { background: var(--panel2); }
@@ -215,7 +220,8 @@
 
   /* compact panel pinned to the foot of the inspector column (the #insp body above
      is flex:1 and pushes it down). flex:0 0 auto = size to content, not 46% of panel. */
-  .sessions { border-top: 1px solid var(--line); padding: 12px 14px; background: var(--panel2); display: flex; flex-direction: column; flex: 0 0 auto; }
+  /* live-sessions panel: top of the left sidebar, above the workflow list */
+  .sessions { border-bottom: 1px solid var(--line); padding: 12px 14px; background: var(--panel2); display: flex; flex-direction: column; }
   .sessions .cap { padding: 0 0 6px; }
   /* collapsible: summary keeps the .cap look, disclosure arrow floats right */
   .sessions > summary { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: center; }
@@ -231,7 +237,7 @@
   .st.running { color: var(--accent); } .st.succeeded { color: var(--ok); }
   .st.failed, .st.errored { color: var(--err); } .st.idle, .st.stopped { color: var(--muted); }
   /* live runs: out-of-process sidecars the viewer tails (foundation.trace) */
-  .sessions .live-cap { padding: 12px 0 5px; display: flex; align-items: center; gap: 6px; }
+  .sessions .live-cap { padding: 0 0 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .sessions .mini { padding: 1px 6px; font-size: 10px; line-height: 1.3; }
   .liveruns { display: flex; flex-direction: column; gap: 6px; }
   .liveruns .small { font-size: 10.5px; }
@@ -241,6 +247,19 @@
   .lr-id { font-weight: 600; font-size: 11px; word-break: break-all; }
   .lr-main .st { margin-left: auto; font-size: 10px; }
   .lr-sub { color: var(--muted); font-size: 10px; margin-top: 2px; }
+  /* live-sessions header: label + rescan/auto controls, run status pinned right */
+  .live-cap .st { margin-left: auto; }
+  .mini.toggle { color: var(--muted); }
+  .mini.toggle.on { color: var(--accent); border-color: var(--accent); }
+  /* mock runner tucked into a small collapsed fold below the live sessions */
+  .mockfold { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .mockfold > summary { list-style: none; cursor: pointer; user-select: none; color: var(--muted);
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px; padding: 2px 0; display: flex; align-items: center; }
+  .mockfold > summary::-webkit-details-marker { display: none; }
+  .mockfold > summary::after { content: "▾"; margin-left: auto; font-size: 10px; transition: transform .12s; }
+  .mockfold:not([open]) > summary::after { transform: rotate(-90deg); }
+  .mockfold > summary:hover { color: var(--accent); }
+  .mockfold .row { margin-top: 8px; }
   button.run { border-color: var(--ok); color: var(--ok); }
   button:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
   .elog { height: 168px; overflow-y: auto; font-size: 10.5px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--input-bg); }
@@ -264,8 +283,25 @@
 </header>
 
 <aside class="side">
+  <div class="side-resize" id="sideResize" title="Drag to resize · double-click to reset"></div>
+  <section class="sessions" id="sessions">
+    <div class="cap live-cap">live sessions
+      <button type="button" class="mini" id="liverefresh" title="Rescan for external live-run sidecars">↻</button>
+      <button type="button" class="mini toggle on" id="autoattach" title="Auto-attach the newest live run as it appears">⦿ auto</button>
+      <span class="st idle" id="runstatus">idle</span>
+    </div>
+    <div class="liveruns" id="liveruns"></div>
+    <div class="elog" id="elog"><div class="ev lv">Waiting for a live session… start one (e.g. <code>oneshot … --live</code>) and it attaches here automatically. Or use the mock runner below.</div></div>
+    <!--<details class="mockfold" id="mockFold">
+      <summary class="cap">mock run · in-process, no network</summary>
+      <div class="row">
+        <button class="run" id="runbtn" title="Run this workflow under the mock engine and watch it live">▶ run &amp; watch</button>
+      </div>
+		</details>-->
+  </section>
   <div class="cap">workflows</div>
   <div id="wflist"></div>
+	<button class="run" id="runbtn" title="Run this workflow under the mock engine and watch it live">▶ run &amp; watch</button>
   <div class="legend" id="legend"></div>
 </aside>
 
@@ -277,16 +313,6 @@
   <div class="insp-resize" id="inspResize" title="Drag to resize · double-click to reset"></div>
   <div class="cap">inspector</div>
   <div class="body" id="insp"><div class="placeholder">Click a state to inspect its action, budget, permissions and I/O.</div></div>
-  <details class="sessions" id="sessFold">
-    <summary class="cap">mocked session</summary>
-    <div class="row">
-      <button class="run" id="runbtn" title="Run this workflow under the mock engine and watch it live">▶ run &amp; watch</button>
-      <span class="st idle" id="runstatus">idle</span>
-    </div>
-    <div class="elog" id="elog"><div class="ev lv">No run yet. “run &amp; watch” drives the workflow under the mock engine (no network) and lights up each state as it executes.</div></div>
-    <div class="cap live-cap">live runs <button type="button" class="mini" id="liverefresh" title="Rescan for external live-run sidecars">↻</button></div>
-    <div class="liveruns" id="liveruns"></div>
-  </details>
 </aside>
 
 <script>
@@ -296,6 +322,8 @@ let SEL_WF = null, SEL_NODE = null, GRAPH = null, autoTimer = null;
 let RUNNABLE = [], NODE_BY_STATE = {}, ES = null, CUR_RUN = null;
 let RUN_VIS = {};          // state_id -> "active"|"done-ok"|"done-err": run highlights, survive a redraw
 let LAST_GRAPH_SIG = null;  // signature of the last-drawn graph, so an unchanged refresh skips the (flashing) redraw
+let AUTO_ATTACH = true;     // auto-attach the newest actively-running external run
+let ATTACHED_ID = null;     // sidecar id we've attached (claimed before the async attach, to prevent double-attach)
 let ATTR_OPEN = false;  // inspector "attributes" fold state — collapsed by default, preserved across node clicks
 let PROBE_LIVE = false;  // probe mock↔live mode — preserved across node clicks; live calls the real model
 // The declarative shelf-key contract for the selected workflow (graph.schemas):
@@ -879,6 +907,7 @@ async function runAndWatch() {
 
 // -- external live runs: attach to a sidecar an out-of-process run is writing --
 async function attachLive(id, workflow) {
+  ATTACHED_ID = id;   // claim immediately so a concurrent poll's auto-attach doesn't double-fire
   // Match the drawn graph to the run's workflow, else the state ids won't map to nodes.
   if (workflow && workflow !== SEL_WF) await selectWorkflow(workflow);
   let run;
@@ -886,10 +915,27 @@ async function attachLive(id, workflow) {
     run = await (await fetch("/api/sessions/attach", {
       method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id })
     })).json();
-  } catch(e) { setStatus("attach failed", "errored"); return; }
-  if (run.error) { setStatus(run.error, "errored"); logEvent(`<span class="lv err">${run.error}</span>`); return; }
+  } catch(e) { ATTACHED_ID = null; setStatus("attach failed", "errored"); return; }
+  if (run.error) { ATTACHED_ID = null; setStatus(run.error, "errored"); logEvent(`<span class="lv err">${run.error}</span>`); return; }
   openStream(run);
   logEvent(`<span class="lv">attached to live run <b>${escapeHtml(id)}</b></span>`);
+}
+
+// A run is "live" only if it says running AND its sidecar was touched recently. The
+// writer heartbeats the mtime every ~15s (foundation.trace) even mid-inference, so a
+// stale mtime means the writer is gone, not merely busy — 60s is a safe 4x margin.
+const STALE_SECS = 60;
+function isFreshRunning(r){
+  return (r.status || "running") === "running"
+    && (r.mtime == null || (Date.now() / 1000 - r.mtime) < STALE_SECS);
+}
+// Auto-follow the newest actively-running external run so a live session tracks
+// itself. Never hijacks a stream in progress, and never re-attaches the same one.
+function maybeAutoAttach(runs) {
+  if (!AUTO_ATTACH || ES) return;              // disabled, or already streaming — leave it
+  const live = runs.find(isFreshRunning);       // runs are newest-first → freshest running
+  if (!live || live.id === ATTACHED_ID) return;
+  attachLive(live.id, live.workflow);
 }
 
 async function loadLiveRuns() {
@@ -908,6 +954,7 @@ async function loadLiveRuns() {
   }).join("");
   box.querySelectorAll(".liverun").forEach(d =>
     d.addEventListener("click", () => attachLive(d.dataset.id, d.dataset.wf)));
+  maybeAutoAttach(runs);
 }
 let liveTimer = null;
 function startLivePolling(){ loadLiveRuns(); if (!liveTimer) liveTimer = setInterval(loadLiveRuns, 3500); }
@@ -967,19 +1014,46 @@ function setInspWidth(px) {
   if (saved) setInspWidth(saved);
 })();
 
-// -- mocked-session fold (collapsed by default; persisted) --
-// While open, poll for external live runs; stop polling when collapsed (cheap when idle).
-(function wireSessFold(){
-  const d = el("sessFold"); if (!d) return;
-  try { if (localStorage.getItem("dbg-sess-fold") === "open") d.open = true; } catch(e) {}
-  const sync = () => { if (d.open) startLivePolling(); else stopLivePolling(); };
-  d.addEventListener("toggle", () => {
-    try { localStorage.setItem("dbg-sess-fold", d.open ? "open" : "closed"); } catch(e) {}
-    sync();
-  });
+// -- left sidebar resize: drag the handle on its right edge; double-click to reset --
+const SIDE_MIN = 180, SIDE_DEFAULT = 232;
+function setSideWidth(px) {
+  const max = Math.max(SIDE_MIN, Math.min(480, window.innerWidth - 500));  // keep canvas + inspector usable
+  const w = Math.min(max, Math.max(SIDE_MIN, px));
+  document.documentElement.style.setProperty("--side-w", w + "px");
+  try { localStorage.setItem("dbg-side-w", String(w)); } catch(e) {}
+}
+(function wireSideResize(){
+  const h = el("sideResize"); if (!h) return;
+  let dragging = false;
+  h.addEventListener("mousedown", e => { dragging = true; document.body.classList.add("resizing"); e.preventDefault(); });
+  window.addEventListener("mousemove", e => { if (dragging) setSideWidth(e.clientX); });  // sidebar starts at x=0 → width = clientX
+  window.addEventListener("mouseup", () => { if (dragging) { dragging = false; document.body.classList.remove("resizing"); } });
+  h.addEventListener("dblclick", () => setSideWidth(SIDE_DEFAULT));
+  const saved = parseInt(localStorage.getItem("dbg-side-w") || "", 10);
+  if (saved) setSideWidth(saved);
+})();
+
+// -- live sessions panel: always polling (a live session must surface with no digging),
+// plus the auto-attach toggle and the collapsed mock-runner fold. --
+(function wireSessions(){
+  try { if (localStorage.getItem("dbg-autoattach") === "0") AUTO_ATTACH = false; } catch(e) {}
+  const ab = el("autoattach");
+  if (ab) {
+    ab.classList.toggle("on", AUTO_ATTACH);
+    ab.addEventListener("click", () => {
+      AUTO_ATTACH = !AUTO_ATTACH;
+      ab.classList.toggle("on", AUTO_ATTACH);
+      try { localStorage.setItem("dbg-autoattach", AUTO_ATTACH ? "1" : "0"); } catch(e) {}
+    });
+  }
   const rb = el("liverefresh");
   if (rb) rb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); loadLiveRuns(); });
-  sync();
+  const m = el("mockFold");
+  if (m) {
+    try { if (localStorage.getItem("dbg-mock-fold") === "open") m.open = true; } catch(e) {}
+    m.addEventListener("toggle", () => { try { localStorage.setItem("dbg-mock-fold", m.open ? "open" : "closed"); } catch(e) {} });
+  }
+  startLivePolling();
 })();
 
 // -- light / dark theme toggle (persisted) --
