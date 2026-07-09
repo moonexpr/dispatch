@@ -163,11 +163,43 @@ class BaseWorkflow(YamlController):
             kw.setdefault("services", self._services)
         return super().context(**kw)
 
+    def _trace_name(self) -> str:
+        """Label for the live-trace sidecar: the workflow's YAML stem, which is the
+        name the debug viewer lists a workflow under — so an attached run maps onto
+        the right graph. A subclass engine gets the right label for free via its
+        overridden ``WORKFLOW_PATH`` (``workflows/websitewf.yml`` → ``websitewf``)."""
+        return os.path.splitext(os.path.basename(self.WORKFLOW_PATH))[0]
+
     def run(self, payload: Any = None, ctx: Optional[Context] = None, *, until: str = ""):
         if ctx is None:
             ctx = self.context()
         self._seed(ctx.shelves)
-        return super().run(payload, ctx=ctx, until=until)
+        # Auto-attach the live-trace sidecar observer HERE, in the engine base, so
+        # every workflow built on BaseWorkflow — baseworkflow, websitewf, any future
+        # overlay — is watchable in the debug viewer with zero per-engine wiring (a
+        # consumer overlay must not have to know sidecars exist). Opt-in via
+        # $DISPATCH_LIVE_TRACE[_DIR]; passive telemetry — it can never change the
+        # outcome. We never clobber a caller-supplied observer (the in-process viewer
+        # sets ctx.observer itself and finishes it itself) — we only own, and finish,
+        # an observer we create here.
+        own_observer = None
+        if getattr(ctx, "observer", None) is None:
+            try:
+                from foundation import trace
+                if trace.tracing_enabled():
+                    own_observer = trace.new_observer(self._trace_name())
+                    ctx.observer = own_observer
+            except Exception:  # noqa: BLE001 — tracing is best-effort telemetry
+                own_observer = None
+        try:
+            result = super().run(payload, ctx=ctx, until=until)
+        except BaseException:
+            if own_observer is not None:
+                own_observer.finish("errored")
+            raise
+        if own_observer is not None:
+            own_observer.finish("succeeded" if getattr(result, "ok", False) else "failed")
+        return result
 
 
 def run_mock(
@@ -246,23 +278,10 @@ def run_live(
     svc = services if services is not None else bw_services.build_services()
     wf = BaseWorkflow(factory, job=job, triage=triage, request=request, services=svc)
     ctx = wf.context(dry_run=dry_run)
-
-    # Opt-in live-trace sidecar so an out-of-process watcher (the debug viewer) can
-    # follow this run. Off unless $DISPATCH_LIVE_TRACE[_DIR] is set; never overrides a
-    # caller-supplied observer; passive (an observer cannot change the run's outcome).
-    observer = getattr(ctx, "observer", None)
-    if observer is None:
-        try:
-            from foundation import trace
-            if trace.tracing_enabled():
-                observer = trace.new_observer("baseworkflow")
-                ctx.observer = observer
-        except Exception:  # noqa: BLE001 — tracing is best-effort telemetry
-            observer = None
+    # Live-trace sidecar wiring now lives in BaseWorkflow.run (shared by every engine),
+    # so there is nothing to do here beyond running and tearing down the shelf root.
     try:
         result = wf.run(ctx=ctx)
-        if observer is not None:
-            observer.finish("succeeded" if result.ok else "failed")
         return {
             "result": result,
             "ctx": ctx,
@@ -270,9 +289,5 @@ def run_live(
             "deliverables": wf.shelves.deliverables.snapshot(),
             "interpreter": wf.last_interpreter,
         }
-    except BaseException:
-        if observer is not None:
-            observer.finish("errored")
-        raise
     finally:
         shutil.rmtree(shelf_root, ignore_errors=True)

@@ -88,6 +88,8 @@ def _run(
 ) -> Dict[str, Any]:
     wf = WebsiteWF(factory, job=job, triage=triage, request=request, services=services)
     ctx = wf.context(dry_run=dry_run)
+    # Live-trace sidecar wiring is inherited from BaseWorkflow.run — nothing to do
+    # here, so a websitewf overlay never has to know sidecars exist.
     result = wf.run(ctx=ctx)
     return {
         "result": result,
