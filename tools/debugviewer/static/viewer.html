@@ -294,6 +294,8 @@ const el = id => document.getElementById(id);
 const svgNS = "http://www.w3.org/2000/svg";
 let SEL_WF = null, SEL_NODE = null, GRAPH = null, autoTimer = null;
 let RUNNABLE = [], NODE_BY_STATE = {}, ES = null, CUR_RUN = null;
+let RUN_VIS = {};          // state_id -> "active"|"done-ok"|"done-err": run highlights, survive a redraw
+let LAST_GRAPH_SIG = null;  // signature of the last-drawn graph, so an unchanged refresh skips the (flashing) redraw
 let ATTR_OPEN = false;  // inspector "attributes" fold state — collapsed by default, preserved across node clicks
 let PROBE_LIVE = false;  // probe mock↔live mode — preserved across node clicks; live calls the real model
 // The declarative shelf-key contract for the selected workflow (graph.schemas):
@@ -461,8 +463,22 @@ async function draw(graph) {
     g.addEventListener("click", () => { selectNode(n); });
     svg.appendChild(g);
   });
+  applyRunVis();                       // re-light any active/done states after a redraw
+  LAST_GRAPH_SIG = graphSig(graph);
 }
 function txt(s){ return document.createTextNode(s); }
+// A stable signature of what the graph DRAWS (nodes/edges/phases). The compiled
+// graph is deterministic for unchanged YAML, so an equal signature means a redraw
+// would produce the identical SVG — the refresh path skips it, killing the flash.
+function graphSig(g){ return JSON.stringify({ n: g.nodes, e: g.edges, p: g.phases }); }
+// Re-apply the current run's node highlights to the freshly built nodes, so a
+// redraw (when the YAML really did change) doesn't drop the live tracking state.
+function applyRunVis(){
+  for (const state in RUN_VIS) {
+    const g = NODE_BY_STATE[state];
+    if (g) { g.classList.remove("active","done-ok","done-err"); g.classList.add(RUN_VIS[state]); }
+  }
+}
 
 // Update selection in place: swap the .sel class and refresh the inspector, without
 // re-running the (async) layout — clicking a node must not reflow the whole graph.
@@ -774,7 +790,7 @@ async function loadWorkflowList() {
 
 async function selectWorkflow(name) {
   SEL_WF = name; SEL_NODE = null;
-  stopStream(); CUR_RUN = null; setStatus("idle", "idle");
+  stopStream(); CUR_RUN = null; RUN_VIS = {}; setStatus("idle", "idle");
   el("wfsel").value = name;
   document.querySelectorAll(".wf").forEach(d => d.classList.toggle("sel", d.querySelector(".n").textContent===name));
   el("insp").innerHTML = `<div class="placeholder">Click a state to inspect it.</div>`;
@@ -786,7 +802,21 @@ async function selectWorkflow(name) {
 
 async function refresh() {
   await loadWorkflowList();
-  if (SEL_WF) await selectWorkflow(SEL_WF);
+  if (SEL_WF) await redrawCurrentWorkflow();
+}
+
+// Recompile the CURRENT workflow from YAML and redraw ONLY if the graph actually
+// changed — without tearing down an in-flight run. This is both the manual "↻ refresh"
+// and the "● live" auto-refresh path. Unchanged YAML => no redraw (no flashing SVG);
+// and unlike selectWorkflow it never stops the SSE stream or clears run visuals, so a
+// live session keeps being tracked while auto-refresh is on.
+async function redrawCurrentWorkflow() {
+  const g = await (await fetch("/api/workflows/" + encodeURIComponent(SEL_WF))).json();
+  if (g.error) return;
+  const svg = el("svg");
+  if (svg.childElementCount && graphSig(g) === LAST_GRAPH_SIG) { updateRunButton(); return; }
+  await draw(g);   // graph genuinely changed (YAML edited) — redraw, preserving run highlights
+  updateRunButton();
 }
 
 function renderLegend() {
@@ -818,6 +848,7 @@ function logEvent(html) {
   while (box.childElementCount > 400) box.removeChild(box.firstChild);
 }
 function clearRunVisuals() {
+  RUN_VIS = {};
   document.querySelectorAll(".node.active,.node.done-ok,.node.done-err")
     .forEach(g => g.classList.remove("active","done-ok","done-err"));
 }
@@ -885,11 +916,13 @@ function stopLivePolling(){ if (liveTimer) { clearInterval(liveTimer); liveTimer
 function handleRunEvent(e) {
   const t = (e.t!=null) ? `<span class="t">${e.t.toFixed(2)}s</span> ` : "";
   if (e.type === "enter") {
+    RUN_VIS[e.state] = "active";
     const g = NODE_BY_STATE[e.state];
     if (g) { g.classList.add("active"); g.classList.remove("done-ok","done-err"); }
     if (e.kind === "leaf" || e.kind === "loop")
       logEvent(`${t}<span class="en">→ ${shortState(e.state)}</span>`);
   } else if (e.type === "leave") {
+    RUN_VIS[e.state] = e.ok ? "done-ok" : "done-err";
     const g = NODE_BY_STATE[e.state];
     if (g) { g.classList.remove("active"); g.classList.add(e.ok ? "done-ok" : "done-err"); }
   } else if (e.type === "event") {
