@@ -19,7 +19,23 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .result import ActionError
+
 VALID_FORMATS = ("text", "json", "yaml")
+
+
+def _salvage_json(s: str) -> Any:
+    """Best-effort extract a JSON object/array embedded in prose or code fences —
+    models often wrap the payload. Returns the parsed value, or ``None`` if nothing
+    parseable is found."""
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start, end = s.find(opener), s.rfind(closer)
+        if 0 <= start < end:
+            try:
+                return json.loads(s[start:end + 1])
+            except ValueError:
+                continue
+    return None
 
 
 class Adapter(ABC):
@@ -60,7 +76,27 @@ class JsonAdapter(Adapter):
     def decode(self, text: str) -> Any:
         if not isinstance(text, str):
             return text
-        return json.loads(text)
+        s = text.strip()
+        # An empty model response carries no structured payload. Fail SAFE to an
+        # empty object rather than crashing the whole tick with a bare
+        # JSONDecodeError — the inference layer's failures-as-data contract. (This
+        # is the common real failure: a model that times out / returns nothing.)
+        if not s:
+            return {}
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            # Models often wrap the payload in prose or ``` fences — salvage the
+            # embedded object/array before giving up.
+            salvaged = _salvage_json(s)
+            if salvaged is not None:
+                return salvaged
+            # Genuinely non-JSON, non-empty output: surface a HANDLED ActionError so
+            # the leaf boundary records a clean failure (not an uncaught crash).
+            raise ActionError(
+                f"json adapter: model output is not valid JSON "
+                f"({len(s)} chars, starts {s[:60]!r})"
+            )
 
 
 class YamlAdapter(Adapter):

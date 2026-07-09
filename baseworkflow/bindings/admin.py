@@ -700,7 +700,7 @@ def migrate(inputs: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
                    f"{', '.join(names) or '(none)'}")
         return record(planned=names)
 
-    environ = _env.Environment()
+    environ = _env.Environment.default()
     token = environ.get("SUPABASE_ACCESS_TOKEN") or os.environ.get("SUPABASE_ACCESS_TOKEN")
     ref = environ.get("SUPABASE_PROJECT_REF") or os.environ.get("SUPABASE_PROJECT_REF")
     if not (token and ref):
